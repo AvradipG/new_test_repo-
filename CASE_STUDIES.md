@@ -1,33 +1,41 @@
-# Project notes
+# Digital Rock Simulation: Scientific Focus
 
 [Return to the portfolio](README.md)
 
-## From a waveform to a detection
+## From a digital rock to a flow model
 
-A sonar signal chain brings together several ideas that are often taught separately: waveform design, propagation delays, correlation, noise and decision thresholds.
+A three-dimensional rock image provides a geometric starting point for a simulation. The modeled pore space, solid boundaries, physical scale and computational domain all affect the problem being solved.
 
-My [public DSP repository](https://github.com/AvradipG/sonar-dsp-projects) contains notebooks and scripts for exploring these ideas with synthetic signals. The collection includes linear chirps, coded waveforms, matched filtering, array simulations, time-frequency analysis and general filtering examples.
+My focus is connecting that structure to a fluid-flow calculation and interpreting what the simulated response says about transport through the rock.
 
-**What to inspect:** waveform definitions, sampling choices, the relationship between a reference signal and its correlation output, and the assumptions behind the array geometry. Start with the waveform notebooks, then the beamforming examples and the full pipeline notebook.
+Questions include whether the resolved geometry captures the relevant pathways, how the selected domain influences the result, and how image resolution or segmentation changes the modeled pore space.
 
-**Scope:** an educational simulation collection. Hardware execution, calibrated acoustic measurements, fractional-delay accuracy and operational detection performance require further work. Some folders contain exploratory notebooks or incomplete examples.
+## Connectivity and transport
 
-## Mathematical structure and numerical stability
+Porosity describes the amount of pore space. Connectivity describes relationships between pores and possible pathways across a domain. Fluid-flow simulations examine transport through that structure under specified physical conditions.
 
-My independent research work explores wave physics through complex matrix calculations and geometric descriptions of polarization. The code includes numerical experiments designed to make sensitivity and representation choices visible.
+These quantities answer different questions. A connectivity percentage alone does not establish permeability. The flow solution, its boundary conditions and its convergence determine whether a transport estimate is meaningful.
 
-The skill I want this work to demonstrate is the ability to move between a mathematical definition, its numerical implementation and the interpretation of the result. A stable-looking figure is not enough. Normalization choices, phase conventions and behavior near degeneracy matter.
+## Interpreting a fluid-flow simulation
 
-**Scope:** private independent research. Manuscript text, unpublished figures and detailed results are not published in this portfolio.
+I am interested in how pore geometry affects flow distribution, preferred pathways and directional transport behavior.
 
-## Making research easier to review
+A useful interpretation connects the numerical fields to the geometry and the imposed conditions. It also considers whether the modeled volume and spatial resolution are suitable for the physical question.
 
-I have also worked on an independent manuscript interface with mathematical-content navigation, annotation tools and versioned source. The aim is practical: keep the source recoverable and make equations, figures and comments easier to follow while a paper evolves.
+## Numerical reliability
 
-**Scope:** a saved software prototype. Browser/stylus behavior and deployment state need separate checks. Its source and manuscript material remain private.
+The checks I care about include:
 
-## Reading this portfolio
+- consistent units, voxel dimensions and coordinate conventions;
+- explicit inlet, outlet and solid-boundary conditions;
+- mass conservation and solver convergence;
+- sensitivity to resolution, segmentation and domain size;
+- reproducibility of the calculation and its processing history.
 
-The public examples are evidence of the topics I work through and the tools I use. They are not a claim that every example is complete, that a numerical benchmark validates a physical model, or that every application is production software.
+These are criteria for assessing a simulation. This portfolio does not claim that every development project has already passed every validation step.
 
-Workplace source, internal processes, client information and employer-specific project descriptions are intentionally absent. The personal research backup is separate from the public demonstrations.
+## Scientific computing
+
+Python and C++ support numerical calculations, data processing and scientific tools. Three-dimensional visualization helps inspect geometry and simulation output. Clear metadata and versioned source make a calculation easier to review and recover.
+
+My professional focus is digital rock simulation and pore-scale fluid flow. This page contains general scientific descriptions only. Company code, client information, internal processes and confidential results are excluded.
