@@ -1,0 +1,7 @@
+build/
+*.xcodeproj/
+CrystalBowl/Info.plist
+Packages/ScanMath/.build/
+Payload/
+*.ipa
+.DS_Store

@@ -1,0 +1,58 @@
+name: Build iPhone app
+
+on:
+  push:
+    branches: [crystal-bowl-ios]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          XC=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Unit tests (measurement maths)
+        run: swift test --package-path Packages/ScanMath
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build for iPhone (unsigned)
+        run: |
+          xcodebuild -project CrystalBowl.xcodeproj -scheme CrystalBowl -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 || {
+              grep -E "error:|error -|BUILD FAILED" build.log | sort -u | head -80
+              exit 1
+            }
+          grep -E "warning:" build.log | sort -u | head -40 || true
+          test -d build/Build/Products/Release-iphoneos/CrystalBowl.app
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/CrystalBowl.app Payload/
+          zip -qry CrystalBowlScanner.ipa Payload
+          ls -la CrystalBowlScanner.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CrystalBowlScanner-ipa
+          path: CrystalBowlScanner.ipa
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
