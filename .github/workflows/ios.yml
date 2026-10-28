@@ -18,6 +18,7 @@ jobs:
           XC=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
           sudo xcode-select -s "$XC"
           xcodebuild -version
+          echo "::notice::$(xcodebuild -version | tr '\n' ' ')"
 
       - name: Unit tests (measurement maths)
         run: swift test --package-path Packages/ScanMath
@@ -33,6 +34,11 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 || {
               grep -E "error:|error -|BUILD FAILED" build.log | sort -u | head -80
+              grep -E ": error: " build.log | sort -u | head -40 | while IFS= read -r line; do
+                f=$(echo "$line" | cut -d: -f1); l=$(echo "$line" | cut -d: -f2); m=$(echo "$line" | sed 's/^.*: error: //')
+                echo "::error file=${f#$GITHUB_WORKSPACE/},line=$l::$m"
+              done
+              grep -E "error:" build.log | grep -v ": error: " | sort -u | head -10 | while IFS= read -r line; do echo "::error::$line"; done
               exit 1
             }
           grep -E "warning:" build.log | sort -u | head -40 || true
