@@ -5,7 +5,7 @@ import SceneKit
 @main
 struct CrystalBowlApp: App {
     @StateObject private var model = AppModel()
-    var body: some Scene {
+    var body: some SwiftUI.Scene {
         WindowGroup {
             RootView().environmentObject(model)
         }
