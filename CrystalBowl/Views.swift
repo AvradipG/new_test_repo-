@@ -45,6 +45,7 @@ struct RootView: View {
 struct HomeView: View {
     @EnvironmentObject var model: AppModel
     @State private var sampleName = ""
+    @AppStorage(AppModel.keepPhotosKey) private var keepPhotos = false
 
     var body: some View {
         NavigationStack(path: $model.path) {
@@ -89,6 +90,15 @@ struct HomeView: View {
                     TipRow(n: 2, text: "Tap Start capture and walk slowly around the rock. The dial fills in as each angle is covered.")
                     TipRow(n: 3, text: "When the pass is done, flip the rock onto its side and scan again so the underside is captured.")
                     TipRow(n: 4, text: "Tap Finish. The model builds on the phone in a few minutes. Keep the app open.")
+                    TipRow(n: 5, text: "Cross-sections along the rock's long axis are cut automatically, every 2 mm.")
+                }
+
+                Section {
+                    Toggle("Keep photos after the model is built", isOn: $keepPhotos)
+                } header: {
+                    Text("Storage")
+                } footer: {
+                    Text("A scan needs a few hundred MB of photos while it is being built. Afterwards the model and cross-sections take about 10–40 MB. Photos are only needed to rebuild the model, so they are deleted unless you keep them.")
                 }
             }
             .navigationTitle("Crystal Bowl")
@@ -263,6 +273,9 @@ struct ScanDetailView: View {
                     }
                 }
                 if scan.hasModel {
+                    SectionsPanel(scan: scan)
+                }
+                if scan.hasModel {
                     Section {
                         if exports.isEmpty {
                             Button {
@@ -293,6 +306,10 @@ struct ScanDetailView: View {
                     }
                 }
                 Section {
+                    LabeledContent("Storage used", value: ByteCountFormatter.string(fromByteCount: ScanStore.size(of: scan), countStyle: .file))
+                    if scan.hasPhotos {
+                        Button("Delete photos, keep model") { ScanStore.deletePhotos(scan); model.reload() }
+                    }
                     Button("Delete scan", role: .destructive) { model.delete(scan) }
                 }
             }
@@ -318,6 +335,100 @@ struct ModelPreview: View {
         }
         .task(id: url) {
             scene = try? SCNScene(url: url, options: nil)
+        }
+    }
+}
+
+// MARK: Cross-sections
+
+struct SectionsPanel: View {
+    @EnvironmentObject var model: AppModel
+    let scan: Scan
+    @State private var seriesID: String?
+    @State private var index = 0.0
+    @State private var axis = 0
+    @State private var spacing = AppModel.defaultSpacingMM
+    @State private var working = false
+    @State private var zipURL: URL?
+
+    private var series: SectionSeries? {
+        let all = scan.sections ?? []
+        return all.first { $0.id == seriesID } ?? all.first
+    }
+
+    var body: some View {
+        Section {
+            if let s = series, !s.rows.isEmpty {
+                let i = min(Int(index.rounded()), s.rows.count - 1)
+                let row = s.rows[i]
+                if let img = UIImage(contentsOfFile: s.imageURL(in: scan, index: i).path) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .interpolation(.medium)
+                        .scaledToFit()
+                        .listRowInsets(EdgeInsets())
+                        .background(Color.black)
+                }
+                if s.rows.count > 1 {
+                    Slider(value: $index, in: 0...Double(s.rows.count - 1), step: 1)
+                }
+                Text(String(format: "%@-axis slice %d of %d · depth %.1f mm", s.axisName, i + 1, s.rows.count, row.depthMM))
+                    .font(.callout.monospacedDigit())
+                Text(String(format: "Area %.1f mm² · perimeter %.1f mm · Ø eq %.1f mm", row.areaMM2, row.perimeterMM, row.equivalentDiameterMM))
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                if (scan.sections ?? []).count > 1 {
+                    Picker("Stack", selection: Binding(get: { series?.id ?? "" }, set: { seriesID = $0; index = 0; zipURL = nil })) {
+                        ForEach(scan.sections ?? []) { s in
+                            Text("\(s.axisName)-axis · every \(SectionSeries.format(s.spacingMM)) mm").tag(s.id)
+                        }
+                    }
+                }
+                if let zipURL {
+                    ShareLink(item: zipURL) { Label("Share this stack (\(s.rows.count) PNG + CSV)", systemImage: "square.and.arrow.up") }
+                } else {
+                    Button {
+                        let sc = scan
+                        Task {
+                            zipURL = await Task.detached { CrossSectionMaker.zip(s, in: sc) }.value
+                        }
+                    } label: { Label("Prepare stack to share", systemImage: "archivebox") }
+                }
+            } else {
+                Text("No cross-sections yet.").foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Cross-sections")
+        } footer: {
+            Text("Slices are cut across the rock's own axes: a is the longest, c the shortest. They show the outer outline at each depth. A surface scan can't see inside the rock.")
+        }
+
+        Section("Cut a new stack") {
+            Picker("Across axis", selection: $axis) {
+                Text("a (long)").tag(0)
+                Text("b").tag(1)
+                Text("c (short)").tag(2)
+            }
+            .pickerStyle(.segmented)
+            Picker("Spacing", selection: $spacing) {
+                Text("0.5 mm").tag(0.5)
+                Text("1 mm").tag(1.0)
+                Text("2 mm").tag(2.0)
+                Text("5 mm").tag(5.0)
+            }
+            .pickerStyle(.segmented)
+            Button {
+                working = true
+                Task {
+                    await model.makeSections(scan, axis: axis, spacingMM: spacing)
+                    seriesID = SectionSeries(axis: axis, spacingMM: spacing, rows: []).id
+                    index = 0
+                    zipURL = nil
+                    working = false
+                }
+            } label: {
+                if working { ProgressView() } else { Label("Cut cross-sections", systemImage: "square.stack.3d.down.right") }
+            }
+            .disabled(working)
         }
     }
 }

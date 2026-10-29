@@ -42,6 +42,45 @@ final class ScanMathTests: XCTestCase {
         XCTAssertEqual(e.z, 0.01, accuracy: 1e-6)
     }
 
+    func testSectionsAcrossEachAxisOfRotatedBox() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let r = rotate(p, z: 0.7, x: -0.4)
+        let frame = ScanMath.principalFrame(r)
+        XCTAssertEqual(frame.extents.x, 0.04, accuracy: 1e-6)
+        let expected = [0.02 * 0.03, 0.02 * 0.04, 0.03 * 0.04]
+        for axis in 0..<3 {
+            let s = ScanMath.crossSections(positions: r, indices: f, frame: frame, axis: axis, spacing: 0.005)
+            XCTAssertFalse(s.isEmpty)
+            for sec in s {
+                XCTAssertEqual(sec.loops.count, 1)
+                XCTAssertTrue(sec.openChains.isEmpty)
+                XCTAssertEqual(sec.area, expected[axis], accuracy: 1e-9)
+            }
+        }
+        let along = ScanMath.crossSections(positions: r, indices: f, frame: frame, axis: 0, spacing: 0.01)
+        XCTAssertEqual(along.map { ($0.depth * 1000).rounded() }, [5, 15, 25, 35])
+    }
+
+    func testHollowSectionSubtractsHole() {
+        let (outer, fo) = box(4, 4, 4)
+        let (inner, fi) = box(2, 2, 2)
+        let p = outer + inner
+        let f = fo + fi.map { $0 + 8 }
+        let frame = ScanMath.principalFrame(p)
+        let s = ScanMath.crossSection(positions: p, indices: f, frame: frame, axis: 2, at: 0.1)
+        XCTAssertEqual(s.loops.count, 2)
+        XCTAssertEqual(s.area, 12, accuracy: 1e-9)
+        XCTAssertEqual(s.perimeter, 16 + 8, accuracy: 1e-9)
+    }
+
+    func testFrameIsRightHanded() {
+        let (p, _) = box(0.05, 0.03, 0.01)
+        let fr = ScanMath.principalFrame(rotate(p, z: 2.1, x: 1.3))
+        let a = fr.axes[0], b = fr.axes[1], c = fr.axes[2]
+        let n = SIMD3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+        XCTAssertEqual((n * c).sum(), 1, accuracy: 1e-9)
+    }
+
     func testStatsInLabUnits() {
         let (p, f) = box(0.06, 0.04, 0.03) // 60 × 40 × 30 mm
         let s = ScanMath.stats(positions: rotate(p, z: 1.1, x: 0.2), indices: f)

@@ -9,11 +9,13 @@ struct Scan: Identifiable, Codable, Hashable {
     var photoCount: Int?
     var passes: Int?
     var stats: MeshStats?
+    var sections: [SectionSeries]?
 
     var folderURL: URL { ScanStore.root.appendingPathComponent(id, isDirectory: true) }
     var imagesURL: URL { folderURL.appendingPathComponent("Images", isDirectory: true) }
     var checkpointURL: URL { folderURL.appendingPathComponent("Checkpoint", isDirectory: true) }
     var exportsURL: URL { folderURL.appendingPathComponent("Exports", isDirectory: true) }
+    var sectionsURL: URL { folderURL.appendingPathComponent("Sections", isDirectory: true) }
     var modelURL: URL { folderURL.appendingPathComponent("\(fileStem).usdz") }
     var hasModel: Bool { FileManager.default.fileExists(atPath: modelURL.path) }
     var hasPhotos: Bool { ScanStore.countPhotos(in: imagesURL) > 0 }
@@ -68,6 +70,22 @@ enum ScanStore {
 
     static func delete(_ scan: Scan) {
         try? FileManager.default.removeItem(at: scan.folderURL)
+    }
+
+    /// Removes the capture photos and checkpoint once a model exists; they are only needed to rebuild it.
+    static func deletePhotos(_ scan: Scan) {
+        try? FileManager.default.removeItem(at: scan.imagesURL)
+        try? FileManager.default.removeItem(at: scan.checkpointURL)
+    }
+
+    /// Bytes used by everything in the scan folder.
+    static func size(of scan: Scan) -> Int64 {
+        guard let e = FileManager.default.enumerator(at: scan.folderURL, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }
+        var total: Int64 = 0
+        for case let url as URL in e {
+            total += Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        return total
     }
 
     static func countPhotos(in dir: URL) -> Int {

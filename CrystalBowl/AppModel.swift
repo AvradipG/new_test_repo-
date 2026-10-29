@@ -218,6 +218,16 @@ final class AppModel: ObservableObject {
             let url = scan.modelURL
             done.stats = await Task.detached { MeshTools.measure(url) }.value
             if done.photoCount == nil { done.photoCount = ScanStore.countPhotos(in: scan.imagesURL) }
+            progressNote = "Cutting cross-sections…"
+            let measured = done
+            if let series = try? await Task.detached(operation: {
+                try CrossSectionMaker.make(scan: measured, axis: 0, spacingMM: AppModel.defaultSpacingMM)
+            }).value {
+                done.sections = [series]
+            }
+            if !UserDefaults.standard.bool(forKey: AppModel.keepPhotosKey) {
+                ScanStore.deletePhotos(done)
+            }
             try? ScanStore.save(done)
             reload()
             phase = .home
@@ -226,6 +236,26 @@ final class AppModel: ObservableObject {
             errorMessage = "Building the model failed: \(error.localizedDescription). Your photos are kept. Open the scan and tap Build model to try again."
             reload()
             phase = .home
+        }
+    }
+
+    static let keepPhotosKey = "keepPhotos"
+    static let defaultSpacingMM = 2.0
+
+    /// Cuts a new stack of cross-sections and stores it on the scan.
+    func makeSections(_ scan: Scan, axis: Int, spacingMM: Double) async {
+        do {
+            let series = try await Task.detached {
+                try CrossSectionMaker.make(scan: scan, axis: axis, spacingMM: spacingMM)
+            }.value
+            var updated = scans.first { $0.id == scan.id } ?? scan
+            var list = (updated.sections ?? []).filter { $0.id != series.id }
+            list.insert(series, at: 0)
+            updated.sections = list
+            try ScanStore.save(updated)
+            reload()
+        } catch {
+            errorMessage = "Couldn't cut cross-sections: \(error.localizedDescription)"
         }
     }
 

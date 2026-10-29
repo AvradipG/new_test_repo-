@@ -6,6 +6,12 @@ import ScanMath
 /// Reads the reconstructed USDZ with Model I/O to measure it and convert it to lab formats.
 enum MeshTools {
     static func measure(_ url: URL) -> MeshStats? {
+        guard let mesh = loadMesh(url) else { return nil }
+        return ScanMath.stats(positions: mesh.positions, indices: mesh.indices, unitToMM: 1000)
+    }
+
+    /// All triangles of the model in world coordinates (metres).
+    static func loadMesh(_ url: URL) -> (positions: [SIMD3<Float>], indices: [UInt32])? {
         let asset = MDLAsset(url: url)
         var positions: [SIMD3<Float>] = []
         var indices: [UInt32] = []
@@ -39,7 +45,7 @@ enum MeshTools {
             }
         }
         guard !positions.isEmpty, !indices.isEmpty else { return nil }
-        return ScanMath.stats(positions: positions, indices: indices, unitToMM: 1000)
+        return (positions, indices)
     }
 
     /// Writes OBJ, PLY and STL next to the USDZ plus a text report. Returns every file to share.

@@ -17,8 +17,9 @@ targets:
       path: CrystalBowl/Info.plist
       properties:
         CFBundleDisplayName: Crystal Bowl
-        CFBundleShortVersionString: "1.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
         NSCameraUsageDescription: Crystal Bowl uses the camera and LiDAR to photograph your rock sample and build a 3D model.
         UILaunchScreen: {}
         UIFileSharingEnabled: true
@@ -32,3 +33,6 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

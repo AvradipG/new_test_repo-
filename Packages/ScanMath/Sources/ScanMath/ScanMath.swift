@@ -52,7 +52,14 @@ public enum ScanMath {
 
     /// Lengths of the point cloud along its principal axes, longest first.
     public static func principalExtents(_ points: [SIMD3<Float>]) -> SIMD3<Double> {
-        guard points.count > 1 else { return .zero }
+        principalFrame(points).extents
+    }
+
+    /// The rock's own axes: a (longest), b, c (shortest), right-handed, with the point range along each.
+    public static func principalFrame(_ points: [SIMD3<Float>]) -> PrincipalFrame {
+        guard points.count > 1 else {
+            return PrincipalFrame(center: .zero, axes: [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)], lo: .zero, hi: .zero)
+        }
         var mean = SIMD3<Double>.zero
         for p in points { mean += SIMD3<Double>(p) }
         mean /= Double(points.count)
@@ -61,18 +68,22 @@ public enum ScanMath {
             let d = SIMD3<Double>(p) - mean
             for r in 0..<3 { for k in 0..<3 { c[r][k] += d[r] * d[k] } }
         }
-        let axes = eigenvectorsSymmetric3(c)
-        var out: [Double] = []
-        for axis in axes {
+        var ranges: [(axis: SIMD3<Double>, lo: Double, hi: Double)] = eigenvectorsSymmetric3(c).map { axis in
             var lo = Double.infinity, hi = -Double.infinity
             for p in points {
                 let t = vdot(SIMD3<Double>(p) - mean, axis)
                 lo = Swift.min(lo, t); hi = Swift.max(hi, t)
             }
-            out.append(hi - lo)
+            return (axis, lo, hi)
         }
-        out.sort(by: >)
-        return SIMD3(out[0], out[1], out[2])
+        ranges.sort { ($0.hi - $0.lo) > ($1.hi - $1.lo) }
+        // Make the frame right-handed by flipping c if needed.
+        if vdot(vcross(ranges[0].axis, ranges[1].axis), ranges[2].axis) < 0 {
+            ranges[2] = (-ranges[2].axis, -ranges[2].hi, -ranges[2].lo)
+        }
+        return PrincipalFrame(center: mean, axes: ranges.map { $0.axis },
+                              lo: SIMD3(ranges[0].lo, ranges[1].lo, ranges[2].lo),
+                              hi: SIMD3(ranges[0].hi, ranges[1].hi, ranges[2].hi))
     }
 
     /// Eigenvectors of a symmetric 3×3 matrix by cyclic Jacobi rotations.
