@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.3
+- Finished scans upload to Google Drive › Crystal Bowl Scans by themselves
+- Each scan folder has a manifest.json, the model in USDZ, OBJ, PLY and STL, and the cross-sections
+- Original photos can also be uploaded (Wi-Fi only); they are kept on the phone until uploaded
+
 ## 1.2
 - The app tells you when a newer version is ready and what changed
 - New About and updates screen shows the installed version

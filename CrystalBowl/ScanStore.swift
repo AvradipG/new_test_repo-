@@ -10,6 +10,7 @@ struct Scan: Identifiable, Codable, Hashable {
     var passes: Int?
     var stats: MeshStats?
     var sections: [SectionSeries]?
+    var drive: DriveSync?
 
     var folderURL: URL { ScanStore.root.appendingPathComponent(id, isDirectory: true) }
     var imagesURL: URL { folderURL.appendingPathComponent("Images", isDirectory: true) }

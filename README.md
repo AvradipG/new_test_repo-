@@ -14,6 +14,9 @@ Scans a rock sample in 3D with an iPhone that has LiDAR (12 Pro or later Pro mod
   scan takes roughly 10–40 MB.
 - Exports: USDZ, OBJ, PLY, STL (metres) and a text report, through the share sheet (Files, Drive, AirDrop, mail).
 - Scans are also visible in the Files app under **On My iPhone › Crystal Bowl**.
+- Google Drive: finished scans upload automatically to **My Drive › Crystal Bowl Scans** (one folder per scan with
+  `manifest.json`, `model/`, `sections/`, optional `images/`, plus `index.json` listing all scans). Needs the
+  repository variable `GOOGLE_IOS_CLIENT_ID` (Google Cloud iOS OAuth client for `com.avradip.crystalbowl`).
 
 ## How it is built
 

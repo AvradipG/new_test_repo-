@@ -40,7 +40,12 @@ struct RootView: View {
         }
         .task { await model.checkForUpdate() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await model.checkForUpdate() } }
+            if phase == .active {
+                Task {
+                    await model.checkForUpdate()
+                    await model.syncAllPending()
+                }
+            }
         }
     }
 }
@@ -101,6 +106,8 @@ struct HomeView: View {
                     TipRow(n: 5, text: "Cross-sections along the rock's long axis are cut automatically, every 2 mm.")
                 }
 
+                DriveSettingsSection()
+
                 Section {
                     Toggle("Keep photos after the model is built", isOn: $keepPhotos)
                 } header: {
@@ -149,6 +156,9 @@ struct ScanRow: View {
                     Text(String(format: "%.0f × %.0f × %.0f mm", s.axisA, s.axisB, s.axisC)).monospacedDigit()
                 } else if !scan.hasModel {
                     Text("No model yet").foregroundStyle(.orange)
+                }
+                if scan.drive?.complete == true {
+                    Label("On Drive", systemImage: "checkmark.icloud").foregroundStyle(.green)
                 }
             }
             .font(.caption).foregroundStyle(.secondary)
@@ -322,6 +332,22 @@ struct ScanDetailView: View {
                         Text("USDZ with colour, plus OBJ, PLY and STL in metres and a measurement report. Use Save to Files or Drive in the share sheet.")
                     }
                 }
+                if scan.hasModel && model.driveSignedIn {
+                    Section("Google Drive") {
+                        if let status = model.driveStatus[scan.id] {
+                            Text(status).font(.callout)
+                        } else if let d = scan.drive, d.complete, let when = d.lastSync {
+                            Label("Uploaded \(when.formatted(date: .abbreviated, time: .shortened))", systemImage: "checkmark.icloud")
+                                .foregroundStyle(.green)
+                            Text("My Drive › \(ScanPackage.rootFolder) › \(scan.id)_\(scan.fileStem)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("Not uploaded yet.").foregroundStyle(.secondary)
+                        }
+                        Button("Upload now") { Task { await model.sync(scan) } }
+                            .disabled(model.isSyncing)
+                    }
+                }
                 Section {
                     LabeledContent("Storage used", value: ByteCountFormatter.string(fromByteCount: ScanStore.size(of: scan), countStyle: .file))
                     if scan.hasPhotos {
@@ -446,6 +472,51 @@ struct SectionsPanel: View {
                 if working { ProgressView() } else { Label("Cut cross-sections", systemImage: "square.stack.3d.down.right") }
             }
             .disabled(working)
+        }
+    }
+}
+
+// MARK: Google Drive settings
+
+struct DriveSettingsSection: View {
+    @EnvironmentObject var model: AppModel
+    @AppStorage(AppModel.autoUploadKey) private var autoUpload = true
+    @AppStorage(AppModel.uploadPhotosKey) private var uploadPhotos = false
+    @AppStorage(GoogleAuth.clientIDKey) private var pastedClientID = ""
+    @State private var signingIn = false
+
+    var body: some View {
+        Section {
+            if model.driveSignedIn {
+                LabeledContent("Signed in as", value: model.driveEmail ?? "Google account")
+                Toggle("Upload every scan automatically", isOn: $autoUpload)
+                Toggle("Also upload original photos (Wi-Fi only)", isOn: $uploadPhotos)
+                Button {
+                    Task { await model.syncAllPending(force: true) }
+                } label: {
+                    if model.isSyncing { ProgressView() } else { Label("Upload pending scans now", systemImage: "icloud.and.arrow.up") }
+                }
+                .disabled(model.isSyncing)
+                Button("Sign out of Google Drive", role: .destructive) { model.signOutOfDrive() }
+            } else if GoogleAuth.shared.clientID != nil {
+                Button {
+                    signingIn = true
+                    Task { await model.signInToDrive(); signingIn = false }
+                } label: {
+                    if signingIn { ProgressView() } else { Label("Sign in to Google Drive", systemImage: "person.badge.key") }
+                }
+                .disabled(signingIn)
+            } else {
+                Text("Google Drive upload isn't set up in this version yet.").foregroundStyle(.secondary)
+                TextField("Paste Google client ID (optional)", text: $pastedClientID)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.footnote.monospaced())
+            }
+        } header: {
+            Text("Google Drive")
+        } footer: {
+            Text("Finished scans go to My Drive › Crystal Bowl Scans, one folder per scan with manifest.json, the model in USDZ, OBJ, PLY and STL, and the cross-sections. The app can only see the files it creates there. Original photos are a few hundred MB per scan, so they upload only on Wi-Fi and only if switched on.")
         }
     }
 }

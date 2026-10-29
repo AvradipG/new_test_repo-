@@ -23,6 +23,15 @@ new to app development, who installs from Windows and has no Mac.
 5. Watch with `gh run watch`. Logs and artifacts can't be downloaded from the cloud sandbox; compiler
    errors are emitted as annotations: `gh api repos/AvradipG/new_test_repo-/check-runs/<job id>/annotations`.
 
+## Google Drive package
+`Drive.swift` (OAuth PKCE sign-in, Drive REST client, manifest) and `DriveSyncModel.swift` (upload queue).
+Scope is `drive.file`: the app sees only what it created. Layout in My Drive:
+`Crystal Bowl Scans/index.json`, `README.txt`, and one folder `<scan id>_<sample>/` per scan with
+`manifest.json` (schema `crystal-bowl.scan/0.1`, uploaded last), `model/`, `sections/`, optional `images/`.
+The iOS OAuth client ID comes from the repository variable `GOOGLE_IOS_CLIENT_ID` (bundle ID
+`com.avradip.crystalbowl`); it is not a secret. The project brief is in Drive:
+`DRA_Handoff/PROJECT_BRIEF_Crystal_Bowl_Design_Requirements_2026-10-27_v0.2.md` (see sections 12–13).
+
 ## Data compatibility
 Scans live in the app's Documents folder and survive updates. `scan.json` is decoded into `Scan`; add new
 fields as optionals so older scans still load. Never rename or remove existing keys.

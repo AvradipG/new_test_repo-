@@ -20,6 +20,12 @@ final class AppModel: ObservableObject {
     @Published var shotCount = 0
     @Published var feedbackText: String?
 
+    // Google Drive
+    @Published var driveSignedIn = false
+    @Published var driveEmail: String?
+    @Published var isSyncing = false
+    @Published var driveStatus: [String: String] = [:]
+
     // Updates
     @Published var latestRemote: RemoteVersion?
     @Published var lastUpdateCheck: Date?
@@ -34,7 +40,10 @@ final class AppModel: ObservableObject {
 
     var isCaptureSupported: Bool { ObjectCaptureSession.isSupported }
 
-    init() { reload() }
+    init() {
+        reload()
+        refreshDriveAccount()
+    }
 
     func reload() { scans = ScanStore.loadAll() }
 
@@ -229,13 +238,16 @@ final class AppModel: ObservableObject {
             }).value {
                 done.sections = [series]
             }
-            if !UserDefaults.standard.bool(forKey: AppModel.keepPhotosKey) {
+            // Photos waiting for a Drive upload are deleted after that upload instead.
+            let photosGoToDrive = uploadPhotos && driveSignedIn
+            if !UserDefaults.standard.bool(forKey: AppModel.keepPhotosKey) && !photosGoToDrive {
                 ScanStore.deletePhotos(done)
             }
             try? ScanStore.save(done)
             reload()
             phase = .home
             path = [done]
+            Task { await syncAllPending() }
         } catch {
             errorMessage = "Building the model failed: \(error.localizedDescription). Your photos are kept. Open the scan and tap Build model to try again."
             reload()
@@ -258,6 +270,7 @@ final class AppModel: ObservableObject {
             updated.sections = list
             try ScanStore.save(updated)
             reload()
+            Task { await syncAllPending() }
         } catch {
             errorMessage = "Couldn't cut cross-sections: \(error.localizedDescription)"
         }
