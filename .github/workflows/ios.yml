@@ -35,7 +35,7 @@ jobs:
         run: |
           xcodebuild -project CrystalBowl.xcodeproj -scheme CrystalBowl -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CURRENT_PROJECT_VERSION=${{ github.run_number }} CB_GIT_COMMIT=${GITHUB_SHA::7} CB_GOOGLE_CLIENT_ID="${{ vars.GOOGLE_IOS_CLIENT_ID }}" build > build.log 2>&1 || {
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CURRENT_PROJECT_VERSION=${{ github.run_number }} CB_GIT_COMMIT=${GITHUB_SHA::7} ${{ vars.GOOGLE_IOS_CLIENT_ID && format('CB_GOOGLE_CLIENT_ID={0}', vars.GOOGLE_IOS_CLIENT_ID) || '' }} build > build.log 2>&1 || {
               grep -E "error:|error -|BUILD FAILED" build.log | sort -u | head -80
               grep -E ": error: " build.log | sort -u | head -40 | while IFS= read -r line; do
                 f=$(echo "$line" | cut -d: -f1); l=$(echo "$line" | cut -d: -f2); m=$(echo "$line" | sed 's/^.*: error: //')
@@ -109,7 +109,7 @@ jobs:
           AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
           xcodebuild -project CrystalBowl.xcodeproj -scheme CrystalBowl -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -archivePath build/CrystalBowl.xcarchive \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION=${{ github.run_number }} CB_GIT_COMMIT=${GITHUB_SHA::7} CB_GOOGLE_CLIENT_ID="${{ vars.GOOGLE_IOS_CLIENT_ID }}" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION=${{ github.run_number }} CB_GIT_COMMIT=${GITHUB_SHA::7} ${{ vars.GOOGLE_IOS_CLIENT_ID && format('CB_GOOGLE_CLIENT_ID={0}', vars.GOOGLE_IOS_CLIENT_ID) || '' }} \
             "${AUTH[@]}" archive > archive.log 2>&1 || {
               grep -E "error:|error -|ARCHIVE FAILED" archive.log | sort -u | head -40 | while IFS= read -r line; do echo "::error::$line"; done
               exit 1

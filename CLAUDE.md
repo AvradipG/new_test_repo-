@@ -28,8 +28,8 @@ new to app development, who installs from Windows and has no Mac.
 Scope is `drive.file`: the app sees only what it created. Layout in My Drive:
 `Crystal Bowl Scans/index.json`, `README.txt`, and one folder `<scan id>_<sample>/` per scan with
 `manifest.json` (schema `crystal-bowl.scan/0.1`, uploaded last), `model/`, `sections/`, optional `images/`.
-The iOS OAuth client ID comes from the repository variable `GOOGLE_IOS_CLIENT_ID` (bundle ID
-`com.avradip.crystalbowl`); it is not a secret. The project brief is in Drive:
+The iOS OAuth client ID (bundle ID `com.avradip.crystalbowl`) is not a secret: set it as `CB_GOOGLE_CLIENT_ID`
+in `project.yml`, or as the repository variable `GOOGLE_IOS_CLIENT_ID`, which overrides it. The project brief is in Drive:
 `DRA_Handoff/PROJECT_BRIEF_Crystal_Bowl_Design_Requirements_2026-10-27_v0.2.md` (see sections 12–13).
 
 ## Data compatibility
