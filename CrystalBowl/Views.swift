@@ -14,6 +14,7 @@ struct CrystalBowlApp: App {
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         Group {
             switch model.phase {
@@ -37,6 +38,10 @@ struct RootView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+        .task { await model.checkForUpdate() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await model.checkForUpdate() } }
+        }
     }
 }
 
@@ -50,6 +55,9 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $model.path) {
             List {
+                if let update = model.updateAvailable {
+                    Section { UpdateBanner(remote: update) }
+                }
                 Section {
                     TextField("Sample ID, e.g. CNPC-2H plug 3", text: $sampleName)
                         .textInputAutocapitalization(.characters)
@@ -102,6 +110,15 @@ struct HomeView: View {
                 }
             }
             .navigationTitle("Crystal Bowl")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        AboutView()
+                    } label: {
+                        Label("About and updates", systemImage: model.updateAvailable == nil ? "info.circle" : "arrow.down.circle.fill")
+                    }
+                }
+            }
             .navigationDestination(for: Scan.self) { scan in
                 ScanDetailView(scanID: scan.id)
             }

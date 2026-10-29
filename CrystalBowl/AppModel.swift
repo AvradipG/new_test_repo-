@@ -20,6 +20,10 @@ final class AppModel: ObservableObject {
     @Published var shotCount = 0
     @Published var feedbackText: String?
 
+    // Updates
+    @Published var latestRemote: RemoteVersion?
+    @Published var lastUpdateCheck: Date?
+
     // Reconstruction
     @Published var progress: Double = 0
     @Published var progressNote = ""

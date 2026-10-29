@@ -35,7 +35,7 @@ jobs:
         run: |
           xcodebuild -project CrystalBowl.xcodeproj -scheme CrystalBowl -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CURRENT_PROJECT_VERSION=${{ github.run_number }} build > build.log 2>&1 || {
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CURRENT_PROJECT_VERSION=${{ github.run_number }} CB_GIT_COMMIT=${GITHUB_SHA::7} build > build.log 2>&1 || {
               grep -E "error:|error -|BUILD FAILED" build.log | sort -u | head -80
               grep -E ": error: " build.log | sort -u | head -40 | while IFS= read -r line; do
                 f=$(echo "$line" | cut -d: -f1); l=$(echo "$line" | cut -d: -f2); m=$(echo "$line" | sed 's/^.*: error: //')
@@ -58,6 +58,21 @@ jobs:
         run: |
           SHA=$(git rev-parse --short HEAD)
           mkdir -p /tmp/pub && cp CrystalBowlScanner.ipa /tmp/pub/
+          VERSION=$(grep -E '^ *MARKETING_VERSION:' project.yml | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          python3 - "$VERSION" "${{ github.run_number }}" "$SHA" > /tmp/pub/version.json <<'PY'
+          import json, sys, datetime
+          version, build, sha = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          notes, seen = [], False
+          for line in open("ReleaseNotes.md", encoding="utf-8"):
+              if line.startswith("## "):
+                  if seen: break
+                  seen = True
+              elif seen and line.startswith("- "):
+                  notes.append(line[2:].strip())
+          print(json.dumps({"version": version, "build": build, "commit": sha,
+                            "date": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%MZ"), "notes": notes}, indent=2))
+          PY
+          cat /tmp/pub/version.json
           cd /tmp/pub
           printf "Built from %s on %s\n" "$SHA" "$(date -u +%Y-%m-%dT%H:%MZ)" > BUILD.txt
           git init -q -b ipa
@@ -94,7 +109,7 @@ jobs:
           AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
           xcodebuild -project CrystalBowl.xcodeproj -scheme CrystalBowl -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -archivePath build/CrystalBowl.xcarchive \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION=${{ github.run_number }} CB_GIT_COMMIT=${GITHUB_SHA::7} \
             "${AUTH[@]}" archive > archive.log 2>&1 || {
               grep -E "error:|error -|ARCHIVE FAILED" archive.log | sort -u | head -40 | while IFS= read -r line; do echo "::error::$line"; done
               exit 1
