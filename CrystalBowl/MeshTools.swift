@@ -96,7 +96,7 @@ enum MeshTools {
             lines.append(String(format: "Volume: %.2f cm³ (%@)", s.volumeCM3, s.isClosed ? "closed mesh" : "mesh has gaps, approximate"))
             lines.append("Triangles: \(s.triangleCount), vertices: \(s.vertexCount)")
             if let e = s.medianEdgeMM {
-                lines.append(String(format: "Mesh detail: median triangle edge %.2f mm (features smaller than this are smoothed out)", e))
+                lines.append(String(format: "Mesh detail: median triangle edge %.2f mm (mesh sampling, not validated resolution)", e))
             }
             if let c = scan.caliper {
                 let axisName = ["a", "b", "c"][max(0, min(2, c.axis))]

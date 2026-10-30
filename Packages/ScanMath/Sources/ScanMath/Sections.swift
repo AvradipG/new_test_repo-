@@ -31,18 +31,25 @@ public struct CrossSection: Sendable {
     public var area: Double
     public var perimeter: Double
     public var equivalentDiameter: Double { (4 * area / Double.pi).squareRoot() }
+    /// No measurement is valid when an intersected component remains open.
+    public var hasReliableMeasurements: Bool { !loops.isEmpty && openChains.isEmpty }
+    public var measurementStatus: String {
+        if !openChains.isEmpty { return "open_contours" }
+        return loops.isEmpty ? "empty_section" : "closed_contours"
+    }
 }
 
 extension ScanMath {
     /// Cuts the mesh with planes across `axis` every `spacing` units, starting half a step in from the end.
     public static func crossSections(positions: [SIMD3<Float>], indices: [UInt32], frame: PrincipalFrame,
                                      axis: Int, spacing: Double) -> [CrossSection] {
-        guard spacing > 0, axis >= 0, axis < 3 else { return [] }
+        guard spacing.isFinite, spacing > 0, axis >= 0, axis < 3 else { return [] }
         let lo = frame.lo[axis], hi = frame.hi[axis]
+        let canonical = canonicalIndices(positions: positions, indices: indices)
         var out: [CrossSection] = []
         var t = lo + spacing / 2
         while t < hi {
-            out.append(crossSection(positions: positions, indices: indices, frame: frame, axis: axis, at: t))
+            out.append(sectionUsingCanonicalIndices(positions: positions, indices: canonical, frame: frame, axis: axis, at: t))
             t += spacing
         }
         return out
@@ -51,6 +58,25 @@ extension ScanMath {
     /// Single section through the plane at signed distance `t` from the frame centre along `axis`.
     public static func crossSection(positions: [SIMD3<Float>], indices: [UInt32], frame: PrincipalFrame,
                                     axis: Int, at t: Double) -> CrossSection {
+        sectionUsingCanonicalIndices(positions: positions,
+            indices: canonicalIndices(positions: positions, indices: indices), frame: frame, axis: axis, at: t)
+    }
+
+    /// Texture/normal seams may duplicate vertex IDs at exactly the same position.
+    /// Weld only exact Float coordinates: no tolerance-based filling of physical gaps.
+    static func canonicalIndices(positions: [SIMD3<Float>], indices: [UInt32]) -> [UInt32] {
+        var first: [SIMD3<Float>: UInt32] = [:]
+        var canonical = [UInt32](repeating: 0, count: positions.count)
+        for (i, p) in positions.enumerated() {
+            let id = first[p] ?? UInt32(i)
+            first[p] = id
+            canonical[i] = id
+        }
+        return indices.map { canonical[Int($0)] }
+    }
+
+    private static func sectionUsingCanonicalIndices(positions: [SIMD3<Float>], indices: [UInt32],
+                                                     frame: PrincipalFrame, axis: Int, at t: Double) -> CrossSection {
         let n = frame.axes[axis]
         let (ui, vi) = frame.planeAxes(axis)
         let u = frame.axes[ui], v = frame.axes[vi]
@@ -87,16 +113,19 @@ extension ScanMath {
                 let a = tri[e], b = tri[(e + 1) % 3]
                 if (dist[Int(a)] > 0) != (dist[Int(b)] > 0) { crossing.append(node(a, b)) }
             }
-            if crossing.count == 2 {
-                adj[crossing[0], default: []].append(crossing[1])
-                adj[crossing[1], default: []].append(crossing[0])
+            if crossing.count == 2 && crossing[0] != crossing[1] {
+                // Repeated faces should not manufacture graph branches.
+                if !(adj[crossing[0]] ?? []).contains(crossing[1]) {
+                    adj[crossing[0], default: []].append(crossing[1])
+                    adj[crossing[1], default: []].append(crossing[0])
+                }
             }
         }
 
         // Walk the segment graph into chains: open ends first, then closed loops.
         var visited = Set<UInt64>()
         var loops: [[SIMD2<Double>]] = [], open: [[SIMD2<Double>]] = []
-        let starts = adj.keys.filter { adj[$0]!.count == 1 } + adj.keys.filter { adj[$0]!.count != 1 }
+        let starts = adj.keys.filter { adj[$0]!.count != 2 }.sorted() + adj.keys.filter { adj[$0]!.count == 2 }.sorted()
         for s in starts where !visited.contains(s) {
             var chain = [s]
             visited.insert(s)
@@ -105,7 +134,7 @@ extension ScanMath {
                 chain.append(next); visited.insert(next); cur = next
             }
             let pts = chain.map { point[$0]! }
-            if chain.count > 2 && adj[cur]!.contains(s) { loops.append(pts) } else { open.append(pts) }
+            if chain.count > 2 && chain.allSatisfy({ adj[$0]!.count == 2 }) && adj[cur]!.contains(s) { loops.append(pts) } else { open.append(pts) }
         }
 
         // Even-odd area: a loop inside an odd number of other loops is a hole.

@@ -8,6 +8,21 @@ struct SectionRow: Codable, Hashable {
     var areaMM2: Double
     var perimeterMM: Double
     var equivalentDiameterMM: Double
+    // Optional for compatibility with scans saved before 1.6.
+    var measurementStatus: String?
+    var closedLoopCount: Int?
+    var openChainCount: Int?
+    var measurementsUsable: Bool {
+        if let status = measurementStatus { return status == "closed_contours" }
+        return areaMM2 > 0 && perimeterMM > 0 // legacy positives, not proof of closure
+    }
+    var measurementText: String {
+        guard measurementsUsable else {
+            return measurementStatus == "empty_section" ? "No closed section at this plane" : "Measurements unavailable: open contours or legacy zero values. Re-cut from the model."
+        }
+        let values = String(format: "Area %.1f mm² · perimeter %.1f mm · Ø eq %.1f mm", areaMM2, perimeterMM, equivalentDiameterMM)
+        return measurementStatus == nil ? values + " · legacy; closure not recorded" : values
+    }
 }
 
 /// A stack of cross-section images cut across one of the rock's axes.
@@ -41,7 +56,8 @@ enum CrossSectionMaker {
                                               axis: axis, spacing: spacingMM / 1000)
         let series = SectionSeries(axis: axis, spacingMM: spacingMM, rows: sections.map {
             SectionRow(depthMM: $0.depth * 1000, areaMM2: $0.area * 1e6,
-                       perimeterMM: $0.perimeter * 1000, equivalentDiameterMM: $0.equivalentDiameter * 1000)
+                       perimeterMM: $0.perimeter * 1000, equivalentDiameterMM: $0.equivalentDiameter * 1000,
+                       measurementStatus: $0.measurementStatus, closedLoopCount: $0.loops.count, openChainCount: $0.openChains.count)
         })
         let fm = FileManager.default
         let dir = series.folderURL(in: scan)
@@ -58,11 +74,34 @@ enum CrossSectionMaker {
             try layout.contactSheet(sections, rows: series.rows, title: "\(scan.name) · \(series.axisName)-axis every \(SectionSeries.format(spacingMM)) mm")
                 .write(to: dir.appendingPathComponent("\(series.folderName)_contact-sheet.png"))
         }
-        var csv = "index,depth_mm,area_mm2,perimeter_mm,equivalent_diameter_mm\n"
+        var csv = "index,depth_mm,area_mm2,perimeter_mm,equivalent_diameter_mm,measurement_status,closed_loop_count,open_chain_count\n"
         for (i, r) in series.rows.enumerated() {
-            csv += String(format: "%d,%.2f,%.2f,%.2f,%.2f\n", i + 1, r.depthMM, r.areaMM2, r.perimeterMM, r.equivalentDiameterMM)
+            let metrics = r.measurementsUsable ? String(format: "%.6f,%.6f,%.6f", r.areaMM2, r.perimeterMM, r.equivalentDiameterMM) : ",,"
+            csv += String(format: "%d,%.6f,", i + 1, r.depthMM) + metrics
+                + ",\(r.measurementStatus ?? "unknown"),\(r.closedLoopCount ?? 0),\(r.openChainCount ?? 0)\n"
         }
         try csv.write(to: dir.appendingPathComponent("\(series.folderName).csv"), atomically: true, encoding: .utf8)
+        // Lossless contour geometry avoids having to measure screenshots later.
+        func vector(_ p: SIMD3<Double>) -> [Double] { [p.x, p.y, p.z] }
+        func paths(_ paths: [[SIMD2<Double>]]) -> [[[Double]]] {
+            paths.map { $0.map { [$0.x * 1000, $0.y * 1000] } }
+        }
+        let records: [[String: Any]] = sections.enumerated().map { i, section in
+            ["index": i + 1, "depth_mm": section.depth * 1000,
+             "measurement_status": section.measurementStatus,
+             "closed_loops_mm": paths(section.loops), "open_chains_mm": paths(section.openChains)]
+        }
+        let geometry: [String: Any] = [
+            "schema": "crystal-bowl.sections/1", "units": "mm", "axis": axis,
+            "spacing_mm": spacingMM, "frame_center_mm": vector(frame.center * 1000),
+            "frame_axes": frame.axes.map(vector), "frame_lo_mm": vector(frame.lo * 1000),
+            "frame_hi_mm": vector(frame.hi * 1000), "sections": records,
+            "app_version": AppInfo.version, "app_build": AppInfo.build, "app_commit": AppInfo.commit,
+            "caliper_scale_factor": scan.scaleFactor, "caliper_scale_applied": false,
+            "note": "Exterior surface sections, not CT. PCA axis sign is not mounted top/bottom. Holder and billets are not automatically excluded. Coordinates retain original model scale."
+        ]
+        try JSONSerialization.data(withJSONObject: geometry, options: [.prettyPrinted, .sortedKeys])
+            .write(to: dir.appendingPathComponent("\(series.folderName)-geometry.json"), options: .atomic)
         return series
     }
 
@@ -140,8 +179,9 @@ enum CrossSectionMaker {
                 let big: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 18, weight: .semibold), .foregroundColor: UIColor.white]
                 let small: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .regular), .foregroundColor: UIColor(white: 0.8, alpha: 1)]
                 (title as NSString).draw(at: CGPoint(x: Self.margin, y: 12), withAttributes: big)
-                let info = String(format: "depth %.1f mm · area %.1f mm² · perimeter %.1f mm · Ø eq %.1f mm",
-                                  row.depthMM, row.areaMM2, row.perimeterMM, row.equivalentDiameterMM)
+                let info = row.measurementsUsable
+                    ? String(format: "depth %.1f mm | area %.1f mm2 | perimeter %.1f mm | eq diameter %.1f mm", row.depthMM, row.areaMM2, row.perimeterMM, row.equivalentDiameterMM)
+                    : String(format: "depth %.1f mm | OPEN/EMPTY: measurements unavailable", row.depthMM)
                 (info as NSString).draw(at: CGPoint(x: Self.margin, y: 36), withAttributes: small)
                 // 10 mm scale bar
                 let barLen = CGFloat(10 * pxPerMM)
@@ -175,7 +215,9 @@ enum CrossSectionMaker {
                     fill.fill()
                     UIColor.systemOrange.setStroke()
                     open.stroke()
-                    let label = String(format: "#%d · %.1f mm · %.0f mm²", i + 1, rows[i].depthMM, rows[i].areaMM2)
+                    let label = rows[i].measurementsUsable
+                        ? String(format: "#%d | %.1f mm | %.0f mm2", i + 1, rows[i].depthMM, rows[i].areaMM2)
+                        : String(format: "#%d | %.1f mm | UNAVAILABLE", i + 1, rows[i].depthMM)
                     (label as NSString).draw(at: CGPoint(x: ox, y: oy + cellH - 34), withAttributes: small)
                 }
             }

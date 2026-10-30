@@ -6,13 +6,13 @@ public struct MeshStats: Codable, Hashable, Sendable {
     public var axisA: Double
     public var axisB: Double
     public var axisC: Double
-    /// Enclosed volume in cubic centimetres. Exact only when `isClosed` is true.
+    /// Enclosed volume in cubic centimetres. A closed, consistently oriented surface is required; physical accuracy still needs validation.
     public var volumeCM3: Double
     public var triangleCount: Int
     public var vertexCount: Int
     /// True when every edge is shared by exactly two triangles (watertight mesh).
     public var isClosed: Bool
-    /// Median triangle edge length in millimetres: the finest detail the mesh can show. Nil for scans measured before 1.5.
+    /// Median triangle edge length in millimetres: mesh sampling, not validated resolution. Nil for scans measured before 1.5.
     public var medianEdgeMM: Double?
 
     public init(axisA: Double, axisB: Double, axisC: Double, volumeCM3: Double, triangleCount: Int, vertexCount: Int, isClosed: Bool,
@@ -127,7 +127,7 @@ public enum ScanMath {
         let vol = abs(signedVolume(positions: positions, indices: indices)) * pow(unitToMM, 3) / 1000
         return MeshStats(axisA: ext.x, axisB: ext.y, axisC: ext.z, volumeCM3: vol,
                          triangleCount: indices.count / 3, vertexCount: positions.count,
-                         isClosed: isClosed(indices: indices),
+                         isClosed: isClosed(indices: canonicalIndices(positions: positions, indices: indices)),
                          medianEdgeMM: medianEdgeLength(positions: positions, indices: indices).map { $0 * unitToMM })
     }
 

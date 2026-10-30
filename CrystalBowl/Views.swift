@@ -636,7 +636,7 @@ struct ScanDetailView: View {
         } header: {
             Text(scan.caliper == nil ? "Measurements (LiDAR scale)" : "Measurements (caliper-corrected)")
         } footer: {
-            Text("a is the longest axis of the rock, c the shortest. Mesh detail is the typical triangle edge: features smaller than that are smoothed out.")
+            Text("a is the longest axis of the rock, c the shortest. Mesh detail is typical triangle spacing, not measured resolution or dimensional accuracy.")
         }
     }
 }
@@ -740,7 +740,7 @@ struct SectionsPanel: View {
                 }
                 Text(String(format: "%@-axis slice %d of %d · depth %.1f mm", s.axisName, i + 1, s.rows.count, row.depthMM))
                     .font(.callout.monospacedDigit())
-                Text(String(format: "Area %.1f mm² · perimeter %.1f mm · Ø eq %.1f mm", row.areaMM2, row.perimeterMM, row.equivalentDiameterMM))
+                Text(row.measurementText)
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 if (scan.sections ?? []).count > 1 {
                     Picker("Stack", selection: Binding(get: { series?.id ?? "" }, set: { seriesID = $0; index = 0; zipURL = nil })) {

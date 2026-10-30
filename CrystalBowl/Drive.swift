@@ -406,7 +406,10 @@ enum ScanPackage {
         let sections: [[String: Any]] = (scan.sections ?? []).map { s in
             ["axis": s.axisName, "spacing_mm": s.spacingMM, "count": s.rows.count,
              "folder": "sections/\(s.folderName)", "table": "sections/\(s.folderName)/\(s.folderName).csv",
-             "depth_origin": "end of the rock along the axis (minimum projection)"]
+             "depth_origin": "minimum projection of entire model along PCA axis; not confirmed mounted bottom",
+             "geometry": "sections/\(s.folderName)/\(s.folderName)-geometry.json",
+             "geometry_note": "Present for stacks re-cut in 1.6 or newer; original model scale",
+             "unavailable_measurement_count": s.rows.filter { !$0.measurementsUsable }.count]
         }
         let dict: [String: Any] = [
             "schema": "crystal-bowl.scan/0.1",

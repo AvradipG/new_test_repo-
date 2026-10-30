@@ -99,4 +99,58 @@ final class ScanMathTests: XCTestCase {
         XCTAssertEqual(s.triangleCount, 12)
         XCTAssertTrue(s.isClosed)
     }
+
+    func testDuplicatedTextureSeamVerticesFormClosedSections() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        // Triangle soup: every face corner has a separate vertex ID, as at UV seams.
+        let split = f.map { p[Int($0)] }
+        let ids = (0..<split.count).map { UInt32($0) }
+        let frame = ScanMath.principalFrame(p)
+        for axis in 0..<3 {
+            let reference = ScanMath.crossSection(positions: p, indices: f, frame: frame, axis: axis, at: 0.001)
+            let actual = ScanMath.crossSection(positions: split, indices: ids, frame: frame, axis: axis, at: 0.001)
+            XCTAssertTrue(actual.hasReliableMeasurements)
+            XCTAssertEqual(actual.loops.count, 1)
+            XCTAssertEqual(actual.area, reference.area, accuracy: 1e-12)
+            XCTAssertEqual(actual.perimeter, reference.perimeter, accuracy: 1e-12)
+        }
+        XCTAssertTrue(ScanMath.stats(positions: split, indices: ids).isClosed)
+    }
+
+    func testRealGapIsNotAutomaticallyBridged() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let split = f.map { p[Int($0)] }
+        let ids = (0..<split.count).map { UInt32($0) }
+        let frame = ScanMath.principalFrame(p)
+        // Remove one of the side triangles crossed by this plane.
+        let open = ScanMath.crossSection(positions: split, indices: Array(ids.dropLast(3)), frame: frame, axis: 0, at: 0.001)
+        XCTAssertFalse(open.hasReliableMeasurements)
+        XCTAssertFalse(open.openChains.isEmpty)
+        XCTAssertEqual(open.measurementStatus, "open_contours")
+    }
+
+    func testMixedClosedAndOpenSectionsAreNotReportedAsComplete() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let other = p.map { $0 + SIMD3<Float>(0.06, 0, 0) }
+        let ids = f + f.dropLast(3).map { $0 + UInt32(p.count) }
+        let frame = ScanMath.principalFrame(p)
+        let actual = ScanMath.crossSection(positions: p + other, indices: ids, frame: frame, axis: 0, at: 0.001)
+        XCTAssertFalse(actual.loops.isEmpty)
+        XCTAssertFalse(actual.openChains.isEmpty)
+        XCTAssertFalse(actual.hasReliableMeasurements)
+    }
+
+    func testEmptySectionHasExplicitStatus() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let actual = ScanMath.crossSection(positions: p, indices: f, frame: ScanMath.principalFrame(p), axis: 0, at: 1)
+        XCTAssertEqual(actual.measurementStatus, "empty_section")
+        XCTAssertFalse(actual.hasReliableMeasurements)
+    }
+
+    func testDuplicateFacesDoNotBreakSectionGraph() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let actual = ScanMath.crossSection(positions: p, indices: f + f, frame: ScanMath.principalFrame(p), axis: 0, at: 0.001)
+        XCTAssertTrue(actual.hasReliableMeasurements)
+        XCTAssertEqual(actual.area, 0.02 * 0.03, accuracy: 1e-9)
+    }
 }

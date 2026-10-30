@@ -3,6 +3,12 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.6
+- Cross-sections now join exactly coincident texture-seam vertices, so intact surfaces are less likely to appear as broken outlines
+- Open or empty sections show measurements unavailable instead of misleading zero area; real gaps are not automatically filled
+- Re-cut an existing scan to export full contour coordinates, scale provenance and open/closed status alongside the PNGs and CSV
+- Section depth is explicitly a model-axis coordinate; holders and billets still require separate identification
+
 ## 1.5
 - Vibration guide while scanning by hand: a tick for each photo, a buzz to slow down, keep going the same way or change height
 - A coverage ring shows where photos are missing; after a pass the app tells you exactly where to stand to fill the gaps
