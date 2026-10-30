@@ -43,6 +43,16 @@ The workflow signs the app and uploads it to App Store Connect when these reposi
 The app record must exist first: App Store Connect › Apps › + › New App, bundle ID `com.avradip.crystalbowl`.
 Each push then uploads a new build; install it from the TestFlight app on the iPhone.
 
+One-time setup so updates arrive by themselves:
+1. App Store Connect › Apps › Crystal Bowl › TestFlight › Internal Testing › **+**: a group with
+   **Enable automatic distribution** ticked, with yourself in it.
+2. In the TestFlight app on the iPhone: Crystal Bowl › **Automatic Updates** on.
+3. Colleagues: TestFlight › External Testing › **+** group, then add their emails or create a public link. Apple
+   reviews the first build for external testers (usually within a day); later builds normally go straight through.
+
+After that, asking an agent (Claude Code, Codex) for a change is the whole loop: it pushes to `crystal-bowl-ios`,
+GitHub builds and uploads, and the phone updates 5–15 minutes after the run turns green.
+
 ## Installing on an iPhone from Windows (Sideloadly)
 
 1. On the PC, install **iTunes** and **iCloud** from apple.com (the website versions, not the Microsoft Store ones), then **Sideloadly** from sideloadly.io.

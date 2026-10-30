@@ -2,7 +2,9 @@
 
 iPhone app (SwiftUI, iOS 17+, LiDAR) that scans a rock sample of up to about 10 cm with Apple Object Capture,
 builds the model on the phone, measures it and cuts cross-sections. The owner is a digital-rock geoscientist,
-new to app development, who installs from Windows and has no Mac.
+new to app development. The owner asks for fixes and improvements often and in plain words ("the button is too
+small", "make the slices clearer"); each request should end with a push that reaches their phone through TestFlight.
+No Mac is needed for that: GitHub builds, signs and uploads in the cloud. A MacBook exists but is optional.
 
 ## Layout
 - `CrystalBowl/`: app code. `AppModel.swift` (capture and reconstruction flow), `Views.swift` (all screens),
@@ -22,6 +24,13 @@ new to app development, who installs from Windows and has no Mac.
    `ipa` branch with `version.json`, then signed TestFlight upload when the App Store Connect secrets exist.
 5. Watch with `gh run watch`. Logs and artifacts can't be downloaded from the cloud sandbox; compiler
    errors are emitted as annotations: `gh api repos/AvradipG/new_test_repo-/check-runs/<job id>/annotations`.
+   A red run means the owner gets nothing: fix it and push again before reporting back.
+6. Done means the run shows the notice "Build N uploaded to App Store Connect". The phone picks it up from
+   TestFlight 5–15 minutes later (automatic updates are on). Tell the owner the build number and what changed.
+
+Start every change from the latest `crystal-bowl-ios`, in the cloud as well. Builds queue, so pushing several
+small fixes in a row is fine. Agents without `gh` can check runs at
+`https://api.github.com/repos/AvradipG/new_test_repo-/actions/runs?branch=crystal-bowl-ios` (public).
 
 ## Google Drive package
 `Drive.swift` (OAuth PKCE sign-in, Drive REST client, manifest) and `DriveSyncModel.swift` (upload queue).

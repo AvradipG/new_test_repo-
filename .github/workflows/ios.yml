@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# Pushes made in quick succession queue up instead of racing each other to the ipa branch and TestFlight.
+concurrency:
+  group: ios-build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: macos-15
