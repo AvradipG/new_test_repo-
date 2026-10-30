@@ -209,7 +209,9 @@ final class AppModel: ObservableObject {
             let session = try PhotogrammetrySession(input: scan.imagesURL, configuration: config)
             try session.process(requests: [.modelFile(url: scan.modelURL)])
             var failure: Error?
-            for try await output in session.outputs {
+            // The outputs stream stays open after the last request finishes, so leave it on
+            // processingComplete; waiting for the stream to end hangs at 100%.
+            outputs: for try await output in session.outputs {
                 switch output {
                 case .requestProgress(_, let fraction):
                     progress = fraction
@@ -218,6 +220,9 @@ final class AppModel: ObservableObject {
                     failure = error
                 case .processingCancelled:
                     failure = NSError(domain: "CrystalBowl", code: 1, userInfo: [NSLocalizedDescriptionKey: "Processing was cancelled"])
+                    break outputs
+                case .processingComplete:
+                    break outputs
                 default:
                     break
                 }
@@ -253,6 +258,15 @@ final class AppModel: ObservableObject {
             reload()
             phase = .home
         }
+    }
+
+    /// Measures a scan whose model was built but never measured (version 1.3 could stop at 100% after writing it).
+    func measure(_ scan: Scan) async {
+        var done = scan
+        let url = scan.modelURL
+        done.stats = await Task.detached { MeshTools.measure(url) }.value
+        try? ScanStore.save(done)
+        reload()
     }
 
     static let keepPhotosKey = "keepPhotos"

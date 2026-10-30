@@ -3,6 +3,10 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.4
+- Building a 3D model no longer stops at 100%: the app goes on to measure the sample and cut the cross-sections
+- A scan that stopped at 100% shows its model: open it and tap Measure
+
 ## 1.3
 - Finished scans upload to Google Drive › Crystal Bowl Scans by themselves
 - Each scan folder has a manifest.json, the model in USDZ, OBJ, PLY and STL, and the cross-sections

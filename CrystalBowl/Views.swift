@@ -268,6 +268,7 @@ struct ScanDetailView: View {
     let scanID: String
     @State private var exports: [URL] = []
     @State private var exporting = false
+    @State private var measuring = false
 
     private var scan: Scan? { model.scans.first { $0.id == scanID } }
 
@@ -297,6 +298,19 @@ struct ScanDetailView: View {
                         }
                         LabeledContent("Triangles", value: s.triangleCount.formatted())
                         LabeledContent("Photos", value: "\(scan.photoCount ?? 0) in \(scan.passes ?? 1) pass(es)")
+                    }
+                } else if scan.hasModel {
+                    Section("Measurements") {
+                        Button {
+                            measuring = true
+                            Task {
+                                await model.measure(scan)
+                                measuring = false
+                            }
+                        } label: {
+                            if measuring { ProgressView() } else { Label("Measure", systemImage: "ruler") }
+                        }
+                        .disabled(measuring)
                     }
                 }
                 if scan.hasModel {
