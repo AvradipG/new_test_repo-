@@ -18,9 +18,29 @@ struct Scan: Identifiable, Codable, Hashable {
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {
-        guard let c = caliper, let s = stats else { return 1 }
-        let model = [s.axisA, s.axisB, s.axisC][max(0, min(2, c.axis))]
+        guard let c = caliper, let model = modelLength(axis: c.axis) else { return 1 }
         return model > 0 && c.measuredMM > 0 ? c.measuredMM / model : 1
+    }
+
+    /// The scan's own length for a caliper axis: a, b, c, or 3 = upright height.
+    func modelLength(axis: Int) -> Double? {
+        guard let s = stats else { return nil }
+        switch axis {
+        case 0: return s.axisA
+        case 1: return s.axisB
+        case 2: return s.axisC
+        case 3: return s.upright?.heightMM
+        default: return nil
+        }
+    }
+
+    /// True for scans made before 1.7: no upright size, no height profile, or section stacks without outline sizes.
+    var needsRepair: Bool {
+        guard hasModel else { return false }
+        guard let s = stats, s.upright != nil else { return true }
+        let stacks = sections ?? []
+        if !stacks.contains(where: { $0.isHeightProfile }) { return true }
+        return stacks.contains { $0.rows.contains { $0.maxFeretMM == nil && $0.measurementStatus != "empty_section" } }
     }
 
     var folderURL: URL { ScanStore.root.appendingPathComponent(id, isDirectory: true) }
@@ -41,10 +61,11 @@ struct Scan: Identifiable, Codable, Hashable {
 }
 
 struct CaliperCheck: Codable, Hashable {
-    /// 0 = a (longest), 1 = b, 2 = c (shortest).
+    /// 0 = a (longest), 1 = b, 2 = c (shortest), 3 = upright height.
     var axis: Int
     var measuredMM: Double
     var date: Date
+    var axisName: String { ["a", "b", "c", "height"][max(0, min(3, axis))] }
 }
 
 enum ScanStore {

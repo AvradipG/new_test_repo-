@@ -3,6 +3,13 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.7
+- Every slice now has its size even when its outline is open: widest diameter, narrowest width and extents in mm
+- New height profile: horizontal slices up the rock as it stood, with the width at every height
+- Upright size on the scan page: height, footprint length x width and widest distance across
+- Every export carries a dimensions.json with all overall sizes, including each shared slice stack
+- Older scans: tap Repair (or Add full dimensions on the home screen) to re-measure and re-cut them from the saved model
+
 ## 1.6
 - Cross-sections now join exactly coincident texture-seam vertices, so intact surfaces are less likely to appear as broken outlines
 - Open or empty sections show measurements unavailable instead of misleading zero area; real gaps are not automatically filled

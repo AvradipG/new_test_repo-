@@ -62,7 +62,53 @@ enum MeshTools {
             }
         }
         if let report = writeReport(scan) { urls.append(report) }
+        let dims = dimensionsURL(scan)
+        if (try? dimensionsData(scan).write(to: dims, options: .atomic)) != nil { urls.append(dims) }
         return urls
+    }
+
+    static func dimensionsURL(_ scan: Scan) -> URL { scan.exportsURL.appendingPathComponent("\(scan.fileStem)-dimensions.json") }
+
+    /// Overall dimensions in one small file for other software: principal axes, upright size, volume and scale.
+    static func dimensionsData(_ scan: Scan) -> Data {
+        let f = scan.scaleFactor
+        var d: [String: Any] = [
+            "schema": "crystal-bowl.dimensions/1", "units": "mm",
+            "scan_id": scan.id, "specimen_alias": scan.name,
+            "app_version": AppInfo.version, "app_build": AppInfo.build,
+            "scale_source": scan.caliper == nil ? "iPhone LiDAR, not independently checked" : "iPhone LiDAR, checked with calipers (see caliper_check)",
+            "notes": [
+                "principal_axes_mm: the model's own axes, a longest, c shortest (extents along PCA axes)",
+                "upright_as_scanned_mm: height along model +Y (up during capture); length x width is the smallest rectangle around the footprint seen from above; max_diameter is the widest horizontal distance",
+                "whole model: a holder or billets scanned with the rock are included",
+                "exterior surface only, not CT",
+            ],
+        ]
+        guard let s = scan.stats else {
+            d["status"] = "not measured yet"
+            return (try? JSONSerialization.data(withJSONObject: d, options: [.prettyPrinted, .sortedKeys])) ?? Data()
+        }
+        d["status"] = "measured"
+        d["principal_axes_mm"] = ["a": s.axisA, "b": s.axisB, "c": s.axisC]
+        d["volume_cm3"] = s.volumeCM3
+        d["mesh_closed"] = s.isClosed
+        if let e = s.medianEdgeMM { d["median_edge_mm"] = e }
+        if let u = s.upright {
+            d["upright_as_scanned_mm"] = ["height": u.heightMM, "length": u.lengthMM, "width": u.widthMM,
+                                          "max_diameter": u.maxDiameterMM, "min_width": u.minWidthMM]
+        }
+        if let c = scan.caliper {
+            d["caliper_check"] = ["axis": c.axisName, "measured_mm": c.measuredMM, "model_mm": c.measuredMM / f, "factor": f] as [String: Any]
+            var corrected: [String: Double] = ["a": s.axisA * f, "b": s.axisB * f, "c": s.axisC * f, "volume_cm3": s.volumeCM3 * f * f * f]
+            if let u = s.upright {
+                corrected["height"] = u.heightMM * f
+                corrected["length"] = u.lengthMM * f
+                corrected["width"] = u.widthMM * f
+                corrected["max_diameter"] = u.maxDiameterMM * f
+            }
+            d["caliper_corrected_mm"] = corrected
+        }
+        return (try? JSONSerialization.data(withJSONObject: d, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
     /// Writes (or rewrites) the text report next to the lab formats.
@@ -78,7 +124,7 @@ enum MeshTools {
         guard scan.hasModel else { return [] }
         let fm = FileManager.default
         let others = ["stl", "ply", "obj", "mtl"].map { scan.exportsURL.appendingPathComponent("\(scan.fileStem).\($0)") }
-            + [scan.exportsURL.appendingPathComponent("\(scan.fileStem)-report.txt")]
+            + [scan.exportsURL.appendingPathComponent("\(scan.fileStem)-report.txt"), dimensionsURL(scan)]
         return [scan.modelURL] + others.filter { fm.fileExists(atPath: $0.path) }
     }
 
@@ -98,8 +144,12 @@ enum MeshTools {
             if let e = s.medianEdgeMM {
                 lines.append(String(format: "Mesh detail: median triangle edge %.2f mm (mesh sampling, not validated resolution)", e))
             }
+            if let u = s.upright {
+                lines.append(String(format: "Upright as scanned: height %.1f mm; footprint %.1f × %.1f mm; widest across %.1f mm; narrowest %.1f mm",
+                                    u.heightMM, u.lengthMM, u.widthMM, u.maxDiameterMM, u.minWidthMM))
+            }
             if let c = scan.caliper {
-                let axisName = ["a", "b", "c"][max(0, min(2, c.axis))]
+                let axisName = c.axisName
                 let f = scan.scaleFactor
                 lines.append(String(format: "Caliper check: %@ = %.2f mm measured; scan %.2f mm; scan is %+.1f%% off", axisName, c.measuredMM, c.measuredMM / f, (1 / f - 1) * 100))
                 lines.append(String(format: "Caliper-corrected axes a × b × c: %.1f × %.1f × %.1f mm, volume %.2f cm³ (multiply mesh coordinates by %.4f)",

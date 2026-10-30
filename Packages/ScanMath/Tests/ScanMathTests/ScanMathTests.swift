@@ -153,4 +153,51 @@ final class ScanMathTests: XCTestCase {
         XCTAssertTrue(actual.hasReliableMeasurements)
         XCTAssertEqual(actual.area, 0.02 * 0.03, accuracy: 1e-9)
     }
+
+    /// Box standing on the XZ plane (+Y up), turned about the vertical axis.
+    func uprightBox() -> ([SIMD3<Float>], [UInt32]) {
+        let (p, f) = box(0.05, 0.02, 0.03)
+        let a: Float = 0.6
+        return (p.map { SIMD3($0.x * cos(a) + $0.z * sin(a), $0.y, -$0.x * sin(a) + $0.z * cos(a)) }, f)
+    }
+
+    func testOpenSectionStillHasOutlineSize() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let split = f.map { p[Int($0)] }
+        let ids = (0..<split.count).map { UInt32($0) }
+        let open = ScanMath.crossSection(positions: split, indices: Array(ids.dropLast(3)), frame: ScanMath.principalFrame(p), axis: 0, at: 0.001)
+        XCTAssertFalse(open.hasReliableMeasurements)
+        let size = open.outlineSize
+        XCTAssertNotNil(size)
+        XCTAssertEqual(size?.maxFeret ?? 0, (0.02 * 0.02 + 0.03 * 0.03).squareRoot(), accuracy: 1e-6)
+        XCTAssertEqual(size?.minWidth ?? 0, 0.02, accuracy: 1e-6)
+    }
+
+    func testUprightSizeOfTurnedBox() {
+        let (p, _) = uprightBox()
+        let u = ScanMath.uprightSize(positions: p)
+        XCTAssertEqual(u?.heightMM ?? 0, 20, accuracy: 1e-3)
+        XCTAssertEqual(u?.lengthMM ?? 0, 50, accuracy: 1e-3)
+        XCTAssertEqual(u?.widthMM ?? 0, 30, accuracy: 1e-3)
+        XCTAssertEqual(u?.maxDiameterMM ?? 0, (50.0 * 50 + 30 * 30).squareRoot(), accuracy: 1e-3)
+        XCTAssertEqual(u?.minWidthMM ?? 0, 30, accuracy: 1e-3)
+        XCTAssertNil(ScanMath.uprightSize(positions: []))
+    }
+
+    func testHorizontalSectionsMeasureHeightFromBottom() {
+        let (p, f) = uprightBox()
+        let frame = ScanMath.uprightFrame(p)
+        XCTAssertEqual(frame.extents.x, 0.02, accuracy: 1e-6)
+        XCTAssertEqual(frame.extents.y, 0.05, accuracy: 1e-6)
+        XCTAssertEqual(frame.extents.z, 0.03, accuracy: 1e-6)
+        let s = ScanMath.crossSections(positions: p, indices: f, frame: frame, axis: 0, spacing: 0.005)
+        XCTAssertEqual(s.count, 4)
+        XCTAssertEqual(s.first?.depth ?? 0, 0.0025, accuracy: 1e-6)
+        for sec in s {
+            XCTAssertTrue(sec.hasReliableMeasurements)
+            XCTAssertEqual(sec.area, 0.05 * 0.03, accuracy: 1e-8)
+            XCTAssertEqual(sec.outlineSize?.extentU ?? 0, 0.05, accuracy: 1e-6)
+            XCTAssertEqual(sec.outlineSize?.extentV ?? 0, 0.03, accuracy: 1e-6)
+        }
+    }
 }

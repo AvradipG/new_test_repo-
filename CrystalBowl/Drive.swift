@@ -344,7 +344,9 @@ enum ScanPackage {
 
     static func role(_ rel: String) -> String {
         if rel.hasPrefix("images/") { return "original_photo" }
+        if rel.hasSuffix("dimensions.json") { return "dimensions" }
         if rel.hasPrefix("sections/") {
+            if rel.hasSuffix("-geometry.json") { return "section_geometry" }
             if rel.hasSuffix(".csv") { return "section_table" }
             if rel.contains("contact-sheet") { return "section_contact_sheet" }
             return "section_image"
@@ -393,7 +395,7 @@ enum ScanPackage {
             let f = scan.scaleFactor
             scale["independently_validated"] = true
             scale["caliper_check"] = [
-                "axis": ["a", "b", "c"][max(0, min(2, c.axis))], "measured_mm": c.measuredMM,
+                "axis": c.axisName, "measured_mm": c.measuredMM,
                 "model_mm": c.measuredMM / f, "factor": f, "date_utc": f8601(c.date),
                 "apply": "multiply mesh coordinates by factor for caliper-corrected geometry",
             ] as [String: Any]
@@ -438,6 +440,10 @@ enum ScanPackage {
             ],
             "scale": scale,
             "measurements": measurements,
+            "dimensions_file": "model/\(scan.fileStem)-dimensions.json",
+            "upright_as_scanned_mm": scan.stats?.upright.map { u -> Any in
+                ["height": u.heightMM, "length": u.lengthMM, "width": u.widthMM, "max_diameter": u.maxDiameterMM, "min_width": u.minWidthMM]
+            } ?? NSNull(),
             "sections": sections,
             "files": fileList,
             "limitations": [
@@ -457,8 +463,12 @@ enum ScanPackage {
     Each scan folder:
       manifest.json      what the scan is, measurements, every file with its role and SHA-256.
                          Uploaded last: if it is missing, the upload is still in progress or was interrupted.
-      model/             textured USDZ, OBJ, PLY, STL (metres, +Y up) and a text report.
-      sections/          cross-section PNG stacks with a CSV of depth, area, perimeter, equivalent diameter (mm).
+      model/             textured USDZ, OBJ, PLY, STL (metres, +Y up), a text report and
+                         <sample>-dimensions.json (all overall sizes in mm in one small file).
+      sections/          cross-section PNG stacks with a CSV per stack: depth or height, max diameter,
+                         min width, extents, and area/perimeter where the outline is closed (mm).
+                         h-axis stacks are horizontal slices up the model as it stood (height profile).
+                         Each stack folder also carries dimensions.json.
       images/            original capture photos, only when photo upload is switched on.
 
     index.json in this folder lists every scan, newest first.

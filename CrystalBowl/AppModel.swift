@@ -31,6 +31,7 @@ final class AppModel: ObservableObject {
     @Published var lastUpdateCheck: Date?
 
     // Reconstruction
+    @Published var repairing: Set<String> = []
     @Published var progress: Double = 0
     @Published var progressNote = ""
 
@@ -248,13 +249,8 @@ final class AppModel: ObservableObject {
             let url = scan.modelURL
             done.stats = await Task.detached { MeshTools.measure(url) }.value
             if done.photoCount == nil { done.photoCount = ScanStore.countPhotos(in: scan.imagesURL) }
-            progressNote = "Cutting cross-sections…"
-            let measured = done
-            if let series = try? await Task.detached(operation: {
-                try CrossSectionMaker.make(scan: measured, axis: 0, spacingMM: AppModel.defaultSpacingMM)
-            }).value {
-                done.sections = [series]
-            }
+            progressNote = "Cutting cross-sections and the height profile…"
+            done.sections = await Self.cutStacks(done, specs: [(0, AppModel.defaultSpacingMM), (3, AppModel.defaultSpacingMM)])
             // Lab formats are written straight away so sharing and the Drive upload are ready when the scan opens.
             progressNote = "Writing STL, PLY and OBJ…"
             let finished = done
@@ -317,6 +313,51 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = "Couldn't cut cross-sections: \(error.localizedDescription)"
         }
+    }
+
+    /// Cuts each (axis, spacing) stack in turn; stacks that fail are left out.
+    static func cutStacks(_ scan: Scan, specs: [(Int, Double)]) async -> [SectionSeries] {
+        var made: [SectionSeries] = []
+        for (axis, spacing) in specs {
+            let s = scan
+            if let series = try? await Task.detached(operation: {
+                try CrossSectionMaker.make(scan: s, axis: axis, spacingMM: spacing)
+            }).value {
+                made.append(series)
+            }
+        }
+        return made
+    }
+
+    var scansNeedingRepair: [Scan] { scans.filter { $0.needsRepair } }
+
+    /// Brings an older scan up to date from its saved model: measures again (now with the upright size),
+    /// re-cuts every stack with the current slicer plus a height profile, rewrites the lab files and report,
+    /// and uploads the result. Photos are not needed.
+    func repair(_ original: Scan) async {
+        guard original.hasModel, !repairing.contains(original.id) else { return }
+        repairing.insert(original.id)
+        defer { repairing.remove(original.id) }
+        var scan = scans.first { $0.id == original.id } ?? original
+        let url = scan.modelURL
+        guard let stats = await Task.detached(operation: { MeshTools.measure(url) }).value else {
+            errorMessage = "Couldn't read the model of \"\(scan.name)\" to repair it."
+            return
+        }
+        scan.stats = stats
+        var specs = (scan.sections ?? []).map { ($0.axis, $0.spacingMM) }
+        if !specs.contains(where: { $0.0 == 0 }) { specs.insert((0, Self.defaultSpacingMM), at: 0) }
+        if !specs.contains(where: { $0.0 == 3 }) { specs.append((3, Self.defaultSpacingMM)) }
+        scan.sections = await Self.cutStacks(scan, specs: specs)
+        try? ScanStore.save(scan)
+        let done = scan
+        _ = await Task.detached { MeshTools.exportAll(done) }.value
+        reload()
+        Task { await syncAllPending() }
+    }
+
+    func repairAll() async {
+        for scan in scansNeedingRepair { await repair(scan) }
     }
 
     func delete(_ scan: Scan) {

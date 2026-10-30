@@ -14,12 +14,15 @@ public struct MeshStats: Codable, Hashable, Sendable {
     public var isClosed: Bool
     /// Median triangle edge length in millimetres: mesh sampling, not validated resolution. Nil for scans measured before 1.5.
     public var medianEdgeMM: Double?
+    /// Height and footprint standing as scanned. Nil for scans measured before 1.7.
+    public var upright: UprightSize?
 
     public init(axisA: Double, axisB: Double, axisC: Double, volumeCM3: Double, triangleCount: Int, vertexCount: Int, isClosed: Bool,
-                medianEdgeMM: Double? = nil) {
+                medianEdgeMM: Double? = nil, upright: UprightSize? = nil) {
         self.axisA = axisA; self.axisB = axisB; self.axisC = axisC
         self.volumeCM3 = volumeCM3; self.triangleCount = triangleCount; self.vertexCount = vertexCount; self.isClosed = isClosed
         self.medianEdgeMM = medianEdgeMM
+        self.upright = upright
     }
 }
 
@@ -128,7 +131,8 @@ public enum ScanMath {
         return MeshStats(axisA: ext.x, axisB: ext.y, axisC: ext.z, volumeCM3: vol,
                          triangleCount: indices.count / 3, vertexCount: positions.count,
                          isClosed: isClosed(indices: canonicalIndices(positions: positions, indices: indices)),
-                         medianEdgeMM: medianEdgeLength(positions: positions, indices: indices).map { $0 * unitToMM })
+                         medianEdgeMM: medianEdgeLength(positions: positions, indices: indices).map { $0 * unitToMM },
+                         upright: uprightSize(positions: positions, up: 1, unitToMM: unitToMM))
     }
 
     /// Median length of the triangle edges (each triangle's three edges counted), in input units.

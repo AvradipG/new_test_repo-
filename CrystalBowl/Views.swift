@@ -78,6 +78,28 @@ struct HomeView: View {
                 if let update = model.updateAvailable {
                     Section { UpdateBanner(remote: update) }
                 }
+                if !model.scansNeedingRepair.isEmpty {
+                    Section {
+                        Button {
+                            Task { await model.repairAll() }
+                        } label: {
+                            HStack(spacing: 12) {
+                                if model.repairing.isEmpty {
+                                    Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(.orange)
+                                } else {
+                                    ProgressView()
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Add full dimensions to \(model.scansNeedingRepair.count) older scan\(model.scansNeedingRepair.count == 1 ? "" : "s")")
+                                        .font(.headline)
+                                    Text("Re-measures each saved model, re-cuts its slices with sizes on every slice and adds a height profile. Photos aren't needed.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .disabled(!model.repairing.isEmpty)
+                    }
+                }
                 Section {
                     TextField("Sample ID, e.g. CNPC-2H plug 3", text: $sampleName)
                         .textInputAutocapitalization(.never)
@@ -484,6 +506,22 @@ struct ScanDetailView: View {
                         }
                     }
                 }
+                if scan.needsRepair {
+                    Section {
+                        Button {
+                            Task { await model.repair(scan) }
+                        } label: {
+                            if model.repairing.contains(scan.id) {
+                                HStack(spacing: 10) { ProgressView(); Text("Repairing: measuring and re-cutting…") }
+                            } else {
+                                Label("Repair: add full dimensions to this scan", systemImage: "wrench.and.screwdriver.fill")
+                            }
+                        }
+                        .disabled(model.repairing.contains(scan.id))
+                    } footer: {
+                        Text("This scan was made with an older version: its slices lack sizes or it has no height profile. Repair re-measures the saved model; photos aren't needed.")
+                    }
+                }
                 if scan.hasModel {
                     shareSection(scan)
                     driveSection(scan)
@@ -625,6 +663,11 @@ struct ScanDetailView: View {
             if !s.isClosed {
                 Text("The mesh has small gaps, so the volume is approximate.").font(.footnote).foregroundStyle(.secondary)
             }
+            if let u = s.upright {
+                LabeledContent("Height (as scanned)", value: String(format: "%.1f mm", u.heightMM * f))
+                LabeledContent("Footprint L × W", value: String(format: "%.1f × %.1f mm", u.lengthMM * f, u.widthMM * f))
+                LabeledContent("Widest across", value: String(format: "%.1f mm", u.maxDiameterMM * f))
+            }
             if let e = s.medianEdgeMM {
                 LabeledContent("Mesh detail", value: String(format: "%.2f mm edges", e))
             }
@@ -657,7 +700,7 @@ struct CaliperSection: View {
         Section {
             if let c = scan.caliper {
                 let f = scan.scaleFactor
-                let axisName = ["a", "b", "c"][max(0, min(2, c.axis))]
+                let axisName = c.axisName
                 LabeledContent("Calipers, axis \(axisName)", value: String(format: "%.2f mm", c.measuredMM))
                 LabeledContent("Scan, axis \(axisName)", value: String(format: "%.2f mm", c.measuredMM / f))
                 LabeledContent("Scan scale error", value: String(format: "%+.2f %%", (1 / f - 1) * 100))
@@ -667,6 +710,9 @@ struct CaliperSection: View {
                     Text(String(format: "a %.1f", stats.axisA)).tag(0)
                     Text(String(format: "b %.1f", stats.axisB)).tag(1)
                     Text(String(format: "c %.1f", stats.axisC)).tag(2)
+                    if let u = stats.upright {
+                        Text(String(format: "h %.1f", u.heightMM)).tag(3)
+                    }
                 }
                 .pickerStyle(.segmented)
                 TextField("Length measured with calipers, mm", text: $text)
@@ -738,14 +784,14 @@ struct SectionsPanel: View {
                 if s.rows.count > 1 {
                     Slider(value: $index, in: 0...Double(s.rows.count - 1), step: 1)
                 }
-                Text(String(format: "%@-axis slice %d of %d · depth %.1f mm", s.axisName, i + 1, s.rows.count, row.depthMM))
+                Text(String(format: "%@ slice %d of %d · %@ %.1f mm", s.title, i + 1, s.rows.count, s.isHeightProfile ? "height" : "depth", row.depthMM))
                     .font(.callout.monospacedDigit())
                 Text(row.measurementText)
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 if (scan.sections ?? []).count > 1 {
                     Picker("Stack", selection: Binding(get: { series?.id ?? "" }, set: { seriesID = $0; index = 0; zipURL = nil })) {
                         ForEach(scan.sections ?? []) { s in
-                            Text("\(s.axisName)-axis · every \(SectionSeries.format(s.spacingMM)) mm").tag(s.id)
+                            Text("\(s.title) · every \(SectionSeries.format(s.spacingMM)) mm").tag(s.id)
                         }
                     }
                 }
@@ -765,7 +811,7 @@ struct SectionsPanel: View {
         } header: {
             Text("Cross-sections")
         } footer: {
-            Text("Slices are cut across the rock's own axes: a is the longest, c the shortest. They show the outer outline at each depth. A surface scan can't see inside the rock.")
+            Text("Slices are cut across the rock's own axes (a longest, c shortest) or, for the height profile, horizontally up the model as it stood. Every slice gives its widest and narrowest size from the outline; area needs a closed outline. A surface scan can't see inside the rock.")
         }
 
         Section("Cut a new stack") {
@@ -773,6 +819,7 @@ struct SectionsPanel: View {
                 Text("a (long)").tag(0)
                 Text("b").tag(1)
                 Text("c (short)").tag(2)
+                Text("height").tag(3)
             }
             .pickerStyle(.segmented)
             Picker("Spacing", selection: $spacing) {
