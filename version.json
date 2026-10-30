@@ -1,0 +1,13 @@
+{
+  "version": "1.7",
+  "build": 17,
+  "commit": "2fc9e13",
+  "date": "2026-10-30T23:42Z",
+  "notes": [
+    "Every slice now has its size even when its outline is open: widest diameter, narrowest width and extents in mm",
+    "New height profile: horizontal slices up the rock as it stood, with the width at every height",
+    "Upright size on the scan page: height, footprint length x width and widest distance across",
+    "Every export carries a dimensions.json with all overall sizes, including each shared slice stack",
+    "Older scans: tap Repair (or Add full dimensions on the home screen) to re-measure and re-cut them from the saved model"
+  ]
+}
