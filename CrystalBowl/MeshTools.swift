@@ -61,11 +61,25 @@ enum MeshTools {
                 urls.append(out)
             }
         }
-        let report = scan.exportsURL.appendingPathComponent("\(scan.fileStem)-report.txt")
-        if (try? reportText(scan).write(to: report, atomically: true, encoding: .utf8)) != nil {
-            urls.append(report)
-        }
+        if let report = writeReport(scan) { urls.append(report) }
         return urls
+    }
+
+    /// Writes (or rewrites) the text report next to the lab formats.
+    @discardableResult
+    static func writeReport(_ scan: Scan) -> URL? {
+        try? FileManager.default.createDirectory(at: scan.exportsURL, withIntermediateDirectories: true)
+        let report = scan.exportsURL.appendingPathComponent("\(scan.fileStem)-report.txt")
+        return (try? reportText(scan).write(to: report, atomically: true, encoding: .utf8)) != nil ? report : nil
+    }
+
+    /// Lab files already written for a scan (USDZ first), without regenerating anything.
+    static func existingExports(_ scan: Scan) -> [URL] {
+        guard scan.hasModel else { return [] }
+        let fm = FileManager.default
+        let others = ["stl", "ply", "obj", "mtl"].map { scan.exportsURL.appendingPathComponent("\(scan.fileStem).\($0)") }
+            + [scan.exportsURL.appendingPathComponent("\(scan.fileStem)-report.txt")]
+        return [scan.modelURL] + others.filter { fm.fileExists(atPath: $0.path) }
     }
 
     static func reportText(_ scan: Scan) -> String {
@@ -81,8 +95,23 @@ enum MeshTools {
             lines.append(String(format: "Principal axes a × b × c: %.1f × %.1f × %.1f mm", s.axisA, s.axisB, s.axisC))
             lines.append(String(format: "Volume: %.2f cm³ (%@)", s.volumeCM3, s.isClosed ? "closed mesh" : "mesh has gaps, approximate"))
             lines.append("Triangles: \(s.triangleCount), vertices: \(s.vertexCount)")
+            if let e = s.medianEdgeMM {
+                lines.append(String(format: "Mesh detail: median triangle edge %.2f mm (features smaller than this are smoothed out)", e))
+            }
+            if let c = scan.caliper {
+                let axisName = ["a", "b", "c"][max(0, min(2, c.axis))]
+                let f = scan.scaleFactor
+                lines.append(String(format: "Caliper check: %@ = %.2f mm measured; scan %.2f mm; scan is %+.1f%% off", axisName, c.measuredMM, c.measuredMM / f, (1 / f - 1) * 100))
+                lines.append(String(format: "Caliper-corrected axes a × b × c: %.1f × %.1f × %.1f mm, volume %.2f cm³ (multiply mesh coordinates by %.4f)",
+                                    s.axisA * f, s.axisB * f, s.axisC * f, s.volumeCM3 * f * f * f, f))
+            }
         }
-        lines.append("Scale comes from the iPhone LiDAR. Check one axis with calipers before relying on it.")
+        if let cov = scan.coverage, cov.count == 3 {
+            lines.append(String(format: "Photo coverage of the last side (low / middle / high): %.0f%% / %.0f%% / %.0f%%", cov[0] * 100, cov[1] * 100, cov[2] * 100))
+        }
+        lines.append(scan.caliper == nil
+            ? "Scale comes from the iPhone LiDAR. Check one axis with calipers before relying on it."
+            : "Mesh files keep the LiDAR scale; apply the caliper factor above for corrected coordinates.")
         return lines.joined(separator: "\n") + "\n"
     }
 }

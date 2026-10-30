@@ -9,7 +9,8 @@ extension AppModel {
     private static let readmeIDKey = "drive.readmeID"
 
     var autoUpload: Bool { UserDefaults.standard.object(forKey: Self.autoUploadKey) as? Bool ?? true }
-    var uploadPhotos: Bool { UserDefaults.standard.bool(forKey: Self.uploadPhotosKey) }
+    /// On by default: the original photos let a Mac or PC rebuild the model at full detail later.
+    var uploadPhotos: Bool { UserDefaults.standard.object(forKey: Self.uploadPhotosKey) as? Bool ?? true }
 
     func refreshDriveAccount() {
         driveSignedIn = GoogleAuth.shared.isSignedIn

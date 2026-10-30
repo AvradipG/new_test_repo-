@@ -12,10 +12,14 @@ public struct MeshStats: Codable, Hashable, Sendable {
     public var vertexCount: Int
     /// True when every edge is shared by exactly two triangles (watertight mesh).
     public var isClosed: Bool
+    /// Median triangle edge length in millimetres: the finest detail the mesh can show. Nil for scans measured before 1.5.
+    public var medianEdgeMM: Double?
 
-    public init(axisA: Double, axisB: Double, axisC: Double, volumeCM3: Double, triangleCount: Int, vertexCount: Int, isClosed: Bool) {
+    public init(axisA: Double, axisB: Double, axisC: Double, volumeCM3: Double, triangleCount: Int, vertexCount: Int, isClosed: Bool,
+                medianEdgeMM: Double? = nil) {
         self.axisA = axisA; self.axisB = axisB; self.axisC = axisC
         self.volumeCM3 = volumeCM3; self.triangleCount = triangleCount; self.vertexCount = vertexCount; self.isClosed = isClosed
+        self.medianEdgeMM = medianEdgeMM
     }
 }
 
@@ -123,7 +127,26 @@ public enum ScanMath {
         let vol = abs(signedVolume(positions: positions, indices: indices)) * pow(unitToMM, 3) / 1000
         return MeshStats(axisA: ext.x, axisB: ext.y, axisC: ext.z, volumeCM3: vol,
                          triangleCount: indices.count / 3, vertexCount: positions.count,
-                         isClosed: isClosed(indices: indices))
+                         isClosed: isClosed(indices: indices),
+                         medianEdgeMM: medianEdgeLength(positions: positions, indices: indices).map { $0 * unitToMM })
+    }
+
+    /// Median length of the triangle edges (each triangle's three edges counted), in input units.
+    public static func medianEdgeLength(positions: [SIMD3<Float>], indices: [UInt32]) -> Double? {
+        var lengths: [Double] = []
+        lengths.reserveCapacity(indices.count)
+        var i = 0
+        while i + 2 < indices.count {
+            let a = SIMD3<Double>(positions[Int(indices[i])])
+            let b = SIMD3<Double>(positions[Int(indices[i + 1])])
+            let c = SIMD3<Double>(positions[Int(indices[i + 2])])
+            for d in [b - a, c - b, a - c] { lengths.append(vdot(d, d).squareRoot()) }
+            i += 3
+        }
+        guard !lengths.isEmpty else { return nil }
+        lengths.sort()
+        let mid = lengths.count / 2
+        return lengths.count % 2 == 1 ? lengths[mid] : (lengths[mid - 1] + lengths[mid]) / 2
     }
 }
 

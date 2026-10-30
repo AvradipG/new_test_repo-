@@ -9,7 +9,8 @@ No Mac is needed for that: GitHub builds, signs and uploads in the cloud. A MacB
 ## Layout
 - `CrystalBowl/`: app code. `AppModel.swift` (capture and reconstruction flow), `Views.swift` (all screens),
   `CrossSections.swift` (slice PNG/CSV output), `MeshTools.swift` (Model I/O load, measure, export),
-  `ScanStore.swift` (scan folders in Documents/Scans), `Updates.swift` (update check, About, problem report).
+  `ScanStore.swift` (scan folders in Documents/Scans), `Updates.swift` (update check, About, problem report),
+  `CaptureGuide.swift` (hand-held guidance: Core Motion heading and camera tilt, coverage map, haptics, gap advice).
 - `Packages/ScanMath/`: platform-independent maths (principal axes, volume, mesh slicing) with XCTest tests.
 - `project.yml`: XcodeGen spec; the Xcode project is generated in CI and not committed.
 - `ReleaseNotes.md`: newest section first. Its bullets are shown in the app's update banner.

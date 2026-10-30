@@ -306,6 +306,11 @@ enum NetworkState {
 enum ScanPackage {
     static let rootFolder = "Crystal Bowl Scans"
 
+    static func f8601(_ d: Date) -> String { ISO8601DateFormatter().string(from: d) }
+
+    /// Web link to a scan's Drive folder.
+    static func folderLink(_ id: String) -> URL? { URL(string: "https://drive.google.com/drive/folders/\(id)") }
+
     /// Files that belong in the Drive copy, as (relative path, local URL), manifest excluded.
     static func files(for scan: Scan, includePhotos: Bool) -> [(String, URL)] {
         let fm = FileManager.default
@@ -369,7 +374,34 @@ enum ScanPackage {
                 "volume_cm3": s.volumeCM3, "mesh_closed": s.isClosed,
                 "triangles": s.triangleCount, "vertices": s.vertexCount,
                 "volume_note": s.isClosed ? "closed mesh" : "mesh has gaps; volume approximate",
+                "median_edge_mm": s.medianEdgeMM ?? NSNull(),
             ] as [String: Any]
+            if scan.caliper != nil {
+                let f = scan.scaleFactor
+                measurements = [
+                    "principal_axes_mm": ["a": s.axisA, "b": s.axisB, "c": s.axisC],
+                    "principal_axes_mm_caliper_corrected": ["a": s.axisA * f, "b": s.axisB * f, "c": s.axisC * f],
+                    "volume_cm3": s.volumeCM3, "volume_cm3_caliper_corrected": s.volumeCM3 * f * f * f,
+                    "mesh_closed": s.isClosed, "triangles": s.triangleCount, "vertices": s.vertexCount,
+                    "volume_note": s.isClosed ? "closed mesh" : "mesh has gaps; volume approximate",
+                    "median_edge_mm": s.medianEdgeMM ?? NSNull(),
+                ] as [String: Any]
+            }
+        }
+        var scale: [String: Any] = ["source": "iPhone LiDAR / ARKit tracking", "independently_validated": false]
+        if let c = scan.caliper {
+            let f = scan.scaleFactor
+            scale["independently_validated"] = true
+            scale["caliper_check"] = [
+                "axis": ["a", "b", "c"][max(0, min(2, c.axis))], "measured_mm": c.measuredMM,
+                "model_mm": c.measuredMM / f, "factor": f, "date_utc": f8601(c.date),
+                "apply": "multiply mesh coordinates by factor for caliper-corrected geometry",
+            ] as [String: Any]
+        }
+        var coverage: Any = NSNull()
+        if let cov = scan.coverage, cov.count == 3 {
+            coverage = ["low": cov[0], "middle": cov[1], "high": cov[2],
+                        "note": "share of 15° sectors with photos on the last side scanned, by camera height"] as [String: Any]
         }
         let sections: [[String: Any]] = (scan.sections ?? []).map { s in
             ["axis": s.axisName, "spacing_mm": s.spacingMM, "count": s.rows.count,
@@ -391,20 +423,23 @@ enum ScanPackage {
                 "placements_note": "passes after the first follow a flip of the specimen; Object Capture aligns them internally",
                 "photo_count": scan.photoCount ?? NSNull(),
                 "original_photos_in_package": photosUploaded,
+                "guidance": "hand-held, motion-sensor coverage map with haptic cues",
+                "coverage_last_side": coverage,
             ] as [String: Any],
             "reconstruction": [
                 "engine": "RealityKit PhotogrammetrySession (on device)",
-                "detail": "reduced",
+                "detail": "reduced (the only level iOS builds on the phone; rebuild from images/ on a Mac for full detail)",
+                "sample_ordering": "sequential",
                 "units": "m", "up_axis": "+Y",
                 "coordinate_frame": "Object Capture model frame",
             ],
-            "scale": ["source": "iPhone LiDAR / ARKit tracking", "independently_validated": false],
+            "scale": scale,
             "measurements": measurements,
             "sections": sections,
             "files": fileList,
             "limitations": [
                 "Exterior surface only; not CT. Cross-sections show the outer outline.",
-                "Scale not validated against a reference; check one axis with calipers.",
+                scan.caliper == nil ? "Scale not validated against a reference; check one axis with calipers." : "Scale checked on one axis with calipers; see scale.caliper_check.",
                 "STL carries no units; it is in metres like the other mesh files.",
             ],
         ]

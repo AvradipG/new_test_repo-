@@ -33,6 +33,14 @@ final class ScanMathTests: XCTestCase {
         XCTAssertFalse(ScanMath.isClosed(indices: Array(f.dropLast(3))))
     }
 
+    func testMedianEdgeLength() {
+        let p: [SIMD3<Float>] = [SIMD3(0, 0, 0), SIMD3(0.003, 0, 0), SIMD3(0, 0.004, 0)] // 3-4-5 triangle, metres
+        let m = ScanMath.medianEdgeLength(positions: p, indices: [0, 1, 2])
+        XCTAssertEqual(m ?? 0, 0.004, accuracy: 1e-9)
+        XCTAssertNil(ScanMath.medianEdgeLength(positions: p, indices: []))
+        XCTAssertEqual(ScanMath.stats(positions: p, indices: [0, 1, 2]).medianEdgeMM ?? 0, 4, accuracy: 1e-6)
+    }
+
     func testRotatedBoxAxes() {
         let (p, _) = box(0.04, 0.02, 0.01) // metres
         let r = rotate(p, z: 0.52, x: 0.35)

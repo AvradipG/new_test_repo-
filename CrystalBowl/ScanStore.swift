@@ -11,6 +11,17 @@ struct Scan: Identifiable, Codable, Hashable {
     var stats: MeshStats?
     var sections: [SectionSeries]?
     var drive: DriveSync?
+    /// Share of the ring covered by photos on the last side scanned: low, middle and high camera heights (0…1).
+    var coverage: [Double]?
+    /// A length measured with calipers, used to check and correct the scan's scale.
+    var caliper: CaliperCheck?
+
+    /// Correction factor from a caliper check (1 when there is none).
+    var scaleFactor: Double {
+        guard let c = caliper, let s = stats else { return 1 }
+        let model = [s.axisA, s.axisB, s.axisC][max(0, min(2, c.axis))]
+        return model > 0 && c.measuredMM > 0 ? c.measuredMM / model : 1
+    }
 
     var folderURL: URL { ScanStore.root.appendingPathComponent(id, isDirectory: true) }
     var imagesURL: URL { folderURL.appendingPathComponent("Images", isDirectory: true) }
@@ -27,6 +38,13 @@ struct Scan: Identifiable, Codable, Hashable {
         let trimmed = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         return trimmed.isEmpty ? id : trimmed
     }
+}
+
+struct CaliperCheck: Codable, Hashable {
+    /// 0 = a (longest), 1 = b, 2 = c (shortest).
+    var axis: Int
+    var measuredMM: Double
+    var date: Date
 }
 
 enum ScanStore {

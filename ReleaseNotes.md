@@ -3,6 +3,14 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.5
+- Vibration guide while scanning by hand: a tick for each photo, a buzz to slow down, keep going the same way or change height
+- A coverage ring shows where photos are missing; after a pass the app tells you exactly where to stand to fill the gaps
+- Scale check: enter one length measured with calipers and the measurements are corrected
+- New colourful home screen; share all model files in one tap; the scan page shows and opens its Google Drive folder
+- Sample names keep the letters you type (no forced capitals)
+- Original photos upload to Drive on Wi-Fi by default, so the model can be rebuilt at full detail on a Mac
+
 ## 1.4
 - Building a 3D model no longer stops at 100%: the app goes on to measure the sample and cut the cross-sections
 - A scan that stopped at 100% shows its model: open it and tap Measure

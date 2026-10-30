@@ -34,6 +34,8 @@ final class AppModel: ObservableObject {
     @Published var progress: Double = 0
     @Published var progressNote = ""
 
+    let guide = CaptureGuide()
+
     private(set) var currentScan: Scan?
     private var pollTask: Task<Void, Never>?
     private var cancelling = false
@@ -70,13 +72,14 @@ final class AppModel: ObservableObject {
             cancelling = false
             phase = .capturing
             UIApplication.shared.isIdleTimerDisabled = true
+            guide.start()
             startPolling(session)
         } catch {
             errorMessage = "Couldn't create the scan folder: \(error.localizedDescription)"
         }
     }
 
-    /// Mirrors the session's state into published properties a few times a second.
+    /// Mirrors the session's state into published properties ten times a second and drives the capture guide.
     private func startPolling(_ session: ObjectCaptureSession) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
@@ -84,7 +87,7 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 self.sync(session)
                 if self.captureStage == .completed || self.captureStage == .failed { return }
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                try? await Task.sleep(nanoseconds: 100_000_000)
             }
         }
     }
@@ -104,9 +107,12 @@ final class AppModel: ObservableObject {
             return
         @unknown default: break
         }
+        let wasCompleted = passCompleted
         passCompleted = session.userCompletedScanPass
         shotCount = session.numberOfShotsTaken
         feedbackText = Self.describe(session.feedback)
+        guide.update(shotCount: shotCount, capturing: captureStage == .capturing && !passCompleted, feedback: feedbackText)
+        if passCompleted && !wasCompleted { guide.passCompleted() }
         if captureStage == .completed && previous != .completed { captureFinished() }
     }
 
@@ -135,11 +141,13 @@ final class AppModel: ObservableObject {
 
     func flipAndContinue() {
         captureSession?.beginNewScanPassAfterFlip()
+        guide.newPass(flipped: true)
         passNumber += 1
     }
 
     func anotherPass() {
         captureSession?.beginNewScanPass()
+        guide.newPass(flipped: false)
         passNumber += 1
     }
 
@@ -159,6 +167,7 @@ final class AppModel: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         captureSession = nil
+        guide.stop()
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
@@ -179,6 +188,7 @@ final class AppModel: ObservableObject {
         guard var scan = currentScan else { phase = .home; return }
         scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL)
         scan.passes = passNumber
+        scan.coverage = guide.bandCoverage
         try? ScanStore.save(scan)
         currentScan = scan
         reconstruct(scan)
@@ -206,6 +216,8 @@ final class AppModel: ObservableObject {
         do {
             var config = PhotogrammetrySession.Configuration()
             config.checkpointDirectory = scan.checkpointURL
+            // Guided capture saves photos in the order they were taken, which lets matching start from neighbours.
+            config.sampleOrdering = .sequential
             let session = try PhotogrammetrySession(input: scan.imagesURL, configuration: config)
             try session.process(requests: [.modelFile(url: scan.modelURL)])
             var failure: Error?
@@ -243,6 +255,10 @@ final class AppModel: ObservableObject {
             }).value {
                 done.sections = [series]
             }
+            // Lab formats are written straight away so sharing and the Drive upload are ready when the scan opens.
+            progressNote = "Writing STL, PLY and OBJ…"
+            let finished = done
+            _ = await Task.detached { MeshTools.exportAll(finished) }.value
             // Photos waiting for a Drive upload are deleted after that upload instead.
             let photosGoToDrive = uploadPhotos && driveSignedIn
             if !UserDefaults.standard.bool(forKey: AppModel.keepPhotosKey) && !photosGoToDrive {
@@ -267,6 +283,19 @@ final class AppModel: ObservableObject {
         done.stats = await Task.detached { MeshTools.measure(url) }.value
         try? ScanStore.save(done)
         reload()
+    }
+
+    /// Stores a caliper measurement of one principal axis; measurements and the report then show the corrected scale.
+    func setCaliper(_ scan: Scan, axis: Int, measuredMM: Double?) {
+        var updated = scans.first { $0.id == scan.id } ?? scan
+        updated.caliper = measuredMM.map { CaliperCheck(axis: axis, measuredMM: $0, date: Date()) }
+        try? ScanStore.save(updated)
+        if updated.hasModel {
+            let s = updated
+            _ = MeshTools.writeReport(s)
+        }
+        reload()
+        Task { await syncAllPending() }
     }
 
     static let keepPhotosKey = "keepPhotos"
