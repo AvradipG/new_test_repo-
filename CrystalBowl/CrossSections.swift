@@ -209,10 +209,10 @@ enum CrossSectionMaker {
                 let big: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 18, weight: .semibold), .foregroundColor: UIColor.white]
                 let small: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .regular), .foregroundColor: UIColor(white: 0.8, alpha: 1)]
                 (title as NSString).draw(at: CGPoint(x: Self.margin, y: 12), withAttributes: big)
-                let size = row.maxFeretMM.map { String(format: " | max %.1f mm | min width %.1f mm", $0, row.minWidthMM ?? 0) } ?? ""
+                let sizeText = row.maxFeretMM.map { String(format: " | max %.1f mm | min width %.1f mm", $0, row.minWidthMM ?? 0) } ?? ""
                 let info = row.measurementsUsable
-                    ? String(format: "%@ %.1f mm%@ | area %.1f mm2", depthLabel, row.depthMM, size, row.areaMM2)
-                    : String(format: "%@ %.1f mm%@ | outline open: no area", depthLabel, row.depthMM, size)
+                    ? String(format: "%@ %.1f mm%@ | area %.1f mm2", depthLabel, row.depthMM, sizeText, row.areaMM2)
+                    : String(format: "%@ %.1f mm%@ | outline open: no area", depthLabel, row.depthMM, sizeText)
                 (info as NSString).draw(at: CGPoint(x: Self.margin, y: 36), withAttributes: small)
                 // 10 mm scale bar
                 let barLen = CGFloat(10 * pxPerMM)
