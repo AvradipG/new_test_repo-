@@ -13,6 +13,7 @@ so write them for the person using the app.
 - Close-up camera for surface patterns: uses all lenses, keeps the rock in focus, zooms to it, tap to focus
 - Connect Google Drive by tapping it on the home screen and choosing a folder in the Google Drive app: no sign-in setup
 - Touch and hold a scan to rename, share, copy its dimensions or delete it; search your scans
+- No more Apple Vision Pro warning emails with each new version
 
 ## 1.7
 - Every slice now has its size even when its outline is open: widest diameter, narrowest width and extents in mm
