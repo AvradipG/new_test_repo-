@@ -78,7 +78,10 @@ enum MeshTools {
             "app_version": AppInfo.version, "app_build": AppInfo.build,
             "scale_source": scan.caliper == nil ? "iPhone LiDAR, not independently checked" : "iPhone LiDAR, checked with calipers (see caliper_check)",
             "notes": [
-                "principal_axes_mm: the model's own axes, a longest, c shortest (extents along PCA axes)",
+                "principal_axes_mm: a >= b >= c, sides of the smallest box around the rock (from 1.8; PCA extents before)",
+                "box_mm: smallest box and 3D Feret diameters (largest point-to-point distance, narrowest caliper width)",
+                "micro_ct: height as scanned and the smallest vertical cylinder that holds the rock (rotation clearance)",
+                "loose pieces under 5 % of the surface area (fragments, bits of table) are left out of all sizes",
                 "upright_as_scanned_mm: height along model +Y (up during capture); length x width is the smallest rectangle around the footprint seen from above; max_diameter is the widest horizontal distance",
                 "whole model: a holder or billets scanned with the rock are included",
                 "exterior surface only, not CT",
@@ -95,8 +98,18 @@ enum MeshTools {
         if let e = s.medianEdgeMM { d["median_edge_mm"] = e }
         if let u = s.upright {
             d["upright_as_scanned_mm"] = ["height": u.heightMM, "length": u.lengthMM, "width": u.widthMM,
-                                          "max_diameter": u.maxDiameterMM, "min_width": u.minWidthMM]
+                                          "max_diameter": u.maxDiameterMM, "min_width": u.minWidthMM,
+                                          "cylinder_diameter": u.cylinderDiameterMM ?? NSNull()] as [String: Any]
+            d["micro_ct"] = ["height_mm": u.heightMM * f,
+                             "cylinder_diameter_mm": (u.cylinderDiameterMM ?? u.maxDiameterMM) * f,
+                             "scale": scan.caliper == nil ? "LiDAR" : "caliper-corrected"] as [String: Any]
         }
+        if let b = s.box {
+            d["box_mm"] = ["length": b.lengthMM, "width": b.widthMM, "thickness": b.thicknessMM,
+                           "max_feret": b.maxFeretMM, "min_feret": b.minFeretMM]
+        }
+        if let k = s.keptAreaShare { d["main_body_area_share"] = k }
+        if let r = s.removedPieces { d["loose_pieces_dropped"] = r }
         if let c = scan.caliper {
             d["caliper_check"] = ["axis": c.axisName, "measured_mm": c.measuredMM, "model_mm": c.measuredMM / f, "factor": f] as [String: Any]
             var corrected: [String: Double] = ["a": s.axisA * f, "b": s.axisB * f, "c": s.axisC * f, "volume_cm3": s.volumeCM3 * f * f * f]
@@ -147,6 +160,16 @@ enum MeshTools {
             if let u = s.upright {
                 lines.append(String(format: "Upright as scanned: height %.1f mm; footprint %.1f × %.1f mm; widest across %.1f mm; narrowest %.1f mm",
                                     u.heightMM, u.lengthMM, u.widthMM, u.maxDiameterMM, u.minWidthMM))
+                if let cyl = u.cylinderDiameterMM {
+                    lines.append(String(format: "Micro-CT: fits a vertical cylinder Ø %.1f mm × %.1f mm high (as scanned, LiDAR scale)", cyl, u.heightMM))
+                }
+            }
+            if let b = s.box {
+                lines.append(String(format: "3D Feret: largest %.1f mm, narrowest %.1f mm. Sizes a × b × c are the smallest box around the rock.",
+                                    b.maxFeretMM, b.minFeretMM))
+            }
+            if let r = s.removedPieces, r > 0 {
+                lines.append("Loose pieces left out of the sizes: \(r) (\(String(format: "%.1f", (1 - (s.keptAreaShare ?? 1)) * 100)) % of the surface)")
             }
             if let c = scan.caliper {
                 let axisName = c.axisName
@@ -155,6 +178,15 @@ enum MeshTools {
                 lines.append(String(format: "Caliper-corrected axes a × b × c: %.1f × %.1f × %.1f mm, volume %.2f cm³ (multiply mesh coordinates by %.4f)",
                                     s.axisA * f, s.axisB * f, s.axisC * f, s.volumeCM3 * f * f * f, f))
             }
+        }
+        if let b = scan.blurrySetAside, b > 0 {
+            lines.append("Blurred photos left out of the model: \(b)")
+        }
+        if scan.detailCount > 0 {
+            lines.append("Close-up detail photos: \(scan.detailCount) (Detail/, not used for the model)")
+        }
+        if let c = scan.caliper, let from = c.fromScanID {
+            lines.append("Caliper check taken over from the earlier scan \(from) of the same sample")
         }
         if let cov = scan.coverage, cov.count == 3 {
             lines.append(String(format: "Photo coverage of the last side (low / middle / high): %.0f%% / %.0f%% / %.0f%%", cov[0] * 100, cov[1] * 100, cov[2] * 100))

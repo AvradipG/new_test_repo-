@@ -200,4 +200,54 @@ final class ScanMathTests: XCTestCase {
             XCTAssertEqual(sec.outlineSize?.extentV ?? 0, 0.03, accuracy: 1e-6)
         }
     }
+    func testBoxSizeIgnoresOrientationAndFragments() {
+        let (p, f) = box(0.06, 0.04, 0.03)
+        // A loose 2 mm crumb far away must not change the sizes.
+        let (cp, cf) = box(0.002, 0.002, 0.002)
+        let crumb = cp.map { $0 + SIMD3<Float>(0.2, 0, 0) }
+        let allP = rotate(p, z: 0.9, x: -0.6) + crumb
+        let allF = f + cf.map { $0 + UInt32(p.count) }
+        let s = ScanMath.stats(positions: allP, indices: allF)
+        XCTAssertEqual(s.removedPieces, 1)
+        XCTAssertEqual(s.axisA, 60, accuracy: 1e-3)
+        XCTAssertEqual(s.axisB, 40, accuracy: 1e-3)
+        XCTAssertEqual(s.axisC, 30, accuracy: 1e-3)
+        XCTAssertEqual(s.volumeCM3, 72, accuracy: 1e-3)
+        XCTAssertEqual(s.box?.maxFeretMM ?? 0, (60.0 * 60 + 40 * 40 + 30 * 30).squareRoot(), accuracy: 1e-3)
+        XCTAssertEqual(s.box?.minFeretMM ?? 0, 30, accuracy: 1e-3)
+    }
+
+    func testSeamSplitMeshIsOnePiece() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let split = f.map { p[Int($0)] } // every triangle has its own vertices, as at texture seams
+        let ids = (0..<split.count).map { UInt32($0) }
+        let body = ScanMath.mainBody(positions: split, indices: ids)
+        XCTAssertEqual(body.removedPieces, 0)
+        XCTAssertEqual(body.indices.count, ids.count)
+    }
+
+    func testEnclosingCircleAndCylinder() {
+        let square: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(2, 0), SIMD2(2, 2), SIMD2(0, 2), SIMD2(1, 1), SIMD2(0.5, 1.5)]
+        let c = ScanMath.enclosingCircle(square)
+        XCTAssertEqual(c.radius, 2.0.squareRoot(), accuracy: 1e-9)
+        XCTAssertEqual(c.center.x, 1, accuracy: 1e-9)
+        XCTAssertEqual(c.center.y, 1, accuracy: 1e-9)
+        let tri: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(10, 0), SIMD2(5, 1)] // obtuse: circle on the long side
+        XCTAssertEqual(ScanMath.enclosingCircle(tri).radius, 5, accuracy: 1e-9)
+        let (p, _) = uprightBox()
+        XCTAssertEqual(ScanMath.uprightSize(positions: p)?.cylinderDiameterMM ?? 0, (50.0 * 50 + 30 * 30).squareRoot(), accuracy: 1e-3)
+    }
+
+    func testSharpnessAndBlurryPhotos() {
+        let w = 32, h = 32
+        let checker = (0..<(w * h)).map { Float(($0 % w / 2 + $0 / w / 2) % 2) }
+        let flat = [Float](repeating: 0.5, count: w * h)
+        XCTAssertGreaterThan(ScanMath.sharpness(gray: checker, width: w, height: h), 1)
+        XCTAssertEqual(ScanMath.sharpness(gray: flat, width: w, height: h), 0, accuracy: 1e-12)
+        var scores = [Double](repeating: 10, count: 20)
+        scores[3] = 1; scores[7] = 2; scores[9] = .nan
+        XCTAssertEqual(ScanMath.blurryIndices(scores), [3, 7])
+        XCTAssertEqual(ScanMath.blurryIndices(scores, maxFraction: 0.05), [3])
+        XCTAssertEqual(ScanMath.blurryIndices(Array(scores.prefix(5))), [])
+    }
 }

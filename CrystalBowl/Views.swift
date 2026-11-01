@@ -34,8 +34,6 @@ struct RootView: View {
                 } else {
                     ProgressView("Starting camera…")
                 }
-            case .reconstructing:
-                ReconstructionView()
             }
         }
         .tint(Theme.violet)
@@ -50,10 +48,13 @@ struct RootView: View {
         .task { await model.checkForUpdate() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
+                model.resumePendingBuilds()
                 Task {
                     await model.checkForUpdate()
                     await model.syncAllPending()
                 }
+            } else if phase == .background {
+                model.appMovedToBackground()
             }
         }
     }
@@ -66,14 +67,43 @@ struct HomeView: View {
     @State private var sampleName = ""
     @AppStorage(AppModel.keepPhotosKey) private var keepPhotos = false
     @AppStorage(CaptureGuide.hapticsKey) private var haptics = true
+    @AppStorage("scan.quick") private var quick = false
+    @State private var search = ""
+    @State private var renaming: Scan?
+    @State private var newName = ""
+    @State private var showDriveSetup = false
+    @State private var confirmDelete: Scan?
+
+    private var shownScans: [Scan] {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        return q.isEmpty ? model.scans : model.scans.filter { $0.name.lowercased().contains(q) || $0.id.contains(q) }
+    }
 
     var body: some View {
         NavigationStack(path: $model.path) {
             List {
                 Section {
-                    HeroCard(scanCount: model.scans.count, onDrive: model.scans.filter { $0.drive?.complete == true }.count)
+                    HeroCard(scanCount: model.scans.count,
+                             onDrive: model.scans.filter { $0.drive?.complete == true || $0.folderSync?.complete == true }.count,
+                             driveConnected: model.driveSignedIn || model.folderLinked) { showDriveSetup = true }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
+                }
+                if let notice = model.readyNotice {
+                    Section {
+                        ReadyCard(notice: notice) {
+                            if let scan = model.scans.first(where: { $0.id == notice.id }) { model.path = [scan] }
+                        } onDismiss: { model.readyNotice = nil }
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                    }
+                }
+                if model.buildingID != nil || !model.pendingBuilds.isEmpty {
+                    Section {
+                        BuildStatusRow()
+                    } footer: {
+                        Text("Building carries on while you use other apps or lock the phone; iOS shows its progress. If iOS pauses it, it continues from where it stopped when you open Crystal Bowl again.")
+                    }
                 }
                 if let update = model.updateAvailable {
                     Section { UpdateBanner(remote: update) }
@@ -101,6 +131,11 @@ struct HomeView: View {
                     }
                 }
                 Section {
+                    Picker("What do you need?", selection: $quick) {
+                        Text("Dimensions only").tag(true)
+                        Text("Dimensions + detail").tag(false)
+                    }
+                    .pickerStyle(.segmented)
                     TextField("Sample ID, e.g. CNPC-2H plug 3", text: $sampleName)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -123,19 +158,49 @@ struct HomeView: View {
                 } header: {
                     Text("New scan")
                 } footer: {
-                    Text("Put the rock on a textured, matte surface (a newspaper page works) in soft, even light, with room to walk all the way round.")
+                    Text(quick
+                         ? "Dimensions only: one slow walk round the rock, then the app builds the model in the background and tells you the height, footprint and the cylinder it needs in the micro-CT. Use the same Sample ID for repeat scans so they are compared."
+                         : "Dimensions + detail: walk round, flip the rock for the underside, then take close-ups of the surface with all lenses. Put the rock on a textured, matte surface (a newspaper page works) in soft, even light.")
                 }
 
-                Section("Scans") {
+                Section {
                     if model.scans.isEmpty {
-                        Text("No scans yet. Your scans appear here, in the Files app under On My iPhone › Crystal Bowl, and on Google Drive once you sign in.")
+                        Text("No scans yet. Your scans appear here, in the Files app under On My iPhone › Crystal Bowl, and on Google Drive once it is connected.")
                             .foregroundStyle(.secondary)
+                    } else if shownScans.isEmpty {
+                        Text("No scan matches \"\(search)\".").foregroundStyle(.secondary)
                     }
-                    ForEach(model.scans) { scan in
-                        NavigationLink(value: scan) { ScanRow(scan: scan) }
+                    ForEach(shownScans) { scan in
+                        NavigationLink(value: scan) {
+                            ScanRow(scan: scan, building: model.buildingID == scan.id, progress: model.progress,
+                                    repeats: model.repeats(of: scan).count)
+                        }
+                        .contextMenu {
+                            Button { newName = scan.name; renaming = scan } label: { Label("Rename", systemImage: "pencil") }
+                            if scan.hasModel {
+                                ShareLink(items: MeshTools.existingExports(scan)) { Label("Share model files", systemImage: "square.and.arrow.up") }
+                            }
+                            if scan.needsRepair {
+                                Button { Task { await model.repair(scan) } } label: { Label("Repair (add full dimensions)", systemImage: "wrench.and.screwdriver") }
+                            }
+                            if !scan.hasModel && scan.hasPhotos && scan.buildRequested != true {
+                                Button { model.reconstruct(scan) } label: { Label("Build model", systemImage: "cube") }
+                            }
+                            Button { UIPasteboard.general.string = model.dimensionsText(scan) } label: { Label("Copy dimensions", systemImage: "doc.on.doc") }
+                            Divider()
+                            Button(role: .destructive) { confirmDelete = scan } label: { Label("Delete", systemImage: "trash") }
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { confirmDelete = scan } label: { Label("Delete", systemImage: "trash") }
+                            Button { newName = scan.name; renaming = scan } label: { Label("Rename", systemImage: "pencil") }
+                                .tint(Theme.blue)
+                        }
                     }
-                    .onDelete { offsets in
-                        for i in offsets { model.delete(model.scans[i]) }
+                } header: {
+                    Text("Scans")
+                } footer: {
+                    if !model.scans.isEmpty {
+                        Text("Touch and hold a scan to rename, share, copy its dimensions or delete it. Swipe left for rename and delete.")
                     }
                 }
 
@@ -151,7 +216,9 @@ struct HomeView: View {
                     TipRow(icon: "arrow.triangle.2.circlepath", color: .pink,
                            text: "Flip the rock and scan the underside the same way, then Finish.")
                     TipRow(icon: "ruler.fill", color: .green,
-                           text: "On the scan page, enter one length measured with calipers to check and correct the scale.")
+                           text: "On the scan page, enter one length measured with calipers to check and correct the scale. Later scans with the same Sample ID take that check over.")
+                    TipRow(icon: "camera.macro", color: .purple,
+                           text: "For surface patterns, open the scan and tap Take close-ups: the app picks the lens, keeps the rock in focus and zooms to it. Tap the rock on the screen if it focuses on something else.")
                 }
 
                 DriveSettingsSection()
@@ -167,6 +234,29 @@ struct HomeView: View {
             }
             .navigationTitle("Crystal Bowl")
             .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $search, prompt: "Search scans")
+            .sheet(isPresented: $showDriveSetup) { DriveSetupSheet() }
+            .alert("Rename scan", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField("Sample ID", text: $newName)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Save") {
+                    if let scan = renaming { model.rename(scan, to: newName) }
+                    renaming = nil
+                }
+                Button("Cancel", role: .cancel) { renaming = nil }
+            } message: {
+                Text("Files and the Google Drive folder keep their original names; the new name is shown in the app, the report and manifest.json.")
+            }
+            .confirmationDialog("Delete this scan?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
+                                titleVisibility: .visible) {
+                Button("Delete \(confirmDelete?.name ?? "scan")", role: .destructive) {
+                    if let scan = confirmDelete { model.delete(scan) }
+                    confirmDelete = nil
+                }
+            } message: {
+                Text("The model, photos and slices on this iPhone are deleted. Copies on Google Drive stay.")
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -185,7 +275,7 @@ struct HomeView: View {
 
     private func start() {
         guard model.isCaptureSupported else { return }
-        model.startNewScan(name: sampleName)
+        model.startNewScan(name: sampleName, quick: quick)
         sampleName = ""
     }
 }
@@ -193,6 +283,8 @@ struct HomeView: View {
 struct HeroCard: View {
     let scanCount: Int
     let onDrive: Int
+    var driveConnected = false
+    var onDriveTap: () -> Void = {}
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
@@ -205,13 +297,69 @@ struct HeroCard: View {
             }
             HStack(spacing: 8) {
                 Chip(text: "\(scanCount) scan\(scanCount == 1 ? "" : "s")", icon: "square.stack.3d.up.fill")
-                Chip(text: "\(onDrive) on Drive", icon: "icloud.fill")
+                Button(action: onDriveTap) {
+                    Chip(text: driveConnected ? "\(onDrive) on Drive" : "Connect Google Drive",
+                         icon: driveConnected ? "icloud.fill" : "icloud.slash.fill")
+                }
+                .buttonStyle(.plain)
             }
         }
         .foregroundStyle(.white)
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 22))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onDriveTap)
+    }
+}
+
+/// Shown when a build has measured the rock: the sizes needed to centre it in the micro-CT come first.
+struct ReadyCard: View {
+    let notice: ReadyNotice
+    let onOpen: () -> Void
+    let onDismiss: () -> Void
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "checkmark.seal.fill").font(.title)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(notice.name): dimensions ready").font(.headline)
+                Text(notice.text).font(.callout.monospacedDigit())
+                Text("Enough to centre it in the micro-CT. The full model and files finish in the background.")
+                    .font(.caption).opacity(0.9)
+            }
+            Spacer(minLength: 0)
+            Button(action: onDismiss) { Image(systemName: "xmark.circle.fill").font(.title3) }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+        }
+        .foregroundStyle(.white)
+        .padding(16)
+        .background(LinearGradient(colors: [.green, Theme.teal], startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: 18))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onOpen)
+    }
+}
+
+/// Progress of the build running now and the builds waiting.
+struct BuildStatusRow: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let id = model.buildingID, let scan = model.scans.first(where: { $0.id == id }) {
+                Button { model.path = [scan] } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Building \(scan.name)", systemImage: "cube.transparent.fill").font(.headline)
+                        ProgressView(value: model.progress)
+                        Text(model.progressNote).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            ForEach(model.pendingBuilds) { scan in
+                Label("\(scan.name): waiting to build", systemImage: "clock").font(.callout).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -246,6 +394,9 @@ struct TipRow: View {
 
 struct ScanRow: View {
     let scan: Scan
+    var building = false
+    var progress = 0.0
+    var repeats = 0
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: scan.hasModel ? "cube.fill" : "camera.fill")
@@ -260,6 +411,10 @@ struct ScanRow: View {
                     if let s = scan.stats {
                         let f = scan.scaleFactor
                         Text(String(format: "%.1f × %.1f × %.1f mm", s.axisA * f, s.axisB * f, s.axisC * f)).monospacedDigit()
+                    } else if building {
+                        Text("Building… \(Int(progress * 100))%").foregroundStyle(Theme.violet).monospacedDigit()
+                    } else if scan.buildRequested == true {
+                        Text("Waiting to build").foregroundStyle(.orange)
                     } else if !scan.hasModel {
                         Text("No model yet").foregroundStyle(.orange)
                     }
@@ -270,7 +425,13 @@ struct ScanRow: View {
                         Chip(text: "On Drive", icon: "checkmark.icloud.fill", tint: .green).foregroundStyle(.green)
                     }
                     if scan.caliper != nil {
-                        Chip(text: "Caliper checked", icon: "ruler.fill", tint: Theme.blue).foregroundStyle(Theme.blue)
+                        Chip(text: "Caliper", icon: "ruler.fill", tint: Theme.blue).foregroundStyle(Theme.blue)
+                    }
+                    if scan.detailCount > 0 {
+                        Chip(text: "\(scan.detailCount) close-ups", icon: "camera.macro", tint: .purple).foregroundStyle(.purple)
+                    }
+                    if repeats > 1 {
+                        Chip(text: "\(repeats) scans", icon: "square.stack", tint: .orange).foregroundStyle(.orange)
                     }
                 }
             }
@@ -356,7 +517,9 @@ struct CaptureView: View {
                 VStack(spacing: 10) {
                     Text(guide.fillingGaps
                          ? "Go to the orange sectors on the ring. The phone bumps when you reach a gap."
-                         : "Walk slowly round the rock, about 30 cm away. Feel a tick for each photo; a buzz means slow down or change height.")
+                         : model.quickCapture
+                            ? "Dimensions only: one slow walk round the rock, 25–40 cm away. A tick for each photo; a buzz means slow down, change height or a blurred photo."
+                            : "Walk slowly round the rock, 25–40 cm away. Feel a tick for each photo; a buzz means slow down, change height or a blurred photo.")
                         .font(.callout)
                         .multilineTextAlignment(.center)
                     Button("Finish now") { model.finishCapture() }.buttonStyle(.bordered)
@@ -373,8 +536,14 @@ struct CaptureView: View {
         let advice = guide.advice()
         let cov = guide.bandCoverage
         let needsMore = !guide.gaps().isEmpty || cov[1] == 0 || cov[2] == 0
+        let enoughForSize = cov.max() ?? 0 >= 0.6
         return VStack(alignment: .leading, spacing: 10) {
             Text("Pass \(model.passNumber) complete").font(.headline)
+            if model.blurryShots > 0 {
+                Label("\(model.blurryShots) blurred photo\(model.blurryShots == 1 ? "" : "s"): those spots show as gaps and are left out of the model.",
+                      systemImage: "camera.metering.unknown")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             HStack(alignment: .top, spacing: 12) {
                 CoverageRing(coverage: guide.coverage, angle: guide.angle, current: nil, target: guide.fillingGaps ? guide.targetBand : nil)
                     .frame(width: 96, height: 96)
@@ -388,7 +557,18 @@ struct CaptureView: View {
                 }
                 .frame(maxHeight: 150)
             }
-            if needsMore {
+            if model.quickCapture && enoughForSize {
+                Button { model.finishCapture() } label: {
+                    Label("Get the dimensions now", systemImage: "ruler.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                Text("One ring is enough for height, footprint and the micro-CT cylinder. The underside isn't captured, so its shape is guessed flat.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button { model.anotherPass() } label: {
+                    Label("Fill the gaps first", systemImage: "circle.dashed").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            } else if needsMore {
                 Button { model.anotherPass() } label: {
                     Label("Fill the gaps on this side", systemImage: "circle.dashed").frame(maxWidth: .infinity)
                 }
@@ -407,10 +587,12 @@ struct CaptureView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            Button { model.finishCapture() } label: {
-                Label("Finish and build the model", systemImage: "cube.fill").frame(maxWidth: .infinity)
+            if !(model.quickCapture && enoughForSize) {
+                Button { model.finishCapture() } label: {
+                    Label("Finish and build the model", systemImage: "cube.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
         }
     }
 }
@@ -457,26 +639,6 @@ struct CoverageRing: View {
     }
 }
 
-// MARK: Reconstruction
-
-struct ReconstructionView: View {
-    @EnvironmentObject var model: AppModel
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "cube.transparent.fill")
-                .font(.system(size: 52, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 104, height: 104)
-                .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 26))
-            Text("Building 3D model").font(.title2.bold())
-            ProgressView(value: model.progress).frame(maxWidth: 280)
-            Text(model.progressNote).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-            Text("Keep the app open and the phone unlocked. This usually takes a few minutes. The model, lab files and cross-sections are then saved and uploaded to Google Drive by themselves.")
-                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 32)
-        }
-    }
-}
-
 // MARK: Scan detail
 
 struct ScanDetailView: View {
@@ -486,6 +648,10 @@ struct ScanDetailView: View {
     @State private var exporting = false
     @State private var measuring = false
     @State private var copied = false
+    @State private var showDetailCamera = false
+    @State private var renaming = false
+    @State private var newName = ""
+    @State private var confirmDelete = false
 
     private var scan: Scan? { model.scans.first { $0.id == scanID } }
 
@@ -497,6 +663,20 @@ struct ScanDetailView: View {
                         ModelPreview(url: scan.modelURL)
                             .frame(height: 320)
                             .listRowInsets(EdgeInsets())
+                    } else if model.buildingID == scan.id {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Building the 3D model", systemImage: "cube.transparent.fill").font(.headline)
+                            ProgressView(value: model.progress)
+                            Text(model.progressNote).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                            Text("You can use other apps or lock the phone. The dimensions come first; you'll get a notification.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else if scan.buildRequested == true {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Waiting to build", systemImage: "clock").font(.headline)
+                            Text("It starts by itself after the scan before it, or continues from where iOS paused it.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("No model yet. \(scan.photoCount ?? ScanStore.countPhotos(in: scan.imagesURL)) photos are saved.")
@@ -505,6 +685,9 @@ struct ScanDetailView: View {
                                 .disabled(!scan.hasPhotos)
                         }
                     }
+                }
+                if let s = scan.stats, let u = s.upright {
+                    microCTSection(scan, s, u)
                 }
                 if scan.needsRepair {
                     Section {
@@ -544,6 +727,8 @@ struct ScanDetailView: View {
                     }
                 }
                 if scan.hasModel {
+                    detailSection(scan)
+                    RepeatsSection(scan: scan, repeats: model.repeats(of: scan))
                     SectionsPanel(scan: scan)
                 }
                 Section {
@@ -551,11 +736,47 @@ struct ScanDetailView: View {
                     if scan.hasPhotos {
                         Button("Delete photos, keep model") { ScanStore.deletePhotos(scan); model.reload() }
                     }
-                    Button("Delete scan", role: .destructive) { model.delete(scan) }
+                    Button("Delete scan", role: .destructive) { confirmDelete = true }
                 }
             }
             .navigationTitle(scan.name)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { newName = scan.name; renaming = true } label: { Label("Rename", systemImage: "pencil") }
+                        Button { UIPasteboard.general.string = model.dimensionsText(scan) } label: { Label("Copy dimensions", systemImage: "doc.on.doc") }
+                        if scan.hasModel {
+                            Button { showDetailCamera = true } label: { Label("Take close-ups", systemImage: "camera.macro") }
+                        }
+                        Divider()
+                        Button(role: .destructive) { confirmDelete = true } label: { Label("Delete scan", systemImage: "trash") }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
+            .alert("Rename scan", isPresented: $renaming) {
+                TextField("Sample ID", text: $newName)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Save") { model.rename(scan, to: newName) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Scans with the same Sample ID are compared as repeat scans of one sample.")
+            }
+            .confirmationDialog("Delete this scan?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Delete \(scan.name)", role: .destructive) { model.delete(scan) }
+            } message: {
+                Text("The model, photos and slices on this iPhone are deleted. Copies on Google Drive stay.")
+            }
+            .fullScreenCover(isPresented: $showDetailCamera) {
+                DetailCaptureView(scan: scan) {
+                    showDetailCamera = false
+                    model.reload()
+                    Task { await model.syncAllPending() }
+                }
+            }
             .task(id: scan.hasModel) { await loadExports(scan) }
         } else {
             Text("This scan was deleted.").foregroundStyle(.secondary)
@@ -618,10 +839,24 @@ struct ScanDetailView: View {
     private func driveSection(_ scan: Scan) -> some View {
         let folder = "\(ScanPackage.rootFolder)/\(scan.id)_\(scan.fileStem)"
         return Section {
-            if !model.driveSignedIn {
-                Label("Sign in to Google Drive on the home screen and every scan uploads by itself.", systemImage: "person.badge.key")
+            if model.folderLinked {
+                if let status = model.folderStatus[scan.id] {
+                    Label(status, systemImage: "arrow.triangle.2.circlepath.icloud")
+                } else if let d = scan.folderSync, d.complete, let when = d.lastSync {
+                    Label("In the Drive folder \(model.folderName ?? "") since \(when.formatted(date: .abbreviated, time: .shortened)); the Google Drive app uploads it.",
+                          systemImage: "checkmark.icloud.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Waiting to copy to the Drive folder", systemImage: "icloud.and.arrow.up").foregroundStyle(.secondary)
+                }
+                Text("Google Drive › \(model.folderName ?? "your folder") › \(scan.id)_\(scan.fileStem)")
+                    .font(.callout.monospaced())
+                Button("Copy to the Drive folder now") { Task { await model.syncToFolder(scan) } }
+            }
+            if !model.driveSignedIn && !model.folderLinked {
+                Label("Not connected. Tap \"Connect Google Drive\" on the home screen and every scan goes there by itself.", systemImage: "icloud.slash")
                     .foregroundStyle(.secondary)
-            } else {
+            } else if model.driveSignedIn {
                 if let status = model.driveStatus[scan.id] {
                     Label(status, systemImage: "arrow.triangle.2.circlepath.icloud")
                 } else if let d = scan.drive, d.complete, let when = d.lastSync {
@@ -658,7 +893,10 @@ struct ScanDetailView: View {
     private func measurementsSection(_ scan: Scan, _ s: MeshStats) -> some View {
         let f = scan.scaleFactor
         return Section {
-            LabeledContent("Axes a × b × c", value: String(format: "%.1f × %.1f × %.1f mm", s.axisA * f, s.axisB * f, s.axisC * f))
+            LabeledContent(s.box == nil ? "Axes a × b × c" : "Smallest box a × b × c", value: String(format: "%.1f × %.1f × %.1f mm", s.axisA * f, s.axisB * f, s.axisC * f))
+            if let b = s.box {
+                LabeledContent("Longest / narrowest (3D)", value: String(format: "%.1f / %.1f mm", b.maxFeretMM * f, b.minFeretMM * f))
+            }
             LabeledContent("Volume", value: String(format: "%.2f cm³", s.volumeCM3 * f * f * f))
             if !s.isClosed {
                 Text("The mesh has small gaps, so the volume is approximate.").font(.footnote).foregroundStyle(.secondary)
@@ -671,6 +909,12 @@ struct ScanDetailView: View {
             if let e = s.medianEdgeMM {
                 LabeledContent("Mesh detail", value: String(format: "%.2f mm edges", e))
             }
+            if let r = s.removedPieces, r > 0 {
+                LabeledContent("Loose pieces left out", value: String(format: "%d (%.1f %% of surface)", r, (1 - (s.keptAreaShare ?? 1)) * 100))
+            }
+            if let b = scan.blurrySetAside, b > 0 {
+                LabeledContent("Blurred photos left out", value: "\(b)")
+            }
             LabeledContent("Triangles", value: s.triangleCount.formatted())
             LabeledContent("Photos", value: "\(scan.photoCount ?? 0) in \(scan.passes ?? 1) pass(es)")
             if let cov = scan.coverage, cov.count == 3 {
@@ -679,8 +923,81 @@ struct ScanDetailView: View {
         } header: {
             Text(scan.caliper == nil ? "Measurements (LiDAR scale)" : "Measurements (caliper-corrected)")
         } footer: {
-            Text("a is the longest axis of the rock, c the shortest. Mesh detail is typical triangle spacing, not measured resolution or dimensional accuracy.")
+            Text(s.box == nil
+                 ? "Measured with the older method. Tap Repair above to get the smallest-box sizes, which agree better between repeat scans."
+                 : "a × b × c are the sides of the smallest box that holds the rock, so they don't depend on how it lay. Loose fragments and bits of table are left out. Mesh detail is triangle spacing, not accuracy.")
         }
+    }
+}
+
+extension ScanDetailView {
+    func microCTSection(_ scan: Scan, _ s: MeshStats, _ u: UprightSize) -> some View {
+        let f = scan.scaleFactor
+        return Section {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).font(.title2)
+                Text("3D dimensions ready: enough to centre the sample in the micro-CT.").font(.callout.bold())
+            }
+            LabeledContent("Height (as it stood)", value: String(format: "%.1f mm", u.heightMM * f))
+            LabeledContent("Fits a cylinder", value: String(format: "Ø %.1f mm", (u.cylinderDiameterMM ?? u.maxDiameterMM) * f))
+            LabeledContent("Footprint L × W", value: String(format: "%.1f × %.1f mm", u.lengthMM * f, u.widthMM * f))
+        } header: {
+            Text("Micro-CT centring")
+        } footer: {
+            Text(scan.caliper == nil
+                 ? "LiDAR scale. The cylinder is the smallest upright cylinder around the rock as it stood when scanned: the clearance it needs turning on the stage. Enter a caliper length below to correct the scale."
+                 : "Caliper-corrected. The cylinder is the smallest upright cylinder around the rock as it stood when scanned: the clearance it needs turning on the stage.")
+        }
+    }
+
+    func detailSection(_ scan: Scan) -> some View {
+        Section {
+            Button { showDetailCamera = true } label: {
+                Label(scan.detailCount == 0 ? "Take close-ups of the surface" : "Take more close-ups (\(scan.detailCount) so far)",
+                      systemImage: "camera.macro")
+            }
+            if scan.detailCount > 0 {
+                ShareLink(items: ScanStore.photoURLs(in: scan.detailURL)) {
+                    Label("Share close-ups", systemImage: "square.and.arrow.up")
+                }
+            }
+        } header: {
+            Text("Detail photos (optional)")
+        } footer: {
+            Text("For surface patterns and later image identification. The camera uses all lenses (macro, main, telephoto), keeps the rock in focus, zooms to it and drops blurred shots. Not needed for the dimensions.")
+        }
+    }
+}
+
+/// Repeat scans of one sample (same Sample ID): mean, spread and range of each size.
+struct RepeatsSection: View {
+    let scan: Scan
+    let repeats: [Scan]
+
+    var body: some View {
+        if repeats.count > 1 {
+            Section {
+                row("a (length)") { $0.axisA }
+                row("b (width)") { $0.axisB }
+                row("c (thickness)") { $0.axisC }
+                row("Height as scanned") { $0.upright?.heightMM }
+                row("Micro-CT cylinder Ø") { $0.upright?.cylinderDiameterMM }
+            } header: {
+                Text("Repeat scans of \(scan.name) (\(repeats.count))")
+            } footer: {
+                Text("Mean ± standard deviation and the range over all scans with this Sample ID, each with its own (or taken-over) caliper scale. A spread above about 1 mm usually comes from the scale: check one length with calipers and later scans take it over. Rename scans so repeats share one Sample ID.")
+            }
+        }
+    }
+
+    private func row(_ title: String, _ value: @escaping (MeshStats) -> Double?) -> some View {
+        let values = repeats.compactMap { s -> Double? in s.stats.flatMap(value).map { $0 * s.scaleFactor } }
+        let n = Double(values.count)
+        let mean = values.reduce(0, +) / max(n, 1)
+        let sd = n > 1 ? (values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / (n - 1)).squareRoot() : 0
+        let lo = values.min() ?? 0, hi = values.max() ?? 0
+        return LabeledContent(title, value: values.isEmpty ? "–" : String(format: "%.1f ± %.1f mm (%.1f–%.1f)", mean, sd, lo, hi))
+            .font(.callout.monospacedDigit())
     }
 }
 
@@ -704,6 +1021,10 @@ struct CaliperSection: View {
                 LabeledContent("Calipers, axis \(axisName)", value: String(format: "%.2f mm", c.measuredMM))
                 LabeledContent("Scan, axis \(axisName)", value: String(format: "%.2f mm", c.measuredMM / f))
                 LabeledContent("Scan scale error", value: String(format: "%+.2f %%", (1 / f - 1) * 100))
+                if c.fromScanID != nil {
+                    Text("Taken over from an earlier scan of the same sample. Enter a new caliper length to replace it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Button("Remove caliper check", role: .destructive) { model.setCaliper(scan, axis: 0, measuredMM: nil) }
             } else {
                 Picker("Axis", selection: $axis) {
@@ -855,12 +1176,21 @@ struct DriveSettingsSection: View {
     @AppStorage(GoogleAuth.clientIDKey) private var pastedClientID = ""
     @State private var signingIn = false
 
+    @State private var showSetup = false
+
     var body: some View {
         Section {
+            if model.folderLinked {
+                LabeledContent("Drive folder", value: model.folderName ?? "chosen folder")
+                Button("Choose a different folder") { showSetup = true }
+                Button("Stop copying to this folder", role: .destructive) { model.unlinkFolder() }
+            } else if !model.driveSignedIn {
+                Button { showSetup = true } label: {
+                    Label("Connect Google Drive", systemImage: "icloud.and.arrow.up.fill").font(.headline)
+                }
+            }
             if model.driveSignedIn {
                 LabeledContent("Signed in as", value: model.driveEmail ?? "Google account")
-                Toggle("Upload every scan automatically", isOn: $autoUpload)
-                Toggle("Also upload original photos (Wi-Fi only)", isOn: $uploadPhotos)
                 Button {
                     Task { await model.syncAllPending(force: true) }
                 } label: {
@@ -868,7 +1198,7 @@ struct DriveSettingsSection: View {
                 }
                 .disabled(model.isSyncing)
                 Button("Sign out of Google Drive", role: .destructive) { model.signOutOfDrive() }
-            } else if GoogleAuth.shared.clientID != nil {
+            } else if GoogleAuth.shared.clientID != nil && !model.folderLinked {
                 Button {
                     signingIn = true
                     Task { await model.signInToDrive(); signingIn = false }
@@ -876,17 +1206,82 @@ struct DriveSettingsSection: View {
                     if signingIn { ProgressView() } else { Label("Sign in to Google Drive", systemImage: "person.badge.key") }
                 }
                 .disabled(signingIn)
-            } else {
-                Text("Google Drive upload isn't set up in this version yet.").foregroundStyle(.secondary)
-                TextField("Paste Google client ID (optional)", text: $pastedClientID)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.footnote.monospaced())
+            }
+            if model.folderLinked || model.driveSignedIn {
+                Toggle("Copy every scan automatically", isOn: $autoUpload)
+                Toggle("Also copy photos and close-ups (Wi-Fi only)", isOn: $uploadPhotos)
             }
         } header: {
             Text("Google Drive")
         } footer: {
-            Text("Finished scans go to My Drive › Crystal Bowl Scans, one folder per scan with manifest.json, the model in USDZ, STL, PLY and OBJ, and the cross-sections. On a computer with Google Drive for desktop it is the folder My Drive\\Crystal Bowl Scans. The app can only see the files it creates there. Original photos are a few hundred MB per scan, so they upload only on Wi-Fi; they let a Mac rebuild the model at full detail.")
+            Text("Finished scans go to the folder you chose, normally My Drive › Crystal Bowl Scans: one folder per scan with manifest.json, dimensions.json, the model in USDZ, STL, PLY and OBJ, and the cross-sections. On a computer with Google Drive for desktop it is the folder My Drive\\Crystal Bowl Scans. Photos are a few hundred MB per scan, so they go only on Wi-Fi.")
+        }
+        .sheet(isPresented: $showSetup) { DriveSetupSheet() }
+    }
+}
+
+/// Connecting Google Drive in one step: pick (or create) the folder in the Files app's Google Drive location.
+struct DriveSetupSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(GoogleAuth.clientIDKey) private var pastedClientID = ""
+    @State private var picking = false
+    @State private var signingIn = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    TipRow(icon: "1.circle.fill", color: Theme.violet, text: "Install the Google Drive app from the App Store and sign in to it (once).")
+                    TipRow(icon: "2.circle.fill", color: Theme.blue, text: "Tap Choose folder below. Tap Browse › Google Drive › My Drive. Create a folder named Crystal Bowl Scans (or pick it) and tap Open.")
+                    TipRow(icon: "3.circle.fill", color: Theme.teal, text: "Done. Every finished scan is copied there by itself, and the Google Drive app uploads it, even after you close Crystal Bowl.")
+                    Button { picking = true } label: {
+                        Label(model.folderLinked ? "Choose a different folder" : "Choose folder", systemImage: "folder.badge.plus")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .foregroundStyle(.white)
+                            .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    if model.folderLinked {
+                        Label("Connected: \(model.folderName ?? "folder")", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    }
+                } header: {
+                    Text("Recommended: through the Google Drive app")
+                } footer: {
+                    Text("No Google sign-in or setup inside Crystal Bowl. Your PC software finds the scans in My Drive\\Crystal Bowl Scans, each with manifest.json written last.")
+                }
+                Section {
+                    if model.driveSignedIn {
+                        LabeledContent("Signed in as", value: model.driveEmail ?? "Google account")
+                    } else if GoogleAuth.shared.clientID != nil {
+                        Button {
+                            signingIn = true
+                            Task { await model.signInToDrive(); signingIn = false }
+                        } label: {
+                            if signingIn { ProgressView() } else { Label("Sign in with Google", systemImage: "person.badge.key") }
+                        }
+                    } else {
+                        Text("Direct upload needs a Google client ID for this app. Paste one here if you have it; otherwise use the folder above.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        TextField("Google client ID (…apps.googleusercontent.com)", text: $pastedClientID)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.footnote.monospaced())
+                    }
+                } header: {
+                    Text("Alternative: direct upload")
+                }
+            }
+            .navigationTitle("Connect Google Drive")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
+                if case .success(let url) = result {
+                    model.linkFolder(url)
+                }
+            }
         }
     }
 }

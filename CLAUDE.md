@@ -10,8 +10,12 @@ No Mac is needed for that: GitHub builds, signs and uploads in the cloud. A MacB
 - `CrystalBowl/`: app code. `AppModel.swift` (capture and reconstruction flow), `Views.swift` (all screens),
   `CrossSections.swift` (slice PNG/CSV output), `MeshTools.swift` (Model I/O load, measure, export),
   `ScanStore.swift` (scan folders in Documents/Scans), `Updates.swift` (update check, About, problem report),
-  `CaptureGuide.swift` (hand-held guidance: Core Motion heading and camera tilt, coverage map, haptics, gap advice).
-- `Packages/ScanMath/`: platform-independent maths (principal axes, volume, mesh slicing) with XCTest tests.
+  `CaptureGuide.swift` (hand-held guidance: Core Motion heading and camera tilt, coverage map, haptics, gap advice),
+  `BackgroundBuild.swift` (iOS 26 continued-processing task + notifications; builds resume from checkpoint),
+  `ShotQuality.swift` (photo sharpness, blurred photos set aside), `DetailCamera.swift` (own AVFoundation camera:
+  multi-lens, saliency auto-focus/zoom, tap to focus), `FolderSync.swift` (copy to a Files/Google Drive folder).
+- `Packages/ScanMath/`: platform-independent maths (principal axes, volume, mesh slicing, smallest box and 3D Feret,
+  main-body extraction, enclosing circle, photo sharpness) with XCTest tests.
 - `project.yml`: XcodeGen spec; the Xcode project is generated in CI and not committed.
 - `ReleaseNotes.md`: newest section first. Its bullets are shown in the app's update banner.
 
@@ -37,7 +41,9 @@ small fixes in a row is fine. Agents without `gh` can check runs at
 `Drive.swift` (OAuth PKCE sign-in, Drive REST client, manifest) and `DriveSyncModel.swift` (upload queue).
 Scope is `drive.file`: the app sees only what it created. Layout in My Drive:
 `Crystal Bowl Scans/index.json`, `README.txt`, and one folder `<scan id>_<sample>/` per scan with
-`manifest.json` (schema `crystal-bowl.scan/0.1`, uploaded last), `model/`, `sections/`, optional `images/`.
+`manifest.json` (schema `crystal-bowl.scan/0.1`, uploaded last), `model/`, `sections/`, optional `images/` and `detail/`.
+Two routes: the REST upload below (needs a client ID) and, from 1.8, a folder picked in the Files app (Google Drive app's
+file provider), stored as a bookmark, written with NSFileCoordinator; the Drive app uploads it.
 The iOS OAuth client ID (bundle ID `com.avradip.crystalbowl`) is not a secret: set it as `CB_GOOGLE_CLIENT_ID`
 in `project.yml`, or as the repository variable `GOOGLE_IOS_CLIENT_ID`, which overrides it. The project brief is in Drive:
 `DRA_Handoff/PROJECT_BRIEF_Crystal_Bowl_Design_Requirements_2026-10-27_v0.2.md` (see sections 12–13).

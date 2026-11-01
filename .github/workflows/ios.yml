@@ -28,6 +28,12 @@ jobs:
           xcodebuild -version
           echo "::notice::$(xcodebuild -version | tr '\n' ' ')"
 
+      - name: Show background-task API of this SDK
+        continue-on-error: true
+        run: |
+          H="$(xcrun --sdk iphoneos --show-sdk-path)/System/Library/Frameworks/BackgroundTasks.framework/Headers"
+          grep -h -B1 -A2 -E "ContinuedProcessing|requiredResources|supportedResources|updateTitle|SubmissionStrategy" "$H"/*.h | head -120 || true
+
       - name: Unit tests (measurement maths)
         run: swift test --package-path Packages/ScanMath
 

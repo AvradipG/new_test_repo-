@@ -15,6 +15,18 @@ struct Scan: Identifiable, Codable, Hashable {
     var coverage: [Double]?
     /// A length measured with calipers, used to check and correct the scan's scale.
     var caliper: CaliperCheck?
+    /// True from the end of capture until the model, measurements and lab files are all written; a build that
+    /// iOS stopped resumes from its checkpoint the next time the app runs.
+    var buildRequested: Bool?
+    var buildAttempts: Int?
+    /// Photos set aside as blurry before the model was built (they are kept in Blurry/).
+    var blurrySetAside: Int?
+    /// Quick scan: one ring round the rock, enough for the dimensions.
+    var quick: Bool?
+    /// File name stem fixed when the scan was first named, so renaming keeps the model and Drive folder names.
+    var storedStem: String?
+    /// Copy in a Google Drive folder chosen through the Files app (works without a Google sign-in).
+    var folderSync: DriveSync?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {
@@ -34,10 +46,11 @@ struct Scan: Identifiable, Codable, Hashable {
         }
     }
 
-    /// True for scans made before 1.7: no upright size, no height profile, or section stacks without outline sizes.
+    /// True for scans measured before 1.8 (no smallest-box sizes or micro-CT cylinder) or cut before 1.7
+    /// (no height profile, or section stacks without outline sizes).
     var needsRepair: Bool {
         guard hasModel else { return false }
-        guard let s = stats, s.upright != nil else { return true }
+        guard let s = stats, let u = s.upright, u.cylinderDiameterMM != nil, s.box != nil else { return true }
         let stacks = sections ?? []
         if !stacks.contains(where: { $0.isHeightProfile }) { return true }
         return stacks.contains { $0.rows.contains { $0.maxFeretMM == nil && $0.measurementStatus != "empty_section" } }
@@ -48,11 +61,21 @@ struct Scan: Identifiable, Codable, Hashable {
     var checkpointURL: URL { folderURL.appendingPathComponent("Checkpoint", isDirectory: true) }
     var exportsURL: URL { folderURL.appendingPathComponent("Exports", isDirectory: true) }
     var sectionsURL: URL { folderURL.appendingPathComponent("Sections", isDirectory: true) }
+    /// Close-up photos for pattern and texture work; not used to build the model.
+    var detailURL: URL { folderURL.appendingPathComponent("Detail", isDirectory: true) }
+    var blurryURL: URL { folderURL.appendingPathComponent("Blurry", isDirectory: true) }
+    var detailCount: Int { ScanStore.countPhotos(in: detailURL) }
+    /// Sizes for the micro-CT are known once the model has been measured.
+    var dimensionsReady: Bool { stats?.upright != nil }
+    /// Scans of the same sample share a name (case and spacing ignored).
+    var sampleKey: String { name.lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
     var modelURL: URL { folderURL.appendingPathComponent("\(fileStem).usdz") }
     var hasModel: Bool { FileManager.default.fileExists(atPath: modelURL.path) }
     var hasPhotos: Bool { ScanStore.countPhotos(in: imagesURL) > 0 }
 
-    var fileStem: String {
+    var fileStem: String { storedStem ?? Self.stem(for: name, id: id) }
+
+    static func stem(for name: String, id: String) -> String {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
         let cleaned = name.unicodeScalars.map { allowed.contains($0) ? String($0) : "-" }.joined()
         let trimmed = cleaned.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
@@ -65,6 +88,8 @@ struct CaliperCheck: Codable, Hashable {
     var axis: Int
     var measuredMM: Double
     var date: Date
+    /// Set when the check was taken over from an earlier scan of the same sample.
+    var fromScanID: String?
     var axisName: String { ["a", "b", "c", "height"][max(0, min(3, axis))] }
 }
 
@@ -80,7 +105,8 @@ enum ScanStore {
         f.dateFormat = "yyyyMMdd-HHmmss"
         f.locale = Locale(identifier: "en_US_POSIX")
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let scan = Scan(id: f.string(from: Date()), name: trimmed.isEmpty ? "Rock sample" : trimmed, created: Date())
+        var scan = Scan(id: f.string(from: Date()), name: trimmed.isEmpty ? "Rock sample" : trimmed, created: Date())
+        scan.storedStem = scan.fileStem
         let fm = FileManager.default
         for dir in [scan.imagesURL, scan.checkpointURL, scan.exportsURL] {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -126,6 +152,12 @@ enum ScanStore {
             total += Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         }
         return total
+    }
+
+    static func photoURLs(in dir: URL) -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { ["heic", "jpg", "jpeg", "png"].contains($0.pathExtension.lowercased()) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     static func countPhotos(in dir: URL) -> Int {

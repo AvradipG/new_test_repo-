@@ -2,7 +2,8 @@ import Foundation
 
 /// Size and volume of a scanned rock, in lab units.
 public struct MeshStats: Codable, Hashable, Sendable {
-    /// Principal axes, longest first (a ≥ b ≥ c), in millimetres.
+    /// Sizes a ≥ b ≥ c in millimetres. From 1.8: sides of the smallest box around the rock's main body
+    /// (independent of how it lay). Before 1.8: extents along the principal (PCA) axes.
     public var axisA: Double
     public var axisB: Double
     public var axisC: Double
@@ -16,13 +17,22 @@ public struct MeshStats: Codable, Hashable, Sendable {
     public var medianEdgeMM: Double?
     /// Height and footprint standing as scanned. Nil for scans measured before 1.7.
     public var upright: UprightSize?
+    /// Box sides and 3D Feret diameters of the main body. Nil for scans measured before 1.8.
+    public var box: BoxSize?
+    /// Share of the surface area kept as the rock after loose pieces were dropped (1 = nothing dropped), and how many pieces.
+    public var keptAreaShare: Double?
+    public var removedPieces: Int?
 
     public init(axisA: Double, axisB: Double, axisC: Double, volumeCM3: Double, triangleCount: Int, vertexCount: Int, isClosed: Bool,
-                medianEdgeMM: Double? = nil, upright: UprightSize? = nil) {
+                medianEdgeMM: Double? = nil, upright: UprightSize? = nil, box: BoxSize? = nil,
+                keptAreaShare: Double? = nil, removedPieces: Int? = nil) {
         self.axisA = axisA; self.axisB = axisB; self.axisC = axisC
         self.volumeCM3 = volumeCM3; self.triangleCount = triangleCount; self.vertexCount = vertexCount; self.isClosed = isClosed
         self.medianEdgeMM = medianEdgeMM
         self.upright = upright
+        self.box = box
+        self.keptAreaShare = keptAreaShare
+        self.removedPieces = removedPieces
     }
 }
 
@@ -125,14 +135,20 @@ public enum ScanMath {
     }
 
     /// Full statistics. `unitToMM` converts input units to millimetres (Object Capture models are in metres).
+    /// Loose pieces (less than 5 % of the rock's surface area) are dropped first, so a stray fragment or a bit of
+    /// table can't change the sizes.
     public static func stats(positions: [SIMD3<Float>], indices: [UInt32], unitToMM: Double = 1000) -> MeshStats {
-        let ext = principalExtents(positions) * unitToMM
-        let vol = abs(signedVolume(positions: positions, indices: indices)) * pow(unitToMM, 3) / 1000
+        let body = mainBody(positions: positions, indices: indices)
+        let pts = usedPositions(positions, indices: body.indices)
+        let box = boxSize(pts, unitToMM: unitToMM)
+        let ext = box.map { SIMD3($0.lengthMM, $0.widthMM, $0.thicknessMM) } ?? principalExtents(pts) * unitToMM
+        let vol = abs(signedVolume(positions: positions, indices: body.indices)) * pow(unitToMM, 3) / 1000
         return MeshStats(axisA: ext.x, axisB: ext.y, axisC: ext.z, volumeCM3: vol,
-                         triangleCount: indices.count / 3, vertexCount: positions.count,
-                         isClosed: isClosed(indices: canonicalIndices(positions: positions, indices: indices)),
-                         medianEdgeMM: medianEdgeLength(positions: positions, indices: indices).map { $0 * unitToMM },
-                         upright: uprightSize(positions: positions, up: 1, unitToMM: unitToMM))
+                         triangleCount: body.indices.count / 3, vertexCount: pts.count,
+                         isClosed: isClosed(indices: canonicalIndices(positions: positions, indices: body.indices)),
+                         medianEdgeMM: medianEdgeLength(positions: positions, indices: body.indices).map { $0 * unitToMM },
+                         upright: uprightSize(positions: pts, up: 1, unitToMM: unitToMM),
+                         box: box, keptAreaShare: body.keptAreaShare, removedPieces: body.removedPieces)
     }
 
     /// Median length of the triangle edges (each triangle's three edges counted), in input units.

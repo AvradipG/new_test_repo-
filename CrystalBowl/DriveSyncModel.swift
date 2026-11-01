@@ -36,9 +36,10 @@ extension AppModel {
 
     /// Uploads every finished scan that has files Drive doesn't have yet.
     func syncAllPending(force: Bool = false) async {
+        await syncFolderPending(force: force)
         guard driveSignedIn, !isSyncing, force || autoUpload else { return }
         let unmetered = await NetworkState.isUnmetered()
-        for scan in scans where scan.hasModel {
+        for scan in scans where scan.hasModel && scan.buildRequested != true {
             if needsSync(scan, photosAllowed: unmetered) { await sync(scan) }
         }
     }
@@ -52,7 +53,7 @@ extension AppModel {
         }
     }
 
-    private static func changed(_ url: URL, _ rec: DriveFileRecord) -> Bool {
+    static func changed(_ url: URL, _ rec: DriveFileRecord) -> Bool {
         guard let a = try? FileManager.default.attributesOfItem(atPath: url.path) else { return false }
         let size = (a[.size] as? NSNumber)?.int64Value ?? 0
         let mod = a[.modificationDate] as? Date ?? .distantPast
@@ -78,7 +79,7 @@ extension AppModel {
                 let s = scan
                 _ = await Task.detached { MeshTools.exportAll(s) }.value
             }
-            let photosNow = uploadPhotos && scan.hasPhotos ? await NetworkState.isUnmetered() : false
+            let photosNow = uploadPhotos && (scan.hasPhotos || scan.detailCount > 0) ? await NetworkState.isUnmetered() : false
             let files = ScanPackage.files(for: scan, includePhotos: photosNow)
 
             let client = DriveClient()

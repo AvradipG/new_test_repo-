@@ -40,7 +40,11 @@ final class CaptureGuide: ObservableObject {
         }
     }
 
-    private struct Shot { let heading: Double; let band: Band }
+    private struct Shot {
+        let heading: Double
+        let band: Band
+        var blurry = false
+    }
 
     /// Photos per band and sector, sectors counted from the start in the walking direction.
     @Published private(set) var coverage: [[Int]] = Array(repeating: Array(repeating: 0, count: CaptureGuide.sectorCount), count: 3)
@@ -65,6 +69,9 @@ final class CaptureGuide: ObservableObject {
     private var inTargetBand = true
     private var lastEmptySector: Int?
     private var lastFeedback: String?
+    /// Photos taken before the current side (index of this side's first photo among all photos of the scan).
+    private var sideOffset = 0
+    private var blurUntil = Date.distantPast
 
     private let tick = UIImpactFeedbackGenerator(style: .light)
     private let bump = UIImpactFeedbackGenerator(style: .rigid)
@@ -76,6 +83,9 @@ final class CaptureGuide: ObservableObject {
     // MARK: Lifecycle
 
     func start() {
+        shots = []
+        sideOffset = 0
+        lastShotCount = 0
         reset(keepCoverage: false)
         fillingGaps = false
         targetBand = .middle
@@ -109,6 +119,7 @@ final class CaptureGuide: ObservableObject {
 
     private func reset(keepCoverage: Bool) {
         if !keepCoverage {
+            sideOffset += shots.count
             shots = []
             direction = 0
             startHeading = nil
@@ -147,7 +158,10 @@ final class CaptureGuide: ObservableObject {
         }
 
         if shotCount > lastShotCount, capturing, let heading = lastHeading, let start = startHeading {
-            shots.append(Shot(heading: Self.wrap(heading - start), band: Band.of(pose.lookDown)))
+            // Several photos can arrive between two updates; each one is placed on the map.
+            for _ in lastShotCount..<shotCount {
+                shots.append(Shot(heading: Self.wrap(heading - start), band: Band.of(pose.lookDown)))
+            }
             recount()
             if hapticsOn { tick.impactOccurred(intensity: 0.55) }
         }
@@ -165,7 +179,9 @@ final class CaptureGuide: ObservableObject {
         lastFeedback = feedback
 
         let speed = abs(rate)
-        if speed > 30 {
+        if Date() < blurUntil {
+            text = "Blurry photo: hold the phone steady and keep the rock 25–40 cm away. Too close and the camera can't focus"
+        } else if speed > 30 {
             text = "Slow down: walk around the rock more slowly"
             warn = true
         } else if direction != 0 && !fillingGaps && rate * direction < -6 {
@@ -212,8 +228,29 @@ final class CaptureGuide: ObservableObject {
     private func recount() {
         var c = Array(repeating: Array(repeating: 0, count: Self.sectorCount), count: 3)
         let dir = direction == 0 ? 1 : direction
-        for s in shots { c[s.band.rawValue][Self.sector(Self.positive(s.heading * dir))] += 1 }
+        for s in shots where !s.blurry { c[s.band.rawValue][Self.sector(Self.positive(s.heading * dir))] += 1 }
         coverage = c
+    }
+
+    /// A photo just taken came out blurred: buzz and show the hint for a few seconds.
+    func flagBlurry() {
+        blurUntil = Date().addingTimeInterval(3)
+        if hapticsOn && Date().timeIntervalSince(lastWarning) > 1.2 {
+            notify.notificationOccurred(.error)
+            lastWarning = Date()
+        }
+    }
+
+    /// Marks blurred photos (indices among all photos of the scan, in capture order) so they stop counting as
+    /// coverage. Only applied when the photo count matches the shots placed on the map, so a mismatch can't
+    /// mark the wrong spots. Returns how many blurred photos were found on this side.
+    @discardableResult
+    func markBlurry(global: Set<Int>, photoCount: Int) -> Int {
+        let local = global.map { $0 - sideOffset }.filter { $0 >= 0 && $0 < shots.count }
+        guard photoCount == sideOffset + shots.count else { return local.count }
+        for i in shots.indices { shots[i].blurry = local.contains(i) }
+        recount()
+        return local.count
     }
 
     /// Share of sectors with at least one photo, per band (0…1).

@@ -3,6 +3,17 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.8
+- Building the 3D model now runs in the background: keep using the app or other apps, or lock the phone. If iOS pauses it, it continues when you open the app
+- Dimensions come first: a notice (and notification) tells you the height, footprint and the cylinder the rock needs, which is enough to centre it in the micro-CT
+- New "Dimensions only" scan: one walk round the rock is enough
+- Steadier sizes: a × b × c are now the smallest box round the rock, loose fragments are left out, and repeat scans of one Sample ID are compared (mean ± spread)
+- A caliper check carries over to later scans with the same Sample ID; tap Repair on older scans to re-measure them
+- Blurred photos are spotted while you scan (buzz and hint), shown as gaps and left out of the model
+- Close-up camera for surface patterns: uses all lenses, keeps the rock in focus, zooms to it, tap to focus
+- Connect Google Drive by tapping it on the home screen and choosing a folder in the Google Drive app: no sign-in setup
+- Touch and hold a scan to rename, share, copy its dimensions or delete it; search your scans
+
 ## 1.7
 - Every slice now has its size even when its outline is open: widest diameter, narrowest width and extents in mm
 - New height profile: horizontal slices up the rock as it stood, with the width at every height

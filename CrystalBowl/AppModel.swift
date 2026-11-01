@@ -1,10 +1,11 @@
 import SwiftUI
 import RealityKit
 import UIKit
+import ScanMath
 
 @MainActor
 final class AppModel: ObservableObject {
-    enum Phase { case home, capturing, reconstructing }
+    enum Phase { case home, capturing }
     enum CaptureStage { case initializing, ready, detecting, capturing, finishing, completed, failed }
 
     @Published var phase: Phase = .home
@@ -30,36 +31,61 @@ final class AppModel: ObservableObject {
     @Published var latestRemote: RemoteVersion?
     @Published var lastUpdateCheck: Date?
 
-    // Reconstruction
+    // Building (one scan at a time, in the background)
     @Published var repairing: Set<String> = []
+    @Published var buildingID: String?
     @Published var progress: Double = 0
     @Published var progressNote = ""
+    @Published var readyNotice: ReadyNotice?
+    /// Blurred photos found on the current side during capture.
+    @Published var blurryShots = 0
+    @Published var quickCapture = false
+
+    // Drive folder chosen through the Files app
+    @Published var folderLinked = false
+    @Published var folderName: String?
+    @Published var folderStatus: [String: String] = [:]
+    var isFolderSyncing = false
 
     let guide = CaptureGuide()
 
     private(set) var currentScan: Scan?
     private var pollTask: Task<Void, Never>?
     private var cancelling = false
+    private var buildQueue: [String] = []
+    private var photoSession: PhotogrammetrySession?
+    private var backgroundedDuringBuild = false
+    private var shotScores: [String: Double] = [:]
+    private var scoringShots = false
+    private var pollCount = 0
 
     var isCaptureSupported: Bool { ObjectCaptureSession.isSupported }
 
     init() {
         reload()
         refreshDriveAccount()
+        refreshFolderLink()
+        resumePendingBuilds()
     }
 
     func reload() { scans = ScanStore.loadAll() }
 
     // MARK: Capture
 
-    func startNewScan(name: String) {
+    func startNewScan(name: String, quick: Bool) {
         guard isCaptureSupported else {
             errorMessage = "This iPhone can't run 3D object capture. It needs a LiDAR iPhone (12 Pro or later Pro model) on iOS 17 or later."
             return
         }
         do {
-            let scan = try ScanStore.create(name: name)
+            var scan = try ScanStore.create(name: name)
+            scan.quick = quick
+            try? ScanStore.save(scan)
             currentScan = scan
+            quickCapture = quick
+            shotScores = [:]
+            blurryShots = 0
+            pollCount = 0
             let session = ObjectCaptureSession()
             var config = ObjectCaptureSession.Configuration()
             config.checkpointDirectory = scan.checkpointURL
@@ -113,7 +139,12 @@ final class AppModel: ObservableObject {
         shotCount = session.numberOfShotsTaken
         feedbackText = Self.describe(session.feedback)
         guide.update(shotCount: shotCount, capturing: captureStage == .capturing && !passCompleted, feedback: feedbackText)
-        if passCompleted && !wasCompleted { guide.passCompleted() }
+        if passCompleted && !wasCompleted {
+            guide.passCompleted()
+            markBlurryOnRing()
+        }
+        pollCount += 1
+        if pollCount % 15 == 0 && captureStage == .capturing && !passCompleted { checkNewShots() }
         if captureStage == .completed && previous != .completed { captureFinished() }
     }
 
@@ -134,6 +165,40 @@ final class AppModel: ObservableObject {
             return text[key] ?? key
         }
         return lines.isEmpty ? nil : lines.sorted().joined(separator: " · ")
+    }
+
+    /// Scores new photos about every 1.5 s; a clearly blurred one gets an immediate buzz and hint.
+    private func checkNewShots() {
+        guard !scoringShots, let scan = currentScan else { return }
+        scoringShots = true
+        let dir = scan.imagesURL
+        let known = Set(shotScores.keys)
+        Task { [weak self] in
+            let fresh = await Task.detached { ShotQuality.scoreNew(in: dir, known: known) }.value
+            guard let self else { return }
+            self.scoringShots = false
+            guard !fresh.isEmpty else { return }
+            self.shotScores.merge(fresh) { a, _ in a }
+            guard self.shotScores.count >= 8 else { return }
+            let m = ScanMath.median(Array(self.shotScores.values))
+            if fresh.values.contains(where: { $0 < ShotQuality.blurRatio * m }) { self.guide.flagBlurry() }
+        }
+    }
+
+    /// After a pass, blurred photos no longer count as coverage, so their spots show up as gaps to fill.
+    private func markBlurryOnRing() {
+        guard let scan = currentScan else { return }
+        let dir = scan.imagesURL
+        let known = Set(shotScores.keys)
+        Task { [weak self] in
+            let fresh = await Task.detached { ShotQuality.scoreNew(in: dir, known: known, limit: 2000) }.value
+            let ordered = await Task.detached { ShotQuality.photos(in: dir).map { $0.lastPathComponent } }.value
+            guard let self else { return }
+            self.shotScores.merge(fresh) { a, _ in a }
+            let values = ordered.map { self.shotScores[$0] ?? .nan }
+            let bad = ScanMath.blurryIndices(values, relative: ShotQuality.blurRatio, maxFraction: ShotQuality.maxSetAside)
+            self.blurryShots = self.guide.markBlurry(global: Set(bad), photoCount: ordered.count)
+        }
     }
 
     func startDetecting() { _ = captureSession?.startDetecting() }
@@ -190,86 +255,231 @@ final class AppModel: ObservableObject {
         scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL)
         scan.passes = passNumber
         scan.coverage = guide.bandCoverage
+        scan.buildRequested = true
+        scan.buildAttempts = 0
+        ShotQuality.saveScores(shotScores, for: scan)
         try? ScanStore.save(scan)
-        currentScan = scan
+        currentScan = nil
+        phase = .home
+        reload()
+        path = [scan]
         reconstruct(scan)
     }
 
-    // MARK: Reconstruction
+    // MARK: Building the model (in the background)
 
+    /// Queues a scan for building. The build runs while the app is used for anything else, and continues
+    /// in the background when the user switches apps or locks the phone (see BackgroundBuild). If iOS stops it,
+    /// it resumes from its checkpoint the next time the app is opened.
     func reconstruct(_ scan: Scan) {
         guard PhotogrammetrySession.isSupported else {
             errorMessage = "This iPhone can't build 3D models on the device."
             return
         }
-        currentScan = scan
-        phase = .reconstructing
-        progress = 0
-        progressNote = "Preparing \(ScanStore.countPhotos(in: scan.imagesURL)) photos…"
-        UIApplication.shared.isIdleTimerDisabled = true
-        Task { [weak self] in
-            await self?.runReconstruction(scan)
+        var s = scans.first { $0.id == scan.id } ?? scan
+        if s.buildRequested != true {
+            s.buildRequested = true
+            s.buildAttempts = 0
+            try? ScanStore.save(s)
+            reload()
+        }
+        Notifier.requestPermission()
+        enqueue(s.id)
+    }
+
+    /// Restarts builds that were interrupted (app closed, phone restarted, iOS took the background time back).
+    func resumePendingBuilds() {
+        for s in scans where s.buildRequested == true && (s.hasPhotos || s.hasModel) { enqueue(s.id) }
+    }
+
+    func appMovedToBackground() {
+        if buildingID != nil { backgroundedDuringBuild = true }
+    }
+
+    var pendingBuilds: [Scan] { scans.filter { $0.buildRequested == true && $0.id != buildingID } }
+
+    private func enqueue(_ id: String) {
+        if buildingID != id && !buildQueue.contains(id) { buildQueue.append(id) }
+        runNextBuild()
+    }
+
+    private func runNextBuild() {
+        guard buildingID == nil else { return }
+        while !buildQueue.isEmpty {
+            let id = buildQueue.removeFirst()
+            guard let scan = scans.first(where: { $0.id == id }), scan.buildRequested == true else { continue }
+            buildingID = id
+            progress = 0
+            progressNote = "Preparing…"
+            backgroundedDuringBuild = UIApplication.shared.applicationState == .background
+            BackgroundBuild.shared.onExpire = { [weak self] in self?.photoSession?.cancel() }
+            BackgroundBuild.shared.begin(title: "Building \(scan.name)")
+            Task { [weak self] in
+                await self?.runBuild(scan)
+                self?.buildingID = nil
+                self?.photoSession = nil
+                self?.runNextBuild()
+            }
+            return
         }
     }
 
-    private func runReconstruction(_ scan: Scan) async {
-        defer { UIApplication.shared.isIdleTimerDisabled = false }
+    private func setProgress(_ fraction: Double, _ note: String) {
+        progress = fraction
+        progressNote = note
+        BackgroundBuild.shared.update(fraction: fraction, note: note)
+    }
+
+    private func runBuild(_ original: Scan) async {
+        var scan = original
+        scan.buildAttempts = (scan.buildAttempts ?? 0) + 1
+        try? ScanStore.save(scan)
         do {
-            var config = PhotogrammetrySession.Configuration()
-            config.checkpointDirectory = scan.checkpointURL
-            // Guided capture saves photos in the order they were taken, which lets matching start from neighbours.
-            config.sampleOrdering = .sequential
-            let session = try PhotogrammetrySession(input: scan.imagesURL, configuration: config)
-            try session.process(requests: [.modelFile(url: scan.modelURL)])
-            var failure: Error?
-            // The outputs stream stays open after the last request finishes, so leave it on
-            // processingComplete; waiting for the stream to end hangs at 100%.
-            outputs: for try await output in session.outputs {
-                switch output {
-                case .requestProgress(_, let fraction):
-                    progress = fraction
-                    progressNote = "Building the model… \(Int(fraction * 100))%"
-                case .requestError(_, let error):
-                    failure = error
-                case .processingCancelled:
-                    failure = NSError(domain: "CrystalBowl", code: 1, userInfo: [NSLocalizedDescriptionKey: "Processing was cancelled"])
-                    break outputs
-                case .processingComplete:
-                    break outputs
-                default:
-                    break
+            if !scan.hasModel {
+                if scan.blurrySetAside == nil {
+                    setProgress(0, "Checking the photos for blur…")
+                    let s = scan
+                    scan.blurrySetAside = await Task.detached { ShotQuality.setAsideBlurry(s) }.value
+                    try? ScanStore.save(scan)
                 }
+                try await photogrammetry(scan)
             }
-            if let failure { throw failure }
-            guard FileManager.default.fileExists(atPath: scan.modelURL.path) else {
-                throw NSError(domain: "CrystalBowl", code: 2, userInfo: [NSLocalizedDescriptionKey: "No model file was produced"])
-            }
-            progressNote = "Measuring…"
-            var done = scan
+            setProgress(0.9, "Measuring…")
             let url = scan.modelURL
-            done.stats = await Task.detached { MeshTools.measure(url) }.value
-            if done.photoCount == nil { done.photoCount = ScanStore.countPhotos(in: scan.imagesURL) }
-            progressNote = "Cutting cross-sections and the height profile…"
-            done.sections = await Self.cutStacks(done, specs: [(0, AppModel.defaultSpacingMM), (3, AppModel.defaultSpacingMM)])
-            // Lab formats are written straight away so sharing and the Drive upload are ready when the scan opens.
-            progressNote = "Writing STL, PLY and OBJ…"
-            let finished = done
-            _ = await Task.detached { MeshTools.exportAll(finished) }.value
-            // Photos waiting for a Drive upload are deleted after that upload instead.
-            let photosGoToDrive = uploadPhotos && driveSignedIn
-            if !UserDefaults.standard.bool(forKey: AppModel.keepPhotosKey) && !photosGoToDrive {
-                ScanStore.deletePhotos(done)
+            guard let stats = await Task.detached(operation: { MeshTools.measure(url) }).value else {
+                throw NSError(domain: "CrystalBowl", code: 3, userInfo: [NSLocalizedDescriptionKey: "The model file couldn't be read"])
             }
-            try? ScanStore.save(done)
+            scan.stats = stats
+            if scan.photoCount == nil { scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL) }
+            inheritCaliper(&scan)
+            try? ScanStore.save(scan)
             reload()
-            phase = .home
-            path = [done]
+            announceDimensions(scan)
+
+            setProgress(0.93, "Cutting cross-sections and the height profile…")
+            scan.sections = await Self.cutStacks(scan, specs: [(0, AppModel.defaultSpacingMM), (3, AppModel.defaultSpacingMM)])
+            setProgress(0.97, "Writing STL, PLY and OBJ…")
+            let finished = scan
+            _ = await Task.detached { MeshTools.exportAll(finished) }.value
+            scan.buildRequested = nil
+            // Photos waiting for a Drive upload are deleted after that upload instead.
+            let photosGoToDrive = uploadPhotos && (driveSignedIn || folderLinked)
+            if !UserDefaults.standard.bool(forKey: AppModel.keepPhotosKey) && !photosGoToDrive {
+                ScanStore.deletePhotos(scan)
+            }
+            try? ScanStore.save(scan)
+            reload()
+            setProgress(1, "Done")
+            BackgroundBuild.shared.end(success: true)
+            Notifier.post(id: "built-\(scan.id)", title: "\(scan.name): 3D model ready",
+                          body: "Model, lab files and slices are saved\(driveSignedIn || folderLinked ? " and going to Google Drive" : "").")
             Task { await syncAllPending() }
         } catch {
-            errorMessage = "Building the model failed: \(error.localizedDescription). Your photos are kept. Open the scan and tap Build model to try again."
+            BackgroundBuild.shared.end(success: false)
+            let interrupted = backgroundedDuringBuild || BackgroundBuild.shared.expired || UIApplication.shared.applicationState != .active
+            if interrupted && (scan.buildAttempts ?? 0) < 8 {
+                // Still requested: it resumes from the checkpoint as soon as the app is in front again.
+                try? ScanStore.save(scan)
+                Notifier.post(id: "paused-\(scan.id)", title: "\(scan.name): build paused",
+                              body: "iOS paused the 3D build while the phone was busy. Open Crystal Bowl and it carries on from where it stopped.")
+                if UIApplication.shared.applicationState == .active { buildQueue.append(scan.id) }
+            } else if (scan.blurrySetAside ?? 0) > 0 {
+                // Try once more with every photo.
+                ShotQuality.restoreBlurry(scan)
+                scan.blurrySetAside = 0
+                try? ScanStore.save(scan)
+                buildQueue.append(scan.id)
+            } else {
+                scan.buildRequested = nil
+                try? ScanStore.save(scan)
+                errorMessage = "Building the model of \"\(scan.name)\" failed: \(error.localizedDescription). Your photos are kept. Open the scan and tap Build model to try again."
+            }
             reload()
-            phase = .home
         }
+    }
+
+    private func photogrammetry(_ scan: Scan) async throws {
+        setProgress(0.01, "Preparing \(ScanStore.countPhotos(in: scan.imagesURL)) photos…")
+        var config = PhotogrammetrySession.Configuration()
+        config.checkpointDirectory = scan.checkpointURL
+        // Guided capture saves photos in the order they were taken, which lets matching start from neighbours.
+        config.sampleOrdering = .sequential
+        let session = try PhotogrammetrySession(input: scan.imagesURL, configuration: config)
+        photoSession = session
+        try session.process(requests: [.modelFile(url: scan.modelURL)])
+        var failure: Error?
+        // The outputs stream stays open after the last request finishes, so leave it on
+        // processingComplete; waiting for the stream to end hangs at 100%.
+        outputs: for try await output in session.outputs {
+            switch output {
+            case .requestProgress(_, let fraction):
+                setProgress(fraction * 0.88, "Building the model… \(Int(fraction * 100))%")
+            case .requestError(_, let error):
+                failure = error
+            case .processingCancelled:
+                failure = NSError(domain: "CrystalBowl", code: 1, userInfo: [NSLocalizedDescriptionKey: "Processing was stopped"])
+                break outputs
+            case .processingComplete:
+                break outputs
+            default:
+                break
+            }
+        }
+        if let failure { throw failure }
+        guard FileManager.default.fileExists(atPath: scan.modelURL.path) else {
+            throw NSError(domain: "CrystalBowl", code: 2, userInfo: [NSLocalizedDescriptionKey: "No model file was produced"])
+        }
+    }
+
+    /// The first result the user is waiting for: enough to centre the rock in the micro-CT.
+    private func announceDimensions(_ scan: Scan) {
+        guard let u = scan.stats?.upright else { return }
+        let f = scan.scaleFactor
+        let text = String(format: "Height %.1f mm · footprint %.1f × %.1f mm · fits a cylinder Ø %.1f mm",
+                          u.heightMM * f, u.lengthMM * f, u.widthMM * f, (u.cylinderDiameterMM ?? u.maxDiameterMM) * f)
+        readyNotice = ReadyNotice(id: scan.id, name: scan.name, text: text)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Notifier.post(id: "dims-\(scan.id)", title: "\(scan.name): dimensions ready",
+                      body: text + ". Enough to centre it in the micro-CT. The full model is still being finished.")
+    }
+
+    /// A scan of a sample that was caliper-checked before takes over that check, so repeat scans share one scale.
+    /// The default name "Rock sample" is never matched, since it may be any rock.
+    private func inheritCaliper(_ scan: inout Scan) {
+        guard scan.caliper == nil, scan.sampleKey != "rock sample" else { return }
+        let earlier = scans.filter { $0.id != scan.id && $0.sampleKey == scan.sampleKey && $0.caliper != nil }
+            .sorted { ($0.caliper?.date ?? .distantPast) > ($1.caliper?.date ?? .distantPast) }
+        guard let source = earlier.first, var c = source.caliper else { return }
+        c.fromScanID = c.fromScanID ?? source.id
+        scan.caliper = c
+    }
+
+    /// Scans of the same sample that were measured with the 1.8 method, oldest first.
+    func repeats(of scan: Scan) -> [Scan] {
+        scans.filter { $0.sampleKey == scan.sampleKey && $0.stats?.box != nil }.sorted { $0.created < $1.created }
+    }
+
+    /// One line with the sizes, for pasting into notes or a CT booking.
+    func dimensionsText(_ scan: Scan) -> String {
+        guard let s = scan.stats else { return "\(scan.name): not measured yet" }
+        let f = scan.scaleFactor
+        var t = scan.name + String(format: ": a × b × c %.1f × %.1f × %.1f mm", s.axisA * f, s.axisB * f, s.axisC * f)
+        if let u = s.upright {
+            t += String(format: "; height %.1f mm; footprint %.1f × %.1f mm; micro-CT cylinder Ø %.1f mm",
+                        u.heightMM * f, u.lengthMM * f, u.widthMM * f, (u.cylinderDiameterMM ?? u.maxDiameterMM) * f)
+        }
+        t += String(format: "; volume %.2f cm³", s.volumeCM3 * f * f * f)
+        return t + (scan.caliper == nil ? " (LiDAR scale)" : " (caliper-corrected)")
+    }
+
+    func rename(_ scan: Scan, to newName: String) {
+        let t = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, var s = scans.first(where: { $0.id == scan.id }) else { return }
+        if s.storedStem == nil { s.storedStem = s.fileStem }
+        s.name = t
+        try? ScanStore.save(s)
+        if s.hasModel { _ = MeshTools.writeReport(s) }
+        reload()
     }
 
     /// Measures a scan whose model was built but never measured (version 1.3 could stop at 100% after writing it).
@@ -361,8 +571,16 @@ final class AppModel: ObservableObject {
     }
 
     func delete(_ scan: Scan) {
+        buildQueue.removeAll { $0 == scan.id }
+        if buildingID == scan.id { photoSession?.cancel() }
         ScanStore.delete(scan)
         path.removeAll { $0.id == scan.id }
         reload()
     }
+}
+
+struct ReadyNotice: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let text: String
 }

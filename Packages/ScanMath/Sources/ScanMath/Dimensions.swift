@@ -25,10 +25,15 @@ public struct UprightSize: Codable, Hashable, Sendable {
     public var maxDiameterMM: Double
     /// Narrowest horizontal caliper width of the footprint.
     public var minWidthMM: Double
+    /// Diameter of the smallest vertical cylinder that holds the rock as it stood: the clearance it needs when
+    /// turning on a vertical rotation axis (micro-CT stage). Nil before 1.8.
+    public var cylinderDiameterMM: Double?
 
-    public init(heightMM: Double, lengthMM: Double, widthMM: Double, maxDiameterMM: Double, minWidthMM: Double) {
+    public init(heightMM: Double, lengthMM: Double, widthMM: Double, maxDiameterMM: Double, minWidthMM: Double,
+                cylinderDiameterMM: Double? = nil) {
         self.heightMM = heightMM; self.lengthMM = lengthMM; self.widthMM = widthMM
         self.maxDiameterMM = maxDiameterMM; self.minWidthMM = minWidthMM
+        self.cylinderDiameterMM = cylinderDiameterMM
     }
 }
 
@@ -129,9 +134,12 @@ extension ScanMath {
             lo = Swift.min(lo, h); hi = Swift.max(hi, h)
             footprint.append(SIMD2(Double(p[h1]), Double(p[h2])))
         }
-        let c = hullCalipers(convexHull(footprint))
+        let hull = convexHull(footprint)
+        let c = hullCalipers(hull)
+        let circle = enclosingCircle(hull)
         return UprightSize(heightMM: (hi - lo) * unitToMM, lengthMM: c.rectLong * unitToMM, widthMM: c.rectShort * unitToMM,
-                           maxDiameterMM: c.maxFeret * unitToMM, minWidthMM: c.minWidth * unitToMM)
+                           maxDiameterMM: c.maxFeret * unitToMM, minWidthMM: c.minWidth * unitToMM,
+                           cylinderDiameterMM: 2 * circle.radius * unitToMM)
     }
 
     /// Frame for slicing the model horizontally as it stood: axis 0 points up, axis 1 along the long side of the

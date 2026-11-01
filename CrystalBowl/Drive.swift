@@ -329,7 +329,10 @@ enum ScanPackage {
         if scan.hasModel { out.append(("model/\(scan.modelURL.lastPathComponent)", scan.modelURL)) }
         walk(scan.exportsURL, prefix: "model")
         walk(scan.sectionsURL, prefix: "sections")
-        if includePhotos { walk(scan.imagesURL, prefix: "images") }
+        if includePhotos {
+            walk(scan.imagesURL, prefix: "images")
+            walk(scan.detailURL, prefix: "detail")
+        }
         var seen = Set<String>()
         return out.filter { seen.insert($0.0).inserted }
     }
@@ -344,6 +347,8 @@ enum ScanPackage {
 
     static func role(_ rel: String) -> String {
         if rel.hasPrefix("images/") { return "original_photo" }
+        if rel == "detail/detail.json" { return "detail_photo_index" }
+        if rel.hasPrefix("detail/") { return "detail_photo" }
         if rel.hasSuffix("dimensions.json") { return "dimensions" }
         if rel.hasPrefix("sections/") {
             if rel.hasSuffix("-geometry.json") { return "section_geometry" }
@@ -441,6 +446,21 @@ enum ScanPackage {
             "scale": scale,
             "measurements": measurements,
             "dimensions_file": "model/\(scan.fileStem)-dimensions.json",
+            "size_method": scan.stats?.box != nil
+                ? "a x b x c = sides of the smallest box around the main body (loose pieces under 5 % of the surface dropped)"
+                : "a x b x c = extents along principal axes (measured before 1.8; tap Repair to update)",
+            "box_mm": scan.stats?.box.map { b -> Any in
+                ["length": b.lengthMM, "width": b.widthMM, "thickness": b.thicknessMM,
+                 "max_feret": b.maxFeretMM, "min_feret": b.minFeretMM]
+            } ?? NSNull(),
+            "micro_ct": scan.stats?.upright.map { u -> Any in
+                ["height_mm": u.heightMM * scan.scaleFactor,
+                 "cylinder_diameter_mm": (u.cylinderDiameterMM ?? u.maxDiameterMM) * scan.scaleFactor,
+                 "note": "smallest vertical cylinder holding the rock as it stood when scanned; caliper-corrected when a check exists"]
+            } ?? NSNull(),
+            "detail_photos": scan.detailCount,
+            "blurry_photos_set_aside": scan.blurrySetAside ?? 0,
+            "quick_scan": scan.quick ?? false,
             "upright_as_scanned_mm": scan.stats?.upright.map { u -> Any in
                 ["height": u.heightMM, "length": u.lengthMM, "width": u.widthMM, "max_diameter": u.maxDiameterMM, "min_width": u.minWidthMM]
             } ?? NSNull(),
@@ -470,6 +490,8 @@ enum ScanPackage {
                          h-axis stacks are horizontal slices up the model as it stood (height profile).
                          Each stack folder also carries dimensions.json.
       images/            original capture photos, only when photo upload is switched on.
+      detail/            close-up photos for surface patterns (all lenses, sharp ones only) with
+                         detail.json (lens, zoom, direction round the rock, sharpness). Wi-Fi only.
 
     index.json in this folder lists every scan, newest first.
     """
