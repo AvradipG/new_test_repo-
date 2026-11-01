@@ -40,4 +40,4 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CB_GIT_COMMIT: dev
-        CB_GOOGLE_CLIENT_ID: ""
+        CB_GOOGLE_CLIENT_ID: "60541649934-sfas6f95kuv4jsr323f81bc99imtp60e.apps.googleusercontent.com"
