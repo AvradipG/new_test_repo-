@@ -107,6 +107,40 @@ jobs:
             echo "::notice::TestFlight upload skipped: add ASC_KEY_P8, ASC_KEY_ID, ASC_ISSUER_ID and APPLE_TEAM_ID as repository secrets to enable it."
           fi
 
+      # Each run signs on a fresh Mac, so Xcode makes a new Apple Development certificate whose private key is
+      # gone when the runner is. Apple caps how many may exist, so remove the ones earlier CI runs created.
+      - name: Remove old CI signing certificates
+        if: steps.tf.outputs.enabled == 'true'
+        continue-on-error: true
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography
+          python3 - <<'PY'
+          import os, time, json, urllib.request, jwt
+          now = int(time.time())
+          tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": now, "exp": now + 600, "aud": "appstoreconnect-v1"},
+                           os.environ["ASC_KEY_P8"], algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          def call(method, url):
+              req = urllib.request.Request(url, method=method, headers={"Authorization": "Bearer " + tok})
+              with urllib.request.urlopen(req) as f:
+                  body = f.read()
+              return json.loads(body) if body else None
+          certs = call("GET", "https://api.appstoreconnect.apple.com/v1/certificates?limit=200")["data"]
+          dev = [c for c in certs if c["attributes"].get("certificateType") in ("DEVELOPMENT", "IOS_DEVELOPMENT")]
+          print(f"{len(certs)} certificates, {len(dev)} development")
+          for c in dev:
+              a = c["attributes"]
+              label = a.get("name", "") + " " + (a.get("displayName") or "")
+              made_by_ci = "Created via API" in label
+              print(a.get("certificateType"), "CI" if made_by_ci else "other", a.get("expirationDate"))
+              if made_by_ci:
+                  call("DELETE", "https://api.appstoreconnect.apple.com/v1/certificates/" + c["id"])
+                  print("  removed")
+          PY
+
       - name: Sign and upload to TestFlight
         if: steps.tf.outputs.enabled == 'true'
         env:
