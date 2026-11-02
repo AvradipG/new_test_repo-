@@ -3,6 +3,14 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.10
+- Fixed: orange or empty sectors on the ring now turn green. Hold the phone still on one and the app takes the photo itself, even when the 3D camera had decided it had enough
+- New shutter button (Photo here) for any spot you want covered
+- Tap the rock on screen to focus and brighten it, as in the Camera app; the camera keeps that spot sharp as you move
+- In poor light the phone's light comes on softly by itself; tap the light button to switch it off or on
+- Clearer start: the phone finds the table first, then puts a box round the rock on it
+- See a finished scan life-size on the table in AR, next to the real rock
+
 ## 1.9
 - Google Drive upload is always on and keeps going in the background: switch apps or lock the phone and iOS finishes the upload
 - A notification tells you when a scan is safely on Google Drive

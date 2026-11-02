@@ -20,6 +20,12 @@ final class AppModel: ObservableObject {
     @Published var passNumber = 1
     @Published var shotCount = 0
     @Published var feedbackText: String?
+    /// Photos the app asked for itself on empty sectors (Object Capture had skipped them).
+    @Published var requestedShots = 0
+    @Published var lightOn = false
+    /// The user switched the light off, so it isn't turned on again by itself during this scan.
+    private var lightDeclined = false
+    private var darkSince: Date?
 
     // Google Drive
     @Published var driveSignedIn = false
@@ -101,6 +107,10 @@ final class AppModel: ObservableObject {
             passNumber = 1
             shotCount = 0
             feedbackText = nil
+            requestedShots = 0
+            lightOn = false
+            lightDeclined = false
+            darkSince = nil
             cancelling = false
             phase = .capturing
             UIApplication.shared.isIdleTimerDisabled = true
@@ -144,6 +154,11 @@ final class AppModel: ObservableObject {
         shotCount = session.numberOfShotsTaken
         feedbackText = Self.describe(session.feedback)
         guide.update(shotCount: shotCount, capturing: captureStage == .capturing && !passCompleted, feedback: feedbackText)
+        if guide.wantsShot && session.canRequestImageCapture {
+            session.requestImageCapture()
+            requestedShots += 1
+        }
+        if captureStage == .capturing || captureStage == .detecting { autoLight(session.feedback) }
         if passCompleted && !wasCompleted {
             guide.passCompleted()
             markBlurryOnRing()
@@ -156,10 +171,10 @@ final class AppModel: ObservableObject {
     static func describe(_ feedback: Set<ObjectCaptureSession.Feedback>) -> String? {
         let text: [String: String] = [
             "objectTooClose": "Move back a little",
-            "objectTooFar": "Move closer to the rock",
+            "objectTooFar": "Move closer to the rock (the 3D camera doesn't zoom: zoom would spoil the true size)",
             "movingTooFast": "Slow down",
-            "environmentLowLight": "More light needed",
-            "environmentTooDark": "Too dark to scan",
+            "environmentLowLight": "Low light: the phone's light is coming on. More room light is better still",
+            "environmentTooDark": "Too dark: turn on a lamp or tap the light button",
             "outOfFieldOfView": "Keep the rock in view",
             "objectNotFlippable": "This rock may not flip well. Scan it upright again instead",
             "overCapturing": "Enough photos from here. Keep moving",
@@ -206,6 +221,30 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Shutter button: a photo from exactly here, whatever Object Capture thinks it already has.
+    func takePhotoNow() {
+        guard let s = captureSession, s.canRequestImageCapture else { return }
+        s.requestImageCapture()
+        requestedShots += 1
+    }
+
+    func toggleLight() {
+        let on = !lightOn
+        if CameraAssist.setLight(on) { lightOn = on }
+        if !on { lightDeclined = true }
+    }
+
+    /// In poor light the phone's light comes on softly by itself after a moment (once per scan; the user can turn it off).
+    private func autoLight(_ feedback: Set<ObjectCaptureSession.Feedback>) {
+        let keys = Set(feedback.map { String(describing: $0) })
+        let dark = keys.contains("environmentLowLight") || keys.contains("environmentTooDark")
+        guard dark else { darkSince = nil; return }
+        if darkSince == nil { darkSince = Date() }
+        if !lightOn && !lightDeclined, let since = darkSince, Date().timeIntervalSince(since) > 1.5, CameraAssist.setLight(true) {
+            lightOn = true
+        }
+    }
+
     func startDetecting() { _ = captureSession?.startDetecting() }
     func resetDetection() { captureSession?.resetDetection() }
     func startCapturing() { captureSession?.startCapturing() }
@@ -235,6 +274,8 @@ final class AppModel: ObservableObject {
     }
 
     private func endCapture() {
+        if lightOn { CameraAssist.setLight(false) }
+        lightOn = false
         pollTask?.cancel()
         pollTask = nil
         captureSession = nil

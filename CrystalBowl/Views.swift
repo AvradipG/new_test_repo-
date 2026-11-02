@@ -455,11 +455,27 @@ struct CaptureView: View {
             } else {
                 ObjectCaptureView(session: session)
                     .ignoresSafeArea()
+                if model.captureStage == .capturing {
+                    FocusTapLayer()
+                        .ignoresSafeArea()
+                }
             }
             VStack(spacing: 12) {
                 HStack(alignment: .top) {
-                    Button("Cancel", role: .destructive) { model.cancelCapture() }
-                        .buttonStyle(.bordered)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button("Cancel", role: .destructive) { model.cancelCapture() }
+                            .buttonStyle(.bordered)
+                        if CameraAssist.hasLight && model.captureStage != .initializing {
+                            Button { model.toggleLight() } label: {
+                                Image(systemName: model.lightOn ? "flashlight.on.fill" : "flashlight.off.fill")
+                                    .font(.title3)
+                                    .frame(width: 44, height: 44)
+                                    .background(model.lightOn ? Color.yellow.opacity(0.85) : Color.clear, in: Circle())
+                                    .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .accessibilityLabel(model.lightOn ? "Turn the light off" : "Turn the light on")
+                        }
+                    }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 8) {
                         Text("Pass \(model.passNumber) · \(model.shotCount) photos")
@@ -498,13 +514,15 @@ struct CaptureView: View {
             ProgressView("Starting camera…")
         case .ready:
             VStack(spacing: 10) {
-                Text("Point the camera at the rock.").multilineTextAlignment(.center)
+                Text("Put the rock on a plain table and point the camera at it. The phone first finds the table surface, then the rock on it.")
+                    .multilineTextAlignment(.center)
                 Button("Continue") { model.startDetecting() }
                     .buttonStyle(.borderedProminent)
             }
         case .detecting:
             VStack(spacing: 10) {
-                Text("Drag the box edges so it just fits the rock.").multilineTextAlignment(.center)
+                Text("The table is found and the box sits on it round the rock. Drag the box edges so it just fits the rock, nothing else.")
+                    .multilineTextAlignment(.center)
                 HStack {
                     Button("Reset box") { model.resetDetection() }.buttonStyle(.bordered)
                     Button("Start capture") { model.startCapturing() }.buttonStyle(.borderedProminent)
@@ -522,7 +540,16 @@ struct CaptureView: View {
                             : "Walk slowly round the rock, 25–40 cm away. Feel a tick for each photo; a buzz means slow down, change height or a blurred photo.")
                         .font(.callout)
                         .multilineTextAlignment(.center)
-                    Button("Finish now") { model.finishCapture() }.buttonStyle(.bordered)
+                    Text("Tap the rock on screen to focus and brighten it. Hold still on an orange sector and the photo is taken for you, or tap the shutter.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    HStack(spacing: 12) {
+                        Button("Finish now") { model.finishCapture() }.buttonStyle(.bordered)
+                        Button { model.takePhotoNow() } label: {
+                            Label("Photo here", systemImage: "camera.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
             }
         case .finishing:
@@ -649,6 +676,7 @@ struct ScanDetailView: View {
     @State private var measuring = false
     @State private var copied = false
     @State private var showDetailCamera = false
+    @State private var showAR = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
@@ -663,6 +691,9 @@ struct ScanDetailView: View {
                         ModelPreview(url: scan.modelURL)
                             .frame(height: 320)
                             .listRowInsets(EdgeInsets())
+                        Button { showAR = true } label: {
+                            Label("See it life-size on the table (AR)", systemImage: "arkit")
+                        }
                     } else if model.buildingID == scan.id {
                         VStack(alignment: .leading, spacing: 8) {
                             Label("Building the 3D model", systemImage: "cube.transparent.fill").font(.headline)
@@ -769,6 +800,13 @@ struct ScanDetailView: View {
                 Button("Delete \(scan.name)", role: .destructive) { model.delete(scan) }
             } message: {
                 Text("The model, photos and slices on this iPhone are deleted. Copies on Google Drive stay.")
+            }
+            .fullScreenCover(isPresented: $showAR) {
+                NavigationStack {
+                    ARModelPreview(url: scan.modelURL)
+                        .ignoresSafeArea()
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showAR = false } } }
+                }
             }
             .fullScreenCover(isPresented: $showDetailCamera) {
                 DetailCaptureView(scan: scan) {
@@ -1278,6 +1316,38 @@ struct DriveSetupSheet: View {
             .fileImporter(isPresented: $picking, allowedContentTypes: [.folder]) { result in
                 if case .success(let url) = result {
                     model.linkFolder(url)
+                }
+            }
+        }
+    }
+}
+
+/// Tap anywhere on the camera picture to focus and set the brightness on that spot (like the Camera app).
+struct FocusTapLayer: View {
+    @State private var mark: CGPoint?
+    @State private var markID = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.clear.contentShape(Rectangle())
+                if let mark {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.yellow, lineWidth: 2)
+                        .frame(width: 76, height: 76)
+                        .position(mark)
+                        .transition(.opacity)
+                }
+            }
+            .onTapGesture { p in
+                guard geo.size.width > 0, geo.size.height > 0 else { return }
+                CameraAssist.focus(atView: CGPoint(x: p.x / geo.size.width, y: p.y / geo.size.height))
+                UISelectionFeedbackGenerator().selectionChanged()
+                withAnimation { mark = p }
+                markID += 1
+                let id = markID
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    if markID == id { withAnimation { mark = nil } }
                 }
             }
         }

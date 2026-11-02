@@ -2,6 +2,7 @@ import Foundation
 import CoreMotion
 import UIKit
 import simd
+import ScanMath
 
 /// Hand-held capture guide. The motion sensors tell where the phone is around the rock (how far the
 /// user has walked from the start and how steeply the camera looks down), every photo is placed on a
@@ -55,6 +56,8 @@ final class CaptureGuide: ObservableObject {
     @Published private(set) var targetBand: Band = .middle
     @Published private(set) var fillingGaps = false
     @Published private(set) var tracking = false
+    /// True for one update when the phone is held still on an empty sector: the app then asks for a photo itself.
+    private(set) var wantsShot = false
 
     private let motion = CMMotionManager()
     private var shots: [Shot] = []
@@ -72,6 +75,8 @@ final class CaptureGuide: ObservableObject {
     /// Photos taken before the current side (index of this side's first photo among all photos of the scan).
     private var sideOffset = 0
     private var blurUntil = Date.distantPast
+    private var map = CoverageMap()
+    private var planner = ShotPlanner()
 
     private let tick = UIImpactFeedbackGenerator(style: .light)
     private let bump = UIImpactFeedbackGenerator(style: .rigid)
@@ -166,6 +171,9 @@ final class CaptureGuide: ObservableObject {
             if hapticsOn { tick.impactOccurred(intensity: 0.55) }
         }
 
+        wantsShot = capturing && planner.update(map: map, degrees: angle, lookDown: pose.lookDown, speed: rate,
+                                                tracking: startHeading != nil && pose.lookDown < 80, now: now)
+
         guard capturing else { hint = nil; return }
         guide(now: now, feedback: feedback)
     }
@@ -210,7 +218,7 @@ final class CaptureGuide: ObservableObject {
             if empty && lastEmptySector != sector && hapticsOn { bump.impactOccurred(intensity: 0.8) }
             lastEmptySector = empty ? sector : nil
             if let next = nearestGap(from: sector, band: targetBand) {
-                text = next == 0 ? "Gap here: hold still while photos are taken" : "Next gap: \(abs(next) * 15)° \(next > 0 ? "ahead" : "back")"
+                text = next == 0 ? "Gap here: hold still, the photo is taken for you" : "Next gap: \(abs(next) * 15)° \(next > 0 ? "ahead" : "back")"
             } else {
                 text = "\(targetBand.name) ring complete"
             }
@@ -226,10 +234,11 @@ final class CaptureGuide: ObservableObject {
     // MARK: Coverage
 
     private func recount() {
-        var c = Array(repeating: Array(repeating: 0, count: Self.sectorCount), count: 3)
+        var m = CoverageMap()
         let dir = direction == 0 ? 1 : direction
-        for s in shots where !s.blurry { c[s.band.rawValue][Self.sector(Self.positive(s.heading * dir))] += 1 }
-        coverage = c
+        for s in shots where !s.blurry { m.add(band: s.band.rawValue, degrees: s.heading * dir) }
+        map = m
+        coverage = m.counts
     }
 
     /// A photo just taken came out blurred: buzz and show the hint for a few seconds.
