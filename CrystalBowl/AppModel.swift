@@ -61,11 +61,16 @@ final class AppModel: ObservableObject {
 
     var isCaptureSupported: Bool { ObjectCaptureSession.isSupported }
 
+    /// The one model of the running app; background upload callbacks reach it through this.
+    static weak var current: AppModel?
+
     init() {
         reload()
         refreshDriveAccount()
         refreshFolderLink()
-        resumePendingBuilds()
+        AppModel.current = self
+        // When iOS launches the app in the background only to finish uploads, builds wait until it is opened.
+        if UIApplication.shared.applicationState != .background { resumePendingBuilds() }
     }
 
     func reload() { scans = ScanStore.loadAll() }
@@ -294,6 +299,9 @@ final class AppModel: ObservableObject {
 
     func appMovedToBackground() {
         if buildingID != nil { backgroundedDuringBuild = true }
+        if driveSignedIn && scans.contains(where: { $0.hasModel && $0.drive?.complete != true }) {
+            AppDelegate.scheduleUploadTask()
+        }
     }
 
     var pendingBuilds: [Scan] { scans.filter { $0.buildRequested == true && $0.id != buildingID } }

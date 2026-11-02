@@ -56,7 +56,7 @@ extension AppModel {
 
     /// Copies every finished scan with files the folder doesn't have yet.
     func syncFolderPending(force: Bool = false) async {
-        guard folderLinked, !isFolderSyncing, force || autoUpload else { return }
+        guard folderLinked, !driveSignedIn, !isFolderSyncing, force || autoUpload else { return }
         let unmetered = await NetworkState.isUnmetered()
         for scan in scans where scan.hasModel && scan.buildRequested != true {
             if needsCopy(scan.folderSync, scan: scan, photosAllowed: unmetered) { await syncToFolder(scan) }

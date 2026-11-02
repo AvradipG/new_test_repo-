@@ -225,6 +225,22 @@ struct DriveClient {
 
     /// Uploads a file with a resumable session. Replaces the content of `existingID` when given.
     func upload(_ file: URL, name: String, parent: String, existingID: String?) async throws -> String {
+        let sessionURL = try await startUpload(file, name: name, parent: parent, existingID: existingID)
+        var put = URLRequest(url: sessionURL)
+        put.httpMethod = "PUT"
+        put.setValue(Self.mimeType(for: file.pathExtension), forHTTPHeaderField: "Content-Type")
+        put.timeoutInterval = 600
+        let (data, resp) = try await URLSession.shared.upload(for: put, fromFile: file)
+        guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code),
+              let id = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["id"] as? String else {
+            throw DriveError(message: "Upload of \(name) failed.")
+        }
+        return id
+    }
+
+    /// Opens a Google resumable upload session for one file and returns its URL. The URL itself authorises
+    /// the upload for a week, so the bytes can be sent later by iOS in the background without a token.
+    func startUpload(_ file: URL, name: String, parent: String, existingID: String?) async throws -> URL {
         let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value ?? 0
         let mime = Self.mimeType(for: file.pathExtension)
         var meta: [String: Any] = ["name": name]
@@ -245,16 +261,7 @@ struct DriveClient {
         guard let location = http.value(forHTTPHeaderField: "Location"), let sessionURL = URL(string: location) else {
             throw DriveError(message: "Google Drive didn't start the upload of \(name).")
         }
-        var put = URLRequest(url: sessionURL)
-        put.httpMethod = "PUT"
-        put.setValue(mime, forHTTPHeaderField: "Content-Type")
-        put.timeoutInterval = 600
-        let (data, resp) = try await URLSession.shared.upload(for: put, fromFile: file)
-        guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code),
-              let id = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["id"] as? String else {
-            throw DriveError(message: "Upload of \(name) failed.")
-        }
-        return id
+        return sessionURL
     }
 
     static func mimeType(for ext: String) -> String {
@@ -281,6 +288,8 @@ struct DriveSync: Codable, Hashable {
     var files: [String: DriveFileRecord] = [:]
     var lastSync: Date?
     var complete = false
+    /// Whether this upload includes the photos (decided once per upload, on Wi-Fi).
+    var photos: Bool?
 }
 
 struct DriveFileRecord: Codable, Hashable {
@@ -493,6 +502,12 @@ enum ScanPackage {
       detail/            close-up photos for surface patterns (all lenses, sharp ones only) with
                          detail.json (lens, zoom, direction round the rock, sharpness). Wi-Fi only.
 
-    index.json in this folder lists every scan, newest first.
+    index.json in this folder lists every scan, newest first (schema crystal-bowl.index/1): scan_id,
+    name, sample_key, scanned_utc and scanned_local, folder and folder_id, status (complete once
+    manifest.json is on Drive), sizes in mm (size_mm a >= b >= c, feret_mm, micro_ct height and
+    cylinder diameter), volume_cm3 and scale (LiDAR or caliper-corrected). Software should read
+    index.json first, then the manifest.json of each scan it needs.
+
+    Folder names: <yyyyMMdd-HHmmss>_<sample name>, so they sort by scan time.
     """
 }

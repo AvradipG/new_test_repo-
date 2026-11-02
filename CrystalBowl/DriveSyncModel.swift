@@ -8,13 +8,16 @@ extension AppModel {
     private static let indexIDKey = "drive.indexID"
     private static let readmeIDKey = "drive.readmeID"
 
-    var autoUpload: Bool { UserDefaults.standard.object(forKey: Self.autoUploadKey) as? Bool ?? true }
+    /// Always on: every finished scan goes to Drive by itself.
+    var autoUpload: Bool { true }
     /// On by default: the original photos let a Mac or PC rebuild the model at full detail later.
     var uploadPhotos: Bool { UserDefaults.standard.object(forKey: Self.uploadPhotosKey) as? Bool ?? true }
 
     func refreshDriveAccount() {
         driveSignedIn = GoogleAuth.shared.isSignedIn
         driveEmail = GoogleAuth.shared.email
+        // One place on Drive only: once signed in, the Files-folder copy (which could land anywhere) stops.
+        if driveSignedIn && UserDefaults.standard.data(forKey: Self.folderBookmarkKey) != nil { unlinkFolder() }
     }
 
     func signInToDrive() async {
@@ -37,7 +40,8 @@ extension AppModel {
     /// Uploads every finished scan that has files Drive doesn't have yet.
     func syncAllPending(force: Bool = false) async {
         await syncFolderPending(force: force)
-        guard driveSignedIn, !isSyncing, force || autoUpload else { return }
+        guard driveSignedIn, !isSyncing else { return }
+        reload()
         let unmetered = await NetworkState.isUnmetered()
         for scan in scans where scan.hasModel && scan.buildRequested != true {
             if needsSync(scan, photosAllowed: unmetered) { await sync(scan) }
@@ -46,7 +50,7 @@ extension AppModel {
 
     func needsSync(_ scan: Scan, photosAllowed: Bool) -> Bool {
         guard let state = scan.drive, state.complete else { return true }
-        let files = ScanPackage.files(for: scan, includePhotos: uploadPhotos && photosAllowed)
+        let files = ScanPackage.files(for: scan, includePhotos: state.photos ?? (uploadPhotos && photosAllowed))
         return files.contains { rel, url in
             guard let rec = state.files[rel] else { return true }
             return Self.changed(url, rec)
@@ -69,24 +73,30 @@ extension AppModel {
             UIApplication.shared.endBackgroundTask(bg)
         }
         var scan = scans.first { $0.id == original.id } ?? original
-        driveStatus[scan.id] = "Preparing upload…"
         var state = scan.drive ?? DriveSync()
-        state.complete = false
         do {
             // Lab formats go to Drive with every scan, so make them if they don't exist yet.
             let plyPath = scan.exportsURL.appendingPathComponent("\(scan.fileStem).ply").path
             if !FileManager.default.fileExists(atPath: plyPath) {
+                driveStatus[scan.id] = "Preparing upload…"
                 let s = scan
                 _ = await Task.detached { MeshTools.exportAll(s) }.value
             }
-            let photosNow = uploadPhotos && (scan.hasPhotos || scan.detailCount > 0) ? await NetworkState.isUnmetered() : false
-            let files = ScanPackage.files(for: scan, includePhotos: photosNow)
+            if state.photos == nil || state.complete {
+                state.photos = uploadPhotos && (scan.hasPhotos || scan.detailCount > 0) ? await NetworkState.isUnmetered() : false
+            }
+            let files = ScanPackage.files(for: scan, includePhotos: state.photos ?? false)
+            let running = await DriveBackground.shared.inFlight()[scan.id] ?? []
 
             let client = DriveClient()
             let root = try await client.folder(named: ScanPackage.rootFolder, in: "root")
             let folderID = try await client.folder(named: "\(scan.id)_\(scan.fileStem)", in: root)
             if state.folderID != folderID { state.files = [:] } // folder was recreated on Drive
             state.folderID = folderID
+            state.complete = false
+            scan.drive = state
+            try? ScanStore.save(scan)
+            reload()
             var folders: [String: String] = ["": folderID]
 
             func folder(for rel: String) async throws -> String {
@@ -98,44 +108,103 @@ extension AppModel {
                 return id
             }
 
-            for (i, (rel, url)) in files.enumerated() {
-                let a = try FileManager.default.attributesOfItem(atPath: url.path)
-                let size = (a[.size] as? NSNumber)?.int64Value ?? 0
-                let mod = a[.modificationDate] as? Date ?? Date()
-                if let rec = state.files[rel], !Self.changed(url, rec) { continue }
-                driveStatus[scan.id] = "Uploading \(i + 1) of \(files.count)…"
-                let parent = try await folder(for: rel)
-                let id = try await uploadReplacing(client, url, name: url.lastPathComponent, parent: parent, existing: state.files[rel]?.id)
-                state.files[rel] = DriveFileRecord(id: id, size: size, modified: mod)
-                scan.drive = state
-                try? ScanStore.save(scan)
+            // Hand every missing file to iOS, which uploads them in the background, also with the app closed.
+            let todo = files.filter { rel, url in
+                !running.contains(rel) && (state.files[rel].map { Self.changed(url, $0) } ?? true)
             }
+            for (n, (rel, url)) in todo.enumerated() {
+                driveStatus[scan.id] = "Handing files to iOS for upload: \(n + 1) of \(todo.count)…"
+                let a = try FileManager.default.attributesOfItem(atPath: url.path)
+                let item = DriveBackground.Item(scanID: scan.id, rel: rel,
+                                                size: (a[.size] as? NSNumber)?.int64Value ?? 0,
+                                                modified: a[.modificationDate] as? Date ?? Date())
+                let parent = try await folder(for: rel)
+                let sessionURL: URL
+                if let existing = state.files[rel]?.id,
+                   let u = try? await client.startUpload(url, name: url.lastPathComponent, parent: parent, existingID: existing) {
+                    sessionURL = u
+                } else {
+                    sessionURL = try await client.startUpload(url, name: url.lastPathComponent, parent: parent, existingID: nil)
+                }
+                DriveBackground.shared.submit(item, to: sessionURL, file: url, mime: DriveClient.mimeType(for: url.pathExtension))
+            }
+            updateUploadStatus(scan.id)
+            await finishIfUploaded(scan.id)
+        } catch {
+            driveStatus[scan.id] = "Upload paused: \(error.localizedDescription). It carries on by itself when the phone is online."
+            AppDelegate.scheduleUploadTask()
+        }
+    }
 
-            // The manifest goes last, so its presence on Drive means the package is complete.
-            driveStatus[scan.id] = "Writing manifest…"
+    /// Called (also with the app in the background) each time iOS finishes uploading one file.
+    func backgroundUploadFinished(_ item: DriveBackground.Item, fileID: String?) {
+        guard var scan = ScanStore.loadAll().first(where: { $0.id == item.scanID }) else { return }
+        if let fileID {
+            var state = scan.drive ?? DriveSync()
+            state.files[item.rel] = DriveFileRecord(id: fileID, size: item.size, modified: item.modified)
+            scan.drive = state
+            try? ScanStore.save(scan)
+            reload()
+        } else {
+            AppDelegate.scheduleUploadTask() // retried later; nothing is lost
+        }
+        updateUploadStatus(item.scanID)
+    }
+
+    /// Writes the manifest and the index for every scan whose files are all on Drive.
+    func finishCompletedUploads() async {
+        reload()
+        for scan in scans where scan.drive != nil && scan.drive?.complete != true {
+            await finishIfUploaded(scan.id)
+        }
+    }
+
+    private func updateUploadStatus(_ id: String) {
+        guard let scan = scans.first(where: { $0.id == id }), let state = scan.drive, !state.complete else {
+            driveStatus[id] = nil
+            return
+        }
+        let files = ScanPackage.files(for: scan, includePhotos: state.photos ?? false)
+        let done = files.filter { rel, _ in state.files[rel] != nil }.count
+        driveStatus[id] = "Uploading \(done) of \(files.count) files. It carries on in the background, also with the phone locked."
+    }
+
+    /// The manifest goes last, so its presence on Drive means the package is complete.
+    func finishIfUploaded(_ id: String) async {
+        guard driveSignedIn, var scan = scans.first(where: { $0.id == id }), var state = scan.drive,
+              let folderID = state.folderID else { return }
+        let photos = state.photos ?? false
+        let files = ScanPackage.files(for: scan, includePhotos: photos)
+        let missing = files.contains { rel, url in state.files[rel].map { Self.changed(url, $0) } ?? true }
+        guard !missing else { return }
+        let bg = UIApplication.shared.beginBackgroundTask(withName: "drive-manifest")
+        defer { UIApplication.shared.endBackgroundTask(bg) }
+        driveStatus[id] = "Writing manifest…"
+        do {
             let hashes: [String: String] = await Task.detached {
                 var h: [String: String] = [:]
                 for (rel, url) in files { h[rel] = ScanPackage.sha256(url) }
                 return h
             }.value
             let manifestURL = scan.folderURL.appendingPathComponent("manifest.json")
-            try ScanPackage.manifest(for: scan, files: files, hashes: hashes, photosUploaded: photosNow).write(to: manifestURL, options: .atomic)
+            try ScanPackage.manifest(for: scan, files: files, hashes: hashes, photosUploaded: photos).write(to: manifestURL, options: .atomic)
+            let client = DriveClient()
             let mid = try await uploadReplacing(client, manifestURL, name: "manifest.json", parent: folderID, existing: state.files["manifest.json"]?.id)
             state.files["manifest.json"] = DriveFileRecord(id: mid, size: 0, modified: Date())
             state.complete = true
             state.lastSync = Date()
             scan.drive = state
             try? ScanStore.save(scan)
-
-            if photosNow && !UserDefaults.standard.bool(forKey: Self.keepPhotosKey) { ScanStore.deletePhotos(scan) }
+            if photos && !UserDefaults.standard.bool(forKey: Self.keepPhotosKey) { ScanStore.deletePhotos(scan) }
             reload()
+            driveStatus[id] = nil
+            let root = try await client.folder(named: ScanPackage.rootFolder, in: "root")
             await writeIndex(client, root: root)
-            driveStatus[scan.id] = nil
+            Notifier.post(id: "drive-\(id)", title: "\(scan.name): on Google Drive",
+                          body: "My Drive › \(ScanPackage.rootFolder) › \(scan.id)_\(scan.fileStem)")
         } catch {
-            scan.drive = state
-            try? ScanStore.save(scan)
-            reload()
-            driveStatus[scan.id] = "Upload paused: \(error.localizedDescription). It retries when you next open the app."
+            driveStatus[id] = "Upload paused: \(error.localizedDescription). It carries on by itself when the phone is online."
+            AppDelegate.scheduleUploadTask()
         }
     }
 
@@ -147,24 +216,49 @@ extension AppModel {
         return try await client.upload(url, name: name, parent: parent, existingID: nil)
     }
 
-    /// Crystal Bowl Scans/index.json lists every scan, newest first; README.txt explains the layout.
+    /// Crystal Bowl Scans/index.json: one entry per scan on Drive, newest first, with what it is, when it was
+    /// scanned, its sizes and where its files are. Software can read this one file instead of every folder.
     private func writeIndex(_ client: DriveClient, root: String) async {
         let f = ISO8601DateFormatter()
+        let local = ISO8601DateFormatter()
+        local.timeZone = .current
+        local.formatOptions = [.withInternetDateTime]
         let entries: [[String: Any]] = scans.compactMap { s in
-            guard let d = s.drive, d.folderID != nil else { return nil }
+            guard let d = s.drive, let folderID = d.folderID else { return nil }
             var e: [String: Any] = [
-                "scan_id": s.id, "specimen_alias": s.name, "created_utc": f.string(from: s.created),
-                "folder": "\(s.id)_\(s.fileStem)", "folder_id": d.folderID ?? "",
-                "status": d.complete ? "complete" : "incomplete",
+                "scan_id": s.id, "name": s.name, "sample_key": s.sampleKey,
+                "scanned_utc": f.string(from: s.created), "scanned_local": local.string(from: s.created),
+                "folder": "\(s.id)_\(s.fileStem)", "folder_id": folderID,
+                "folder_url": ScanPackage.folderLink(folderID)?.absoluteString ?? "",
+                "manifest": "\(s.id)_\(s.fileStem)/manifest.json",
+                "manifest_file_id": d.files["manifest.json"]?.id ?? NSNull(),
+                "dimensions_file": "\(s.id)_\(s.fileStem)/model/\(s.fileStem)-dimensions.json",
+                "status": d.complete ? "complete" : "uploading",
                 "last_upload_utc": d.lastSync.map { f.string(from: $0) } ?? NSNull(),
+                "quick_scan": s.quick ?? false,
+                "photos_included": d.photos ?? false,
+                "close_up_photos": s.detailCount,
+                "scale": s.caliper == nil ? "LiDAR" : "caliper-corrected",
             ]
             if let st = s.stats {
-                e["principal_axes_mm"] = ["a": st.axisA, "b": st.axisB, "c": st.axisC]
-                e["volume_cm3"] = st.volumeCM3
+                let k = s.scaleFactor
+                e["size_mm"] = ["a": st.axisA * k, "b": st.axisB * k, "c": st.axisC * k]
+                e["volume_cm3"] = st.volumeCM3 * k * k * k
+                if let b = st.box { e["feret_mm"] = ["max": b.maxFeretMM * k, "min": b.minFeretMM * k] }
+                if let u = st.upright {
+                    e["micro_ct"] = ["height_mm": u.heightMM * k,
+                                     "cylinder_diameter_mm": (u.cylinderDiameterMM ?? u.maxDiameterMM) * k]
+                }
             }
             return e
         }
-        let index: [String: Any] = ["schema": "crystal-bowl.index/0.1", "updated_utc": f.string(from: Date()), "scans": entries]
+        let index: [String: Any] = [
+            "schema": "crystal-bowl.index/1",
+            "about": "Every scan in this folder, newest first. Sizes in mm (a >= b >= c, smallest box around the rock). Each scan's manifest.json is the full record with every file; a scan is complete when its status is complete.",
+            "updated_utc": f.string(from: Date()),
+            "scan_count": entries.count,
+            "scans": entries,
+        ]
         let tmp = FileManager.default.temporaryDirectory
         let indexURL = tmp.appendingPathComponent("index.json")
         let readmeURL = tmp.appendingPathComponent("README.txt")
@@ -174,8 +268,8 @@ extension AppModel {
         if let id = try? await uploadReplacing(client, indexURL, name: "index.json", parent: root, existing: ud.string(forKey: Self.indexIDKey)) {
             ud.set(id, forKey: Self.indexIDKey)
         }
-        if ud.string(forKey: Self.readmeIDKey) == nil, (try? ScanPackage.readme.write(to: readmeURL, atomically: true, encoding: .utf8)) != nil,
-           let id = try? await client.upload(readmeURL, name: "README.txt", parent: root, existingID: nil) {
+        if (try? ScanPackage.readme.write(to: readmeURL, atomically: true, encoding: .utf8)) != nil,
+           let id = try? await uploadReplacing(client, readmeURL, name: "README.txt", parent: root, existing: ud.string(forKey: Self.readmeIDKey)) {
             ud.set(id, forKey: Self.readmeIDKey)
         }
     }

@@ -5,10 +5,10 @@ import ScanMath
 
 @main
 struct CrystalBowlApp: App {
-    @StateObject private var model = AppModel()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some SwiftUI.Scene {
         WindowGroup {
-            RootView().environmentObject(model)
+            RootView().environmentObject(delegate.model)
         }
     }
 }
@@ -839,7 +839,7 @@ struct ScanDetailView: View {
     private func driveSection(_ scan: Scan) -> some View {
         let folder = "\(ScanPackage.rootFolder)/\(scan.id)_\(scan.fileStem)"
         return Section {
-            if model.folderLinked {
+            if model.folderLinked && !model.driveSignedIn {
                 if let status = model.folderStatus[scan.id] {
                     Label(status, systemImage: "arrow.triangle.2.circlepath.icloud")
                 } else if let d = scan.folderSync, d.complete, let when = d.lastSync {
@@ -1171,7 +1171,6 @@ struct SectionsPanel: View {
 
 struct DriveSettingsSection: View {
     @EnvironmentObject var model: AppModel
-    @AppStorage(AppModel.autoUploadKey) private var autoUpload = true
     @AppStorage(AppModel.uploadPhotosKey) private var uploadPhotos = true
     @AppStorage(GoogleAuth.clientIDKey) private var pastedClientID = ""
     @State private var signingIn = false
@@ -1208,13 +1207,12 @@ struct DriveSettingsSection: View {
                 .disabled(signingIn)
             }
             if model.folderLinked || model.driveSignedIn {
-                Toggle("Copy every scan automatically", isOn: $autoUpload)
-                Toggle("Also copy photos and close-ups (Wi-Fi only)", isOn: $uploadPhotos)
+                Toggle("Also upload photos and close-ups (Wi-Fi only)", isOn: $uploadPhotos)
             }
         } header: {
             Text("Google Drive")
         } footer: {
-            Text("Finished scans go to the folder you chose, normally My Drive › Crystal Bowl Scans: one folder per scan with manifest.json, dimensions.json, the model in USDZ, STL, PLY and OBJ, and the cross-sections. On a computer with Google Drive for desktop it is the folder My Drive\\Crystal Bowl Scans. Photos are a few hundred MB per scan, so they go only on Wi-Fi.")
+            Text("Every finished scan uploads by itself, in the background too (other apps open, phone locked). It goes to My Drive › Crystal Bowl Scans: one folder per scan, named <date-time>_<sample>, with manifest.json, dimensions.json, the model in USDZ, STL, PLY and OBJ, and the cross-sections. index.json lists every scan with its date and sizes for other software. On a computer with Google Drive for desktop it is the folder My Drive\\Crystal Bowl Scans. Photos are a few hundred MB per scan, so they go only on Wi-Fi.")
         }
         .sheet(isPresented: $showSetup) { DriveSetupSheet() }
     }

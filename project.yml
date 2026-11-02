@@ -23,7 +23,7 @@ targets:
         CBGitCommit: $(CB_GIT_COMMIT)
         CBGoogleClientID: $(CB_GOOGLE_CLIENT_ID)
         NSCameraUsageDescription: Crystal Bowl uses the camera and LiDAR to photograph your rock sample and build a 3D model.
-        BGTaskSchedulerPermittedIdentifiers: [com.avradip.crystalbowl.build.*]
+        BGTaskSchedulerPermittedIdentifiers: [com.avradip.crystalbowl.build.*, com.avradip.crystalbowl.upload]
         UIBackgroundModes: [processing]
         UILaunchScreen: {}
         UIFileSharingEnabled: true
@@ -36,7 +36,7 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "1.8"
+        MARKETING_VERSION: "1.9"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CB_GIT_COMMIT: dev

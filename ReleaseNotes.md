@@ -3,6 +3,12 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.9
+- Google Drive upload is always on and keeps going in the background: switch apps or lock the phone and iOS finishes the upload
+- A notification tells you when a scan is safely on Google Drive
+- One tidy place: My Drive › Crystal Bowl Scans, one folder per scan named by date and sample
+- index.json in that folder lists every scan with its date, sizes and micro-CT cylinder, so other software finds scans by itself
+
 ## 1.8
 - Building the 3D model now runs in the background: keep using the app or other apps, or lock the phone. If iOS pauses it, it continues when you open the app
 - Dimensions come first: a notice (and notification) tells you the height, footprint and the cylinder the rock needs, which is enough to centre it in the micro-CT
