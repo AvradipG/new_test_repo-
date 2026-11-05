@@ -245,6 +245,7 @@ extension AppModel {
                 e["size_mm"] = ["a": st.axisA * k, "b": st.axisB * k, "c": st.axisC * k]
                 e["volume_cm3"] = st.volumeCM3 * k * k * k
                 if let b = st.box { e["feret_mm"] = ["max": b.maxFeretMM * k, "min": b.minFeretMM * k] }
+                if let shape = s.shape { e["shape"] = shape.json(scale: k) }
                 if let u = st.upright {
                     e["micro_ct"] = ["height_mm": u.heightMM * k,
                                      "cylinder_diameter_mm": (u.cylinderDiameterMM ?? u.maxDiameterMM) * k]

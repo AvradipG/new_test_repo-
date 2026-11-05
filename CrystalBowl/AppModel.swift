@@ -17,6 +17,9 @@ final class AppModel: ObservableObject {
     // Main tabs: scanning, and AR view of finished scans
     @Published var tab: Tab = .scan
     @Published var arSelection: Set<String> = []
+    /// Older scans getting the newer extras added (shape, sample sheet, ruled sections).
+    @Published var upgradeNote: String?
+    var upgrading = false
 
     // Capture
     @Published var captureSession: ObjectCaptureSession?
@@ -412,6 +415,7 @@ final class AppModel: ObservableObject {
 
             setProgress(0.93, "Cutting cross-sections and the height profile…")
             scan.sections = await Self.cutStacks(scan, specs: [(0, AppModel.defaultSpacingMM), (3, AppModel.defaultSpacingMM)])
+            scan.sectionsRuled = true
             setProgress(0.97, "Writing STL, PLY and OBJ…")
             let finished = scan
             _ = await Task.detached { MeshTools.exportAll(finished) }.value
@@ -425,6 +429,7 @@ final class AppModel: ObservableObject {
             reload()
             setProgress(1, "Done")
             BackgroundBuild.shared.end(success: true)
+            Task { await upgradeScans() } // shape fit and sample sheet for the new scan
             Notifier.post(id: "built-\(scan.id)", title: "\(scan.name): 3D model ready",
                           body: "Model, lab files and slices are saved\(driveSignedIn || folderLinked ? " and going to Google Drive" : "").")
             Task { await syncAllPending() }
@@ -613,6 +618,7 @@ final class AppModel: ObservableObject {
         if !specs.contains(where: { $0.0 == 0 }) { specs.insert((0, Self.defaultSpacingMM), at: 0) }
         if !specs.contains(where: { $0.0 == 3 }) { specs.append((3, Self.defaultSpacingMM)) }
         scan.sections = await Self.cutStacks(scan, specs: specs)
+        scan.sectionsRuled = true
         try? ScanStore.save(scan)
         let done = scan
         _ = await Task.detached { MeshTools.exportAll(done) }.value

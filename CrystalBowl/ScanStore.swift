@@ -27,6 +27,12 @@ struct Scan: Identifiable, Codable, Hashable {
     var storedStem: String?
     /// Copy in a Google Drive folder chosen through the Files app (works without a Google sign-in).
     var folderSync: DriveSync?
+    /// Cylinder or sphere found in the model (2.0).
+    var shape: ShapeRecord?
+    /// Cross-section images drawn with millimetre rulers (2.0).
+    var sectionsRuled: Bool?
+    /// Which set of automatic extras this scan has (see AppModel.extrasVersion).
+    var extrasVersion: Int?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {
@@ -48,6 +54,11 @@ struct Scan: Identifiable, Codable, Hashable {
 
     /// True for scans measured before 1.8 (no smallest-box sizes or micro-CT cylinder) or cut before 1.7
     /// (no height profile, or section stacks without outline sizes).
+    /// Finished, and missing the shape fit, sample sheet or ruled cross-sections that newer versions add.
+    var needsExtras: Bool {
+        hasModel && buildRequested != true && (extrasVersion ?? 0) < AppModel.extrasVersion
+    }
+
     var needsRepair: Bool {
         guard hasModel else { return false }
         guard let s = stats, let u = s.upright, u.cylinderDiameterMM != nil, s.box != nil else { return true }

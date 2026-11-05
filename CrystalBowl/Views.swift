@@ -56,6 +56,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 model.resumePendingBuilds()
+                Task { await model.upgradeScans() }
                 Task {
                     await model.checkForUpdate()
                     await model.syncAllPending()
@@ -95,6 +96,14 @@ struct HomeView: View {
                              driveConnected: model.driveSignedIn || model.folderLinked) { showDriveSetup = true }
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
+                }
+                if let note = model.upgradeNote {
+                    Section {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(note).font(.footnote)
+                        }
+                    }
                 }
                 if let notice = model.readyNotice {
                     Section {
@@ -748,6 +757,7 @@ struct ScanDetailView: View {
                     }
                 }
                 if scan.hasModel {
+                    sampleSheetSection(scan)
                     shareSection(scan)
                     driveSection(scan)
                 }
@@ -884,6 +894,26 @@ struct ScanDetailView: View {
         }
     }
 
+    /// The latest sample sheet (made automatically, or again from the 3D view at another angle).
+    @ViewBuilder private func sampleSheetSection(_ scan: Scan) -> some View {
+        let dir = scan.exportsURL.appendingPathComponent("sheet", isDirectory: true)
+        let files = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+            .filter { $0.pathExtension == "png" }
+            .sorted { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
+                    > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+        if let sheet = files.first(where: { $0.lastPathComponent.contains("sample-sheet") }), let img = UIImage(contentsOfFile: sheet.path) {
+            Section {
+                Image(uiImage: img).resizable().scaledToFit()
+                    .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                ShareLink(items: files) { Label("Share the sample sheet (\(files.count) images)", systemImage: "square.and.arrow.up") }
+            } header: {
+                Text("Sample sheet")
+            } footer: {
+                Text("True-scale virtual photos with a ruler. Make it again at another angle from Measure in 3D.")
+            }
+        }
+    }
+
     private func driveSection(_ scan: Scan) -> some View {
         let folder = "\(ScanPackage.rootFolder)/\(scan.id)_\(scan.fileStem)"
         return Section {
@@ -944,6 +974,9 @@ struct ScanDetailView: View {
             LabeledContent(s.box == nil ? "Axes a × b × c" : "Smallest box a × b × c", value: String(format: "%.1f × %.1f × %.1f mm", s.axisA * f, s.axisB * f, s.axisC * f))
             if let b = s.box {
                 LabeledContent("Longest / narrowest (3D)", value: String(format: "%.1f / %.1f mm", b.maxFeretMM * f, b.minFeretMM * f))
+            }
+            if let shape = scan.shape {
+                Text(shape.text(scale: f)).font(.callout)
             }
             LabeledContent("Volume", value: String(format: "%.2f cm³", s.volumeCM3 * f * f * f))
             if !s.isClosed {

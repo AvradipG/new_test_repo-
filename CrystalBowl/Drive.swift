@@ -458,6 +458,8 @@ enum ScanPackage {
             "size_method": scan.stats?.box != nil
                 ? "a x b x c = sides of the smallest box around the main body (loose pieces under 5 % of the surface dropped)"
                 : "a x b x c = extents along principal axes (measured before 1.8; tap Repair to update)",
+            "shape": scan.shape.map { $0.json(scale: scan.scaleFactor) as Any } ?? NSNull(),
+            "sample_sheet": "model/sheet/ (true-scale views with a ruler: four sides, top, bottom, and a one-row overview)",
             "box_mm": scan.stats?.box.map { b -> Any in
                 ["length": b.lengthMM, "width": b.widthMM, "thickness": b.thicknessMM,
                  "max_feret": b.maxFeretMM, "min_feret": b.minFeretMM]

@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 2.1
+- Older scans get the new extras by themselves: cylinder or sphere sizes, a sample sheet, and cross-sections with millimetre rulers. New scans get them right after building
+- A scan's page shows its sample sheet and its shape (for example Cylinder Ø 50.8 × 150.2 mm)
+- The shape sizes are also in dimensions.json, the report, manifest.json and index.json on Google Drive
+
 ## 2.0
 - Scan and AR in one app: a new AR view tab stands several scanned samples on the real table side by side
 - In AR: real size, or bigger or smaller (10 % to 500 %); pinch to resize, twist or use the dial to turn, drag to move

@@ -108,6 +108,7 @@ enum MeshTools {
             d["box_mm"] = ["length": b.lengthMM, "width": b.widthMM, "thickness": b.thicknessMM,
                            "max_feret": b.maxFeretMM, "min_feret": b.minFeretMM]
         }
+        if let shape = scan.shape { d["shape"] = shape.json(scale: f) }
         if let k = s.keptAreaShare { d["main_body_area_share"] = k }
         if let r = s.removedPieces { d["loose_pieces_dropped"] = r }
         if let c = scan.caliper {
@@ -163,6 +164,9 @@ enum MeshTools {
                 if let cyl = u.cylinderDiameterMM {
                     lines.append(String(format: "Micro-CT: fits a vertical cylinder Ø %.1f mm × %.1f mm high (as scanned, LiDAR scale)", cyl, u.heightMM))
                 }
+            }
+            if let shape = scan.shape {
+                lines.append("Shape: " + shape.text(scale: scan.scaleFactor))
             }
             if let b = s.box {
                 lines.append(String(format: "3D Feret: largest %.1f mm, narrowest %.1f mm. Sizes a × b × c are the smallest box around the rock.",
