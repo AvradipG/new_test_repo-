@@ -50,10 +50,17 @@ public enum MarkFinder {
 
     @inline(__always) static func isRed(_ c: SIMD3<Float>) -> Bool {
         let (h, s, v) = hsv(c)
-        return (h <= 22 || h >= 335) && s >= 0.38 && v >= 0.18 && c.x - Swift.max(c.y, c.z) >= 0.12
+        let hueRed: Bool = h <= 22 || h >= 335
+        let strong: Bool = s >= 0.38 && v >= 0.18
+        let other: Float = Swift.max(c.y, c.z)
+        let lead: Float = c.x - other
+        return hueRed && strong && lead >= 0.12
     }
 
-    @inline(__always) static func luma(_ c: SIMD3<Float>) -> Float { 0.299 * c.x + 0.587 * c.y + 0.114 * c.z }
+    @inline(__always) static func luma(_ c: SIMD3<Float>) -> Float {
+        let w = SIMD3<Float>(0.299, 0.587, 0.114)
+        return (c * w).sum()
+    }
 
     /// Finds the mark in an unrolled side image.
     /// - Parameters:

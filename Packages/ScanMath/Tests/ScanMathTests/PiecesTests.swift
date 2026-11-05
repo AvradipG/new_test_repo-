@@ -9,7 +9,10 @@ final class PiecesTests: XCTestCase {
 
     /// Wavy, non-symmetric break surface height at (x, z).
     func breakHeight(_ base: Double, _ x: Double, _ z: Double, phase: Double) -> Double {
-        base + 0.0028 * sin(x * 260 + phase) * cos(z * 190 - phase) + 0.0016 * sin((x + 0.6 * z) * 420 + 2 * phase)
+        let a: Double = sin(x * 260 + phase) * cos(z * 190 - phase)
+        let u: Double = (x + 0.6 * z) * 420 + 2 * phase
+        let b: Double = sin(u)
+        return base + 0.0028 * a + 0.0016 * b
     }
     func breakNormal(_ base: Double, _ x: Double, _ z: Double, phase: Double) -> SIMD3<Double> {
         let e = 1e-6
@@ -192,8 +195,15 @@ final class PiecesTests: XCTestCase {
     /// A bumpy, non-symmetric rock with outward normals.
     func rock() -> (points: [SIMD3<Double>], normals: [SIMD3<Double>]) {
         func surf(_ th: Double, _ ph: Double) -> SIMD3<Double> {
-            let r = 0.012 * (1 + 0.18 * sin(3 * th + 0.5) * cos(2 * ph) + 0.12 * sin(5 * ph + 1) + 0.08 * cos(th - 2 * ph))
-            return SIMD3(r * 1.3 * sin(ph) * cos(th), r * 0.8 * cos(ph), r * sin(ph) * sin(th))
+            let t1: Double = 0.18 * sin(3 * th + 0.5) * cos(2 * ph)
+            let t2: Double = 0.12 * sin(5 * ph + 1)
+            let t3: Double = 0.08 * cos(th - 2 * ph)
+            let r: Double = 0.012 * (1 + t1 + t2 + t3)
+            let sp: Double = sin(ph)
+            let x: Double = r * 1.3 * sp * cos(th)
+            let y: Double = r * 0.8 * cos(ph)
+            let z: Double = r * sp * sin(th)
+            return SIMD3(x, y, z)
         }
         var P: [SIMD3<Double>] = [], N: [SIMD3<Double>] = []
         let nph = 70
