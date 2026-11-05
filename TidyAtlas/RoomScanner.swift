@@ -73,7 +73,7 @@ struct RoomCaptureRepresentable: UIViewRepresentable {
     var stop: Bool
     var onResult: (CapturedRoom) -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(onResult: onResult) }
+    func makeCoordinator() -> RoomCaptureCoordinator { RoomCaptureCoordinator(onResult: onResult) }
 
     func makeUIView(context: Context) -> RoomCaptureView {
         let view = RoomCaptureView(frame: .zero)
@@ -89,27 +89,29 @@ struct RoomCaptureRepresentable: UIViewRepresentable {
         }
     }
 
-    static func dismantleUIView(_ view: RoomCaptureView, coordinator: Coordinator) {
+    static func dismantleUIView(_ view: RoomCaptureView, coordinator: RoomCaptureCoordinator) {
         if !coordinator.stopped { view.captureSession.stop() }
     }
+}
 
-    final class Coordinator: NSObject, RoomCaptureViewDelegate {
-        var onResult: (CapturedRoom) -> Void
-        var stopped = false
+/// Top-level with a fixed Objective-C name: RoomCaptureViewDelegate inherits NSCoding, which needs a stable class name.
+@objc(TARoomCaptureCoordinator)
+final class RoomCaptureCoordinator: NSObject, RoomCaptureViewDelegate {
+    var onResult: (CapturedRoom) -> Void
+    var stopped = false
 
-        init(onResult: @escaping (CapturedRoom) -> Void) {
-            self.onResult = onResult
-            super.init()
-        }
+    init(onResult: @escaping (CapturedRoom) -> Void) {
+        self.onResult = onResult
+        super.init()
+    }
 
-        // RoomCaptureViewDelegate inherits NSCoding; the coordinator is never archived.
-        required init?(coder: NSCoder) { nil }
-        func encode(with coder: NSCoder) {}
+    // RoomCaptureViewDelegate inherits NSCoding; the coordinator is never archived.
+    required init?(coder: NSCoder) { nil }
+    func encode(with coder: NSCoder) {}
 
-        func captureView(shouldPresent roomDataForProcessing: CapturedRoomData, error: Error?) -> Bool { true }
+    func captureView(shouldPresent roomDataForProcessing: CapturedRoomData, error: Error?) -> Bool { true }
 
-        func captureView(didPresent processedResult: CapturedRoom, error: Error?) {
-            DispatchQueue.main.async { self.onResult(processedResult) }
-        }
+    func captureView(didPresent processedResult: CapturedRoom, error: Error?) {
+        DispatchQueue.main.async { self.onResult(processedResult) }
     }
 }
