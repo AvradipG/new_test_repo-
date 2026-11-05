@@ -66,7 +66,9 @@ final class ARStudio: ObservableObject {
         let todo = items.indices.filter { !items[$0].placed }
         let widths = todo.map { width(of: items[$0]) }
         let gap: Float = 0.03
-        var x = -(widths.reduce(0, +) + gap * Float(max(0, todo.count - 1))) / 2
+        let total: Float = widths.reduce(0, +)
+        let gaps: Float = gap * Float(max(0, todo.count - 1))
+        var x: Float = -(total + gaps) / 2
         for (k, i) in todo.enumerated() {
             x += widths[k] / 2
             items[i].rig.stage.simdPosition = point + right * x

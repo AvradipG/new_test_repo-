@@ -181,51 +181,69 @@ final class SampleRig {
     private func buildDimensions() {
         let d = data
         let y0 = d.minY, y1 = d.maxY
-        let c = d.footprint.center, ld = d.footprint.longDir, nd = SIMD2(-ld.y, ld.x)
+        let c: SIMD2<Double> = d.footprint.center
+        let ld: SIMD2<Double> = d.footprint.longDir
+        let nd = SIMD2<Double>(-ld.y, ld.x)
+        let halfL: SIMD2<Double> = ld * (d.footprint.long / 2)
+        let halfS: SIMD2<Double> = nd * (d.footprint.short / 2)
         func p3(_ p: SIMD2<Double>, _ y: Double) -> SIMD3<Float> { SIMD3(Float(p.x), Float(y), Float(p.y)) }
         let kind = d.shape?.kind ?? .irregular
 
         // Height, beside the rock.
-        let hx = c + ld * (d.footprint.long / 2 + margin)
+        let hx: SIMD2<Double> = c + halfL + ld * margin
         dims.addChildNode(Self.dimension(p3(hx, y0), p3(hx, y1), text: String(format: "H %.1f mm", d.heightMM),
                                          color: Palette.height, r: lineRadius, tick: SIMD3(Float(ld.x), 0, Float(ld.y)), label: labelHeight))
 
         if kind != .cylinder {
             // Footprint rectangle and its two sides.
-            let corners = [c - ld * d.footprint.long / 2 - nd * d.footprint.short / 2, c + ld * d.footprint.long / 2 - nd * d.footprint.short / 2,
-                           c + ld * d.footprint.long / 2 + nd * d.footprint.short / 2, c - ld * d.footprint.long / 2 + nd * d.footprint.short / 2]
+            let corners: [SIMD2<Double>] = [c - halfL - halfS, c + halfL - halfS, c + halfL + halfS, c - halfL + halfS]
             for i in 0..<4 {
                 dims.addChildNode(Self.line(p3(corners[i], y0), p3(corners[(i + 1) % 4], y0), r: lineRadius * 0.5, color: Palette.footprint))
             }
-            let off = nd * (d.footprint.short / 2 + margin)
-            dims.addChildNode(Self.dimension(p3(c - ld * d.footprint.long / 2 + off, y0), p3(c + ld * d.footprint.long / 2 + off, y0),
+            let off: SIMD2<Double> = halfS + nd * margin
+            let l0: SIMD2<Double> = c - halfL + off, l1: SIMD2<Double> = c + halfL + off
+            dims.addChildNode(Self.dimension(p3(l0, y0), p3(l1, y0),
                                              text: String(format: "L %.1f mm", d.lengthMM), color: Palette.length, r: lineRadius,
                                              tick: SIMD3(Float(nd.x), 0, Float(nd.y)), label: labelHeight))
-            let off2 = -ld * (d.footprint.long / 2 + margin)
-            dims.addChildNode(Self.dimension(p3(c - nd * d.footprint.short / 2 + off2, y0), p3(c + nd * d.footprint.short / 2 + off2, y0),
+            let off2: SIMD2<Double> = -(halfL + ld * margin)
+            let w0: SIMD2<Double> = c - halfS + off2, w1: SIMD2<Double> = c + halfS + off2
+            dims.addChildNode(Self.dimension(p3(w0, y0), p3(w1, y0),
                                              text: String(format: "W %.1f mm", d.widthMM), color: Palette.width, r: lineRadius,
                                              tick: SIMD3(Float(ld.x), 0, Float(ld.y)), label: labelHeight))
         }
 
         if let s = d.shape, s.kind == .cylinder {
-            let a = SIMD3<Float>(s.axis), ctr = SIMD3<Float>(s.center)
-            let half = Float(s.length / 2), r = Float(s.radius)
-            let top = ctr + a * half, bottom = ctr - a * half
+            let a = SIMD3<Float>(s.axis)
+            let ctr = SIMD3<Float>(s.center)
+            let r = Float(s.radius)
+            let along: SIMD3<Float> = a * Float(s.length / 2)
+            let top: SIMD3<Float> = ctr + along
+            let bottom: SIMD3<Float> = ctr - along
             for end in [top, bottom] { dims.addChildNode(Self.ring(center: end, axis: a, radius: r, pipe: lineRadius * 0.8, color: Palette.cylinder)) }
-            dims.addChildNode(Self.line(bottom - a * Float(margin) * 0.5, top + a * Float(margin) * 0.5, r: lineRadius * 0.4, color: Palette.cylinder.withAlphaComponent(0.7)))
+            let ext: SIMD3<Float> = a * (Float(margin) * 0.5)
+            dims.addChildNode(Self.line(bottom - ext, top + ext, r: lineRadius * 0.4, color: Palette.cylinder.withAlphaComponent(0.7)))
             // Diameter across the top face.
-            let side = Self.perpendicular(a)
-            dims.addChildNode(Self.dimension(top - side * r, top + side * r, text: String(format: "Ø %.1f mm", s.diameter * 1000 * d.scaleFactor),
-                                             color: Palette.cylinder, r: lineRadius, tick: a, label: labelHeight, labelOffset: a * labelHeight * 1.2))
+            let side: SIMD3<Float> = Self.perpendicular(a)
+            let across: SIMD3<Float> = side * r
+            let dText = String(format: "Ø %.1f mm", s.diameter * 1000 * d.scaleFactor)
+            let up: SIMD3<Float> = a * (labelHeight * 1.2)
+            dims.addChildNode(Self.dimension(top - across, top + across, text: dText, color: Palette.cylinder,
+                                             r: lineRadius, tick: a, label: labelHeight, labelOffset: up))
             // Length along the side.
-            let off = side * (r + Float(margin))
-            dims.addChildNode(Self.dimension(bottom + off, top + off, text: String(format: "L %.1f mm", s.length * 1000 * d.scaleFactor),
-                                             color: Palette.length, r: lineRadius, tick: side, label: labelHeight))
+            let off: SIMD3<Float> = side * (r + Float(margin))
+            let lText = String(format: "L %.1f mm", s.length * 1000 * d.scaleFactor)
+            dims.addChildNode(Self.dimension(bottom + off, top + off, text: lText, color: Palette.length,
+                                             r: lineRadius, tick: side, label: labelHeight))
         } else if let s = d.shape, s.kind == .sphere {
-            let ctr = SIMD3<Float>(s.center), r = Float(s.radius)
-            dims.addChildNode(Self.ring(center: ctr, axis: SIMD3(0, 1, 0), radius: r, pipe: lineRadius * 0.8, color: Palette.cylinder))
-            dims.addChildNode(Self.dimension(ctr - SIMD3(r, 0, 0), ctr + SIMD3(r, 0, 0), text: String(format: "Ø %.1f mm (r %.1f)", s.diameter * 1000 * d.scaleFactor, s.radius * 1000 * d.scaleFactor),
-                                             color: Palette.cylinder, r: lineRadius, tick: SIMD3(0, 1, 0), label: labelHeight, labelOffset: SIMD3(0, labelHeight * 1.2, 0)))
+            let ctr = SIMD3<Float>(s.center)
+            let r = Float(s.radius)
+            let dx = SIMD3<Float>(r, 0, 0)
+            let upY = SIMD3<Float>(0, 1, 0)
+            dims.addChildNode(Self.ring(center: ctr, axis: upY, radius: r, pipe: lineRadius * 0.8, color: Palette.cylinder))
+            let sText = String(format: "Ø %.1f mm (r %.1f)", s.diameter * 1000 * d.scaleFactor, s.radius * 1000 * d.scaleFactor)
+            let up: SIMD3<Float> = upY * (labelHeight * 1.2)
+            dims.addChildNode(Self.dimension(ctr - dx, ctr + dx, text: sText, color: Palette.cylinder,
+                                             r: lineRadius, tick: upY, label: labelHeight, labelOffset: up))
         }
 
         // Micro-CT clearance: the smallest vertical cylinder the rock turns in.
@@ -234,7 +252,8 @@ final class SampleRig {
             dims.addChildNode(Self.ring(center: p3(cc, y), axis: SIMD3(0, 1, 0), radius: cr, pipe: lineRadius * 0.45, color: Palette.clearance))
         }
         let lab = Self.label(String(format: "turns in Ø %.1f mm", d.fitsDiameterMM), color: Palette.clearance, height: labelHeight * 0.85)
-        lab.simdPosition = p3(cc - nd * d.circleRadius, y1) + SIMD3(0, labelHeight, 0)
+        let labAt: SIMD2<Double> = cc - nd * d.circleRadius
+        lab.simdPosition = p3(labAt, y1) + SIMD3<Float>(0, labelHeight, 0)
         dims.addChildNode(lab)
     }
 
