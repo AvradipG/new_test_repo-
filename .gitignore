@@ -1,0 +1,7 @@
+build/
+*.xcodeproj/
+TidyAtlas/Info.plist
+Packages/TidyCore/.build/
+Payload/
+*.ipa
+.DS_Store

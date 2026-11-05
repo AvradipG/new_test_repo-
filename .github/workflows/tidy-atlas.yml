@@ -1,0 +1,204 @@
+name: Build Tidy Atlas iPhone app
+
+on:
+  push:
+    branches: [tidy-atlas-ios]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Shares the queue with the Crystal Bowl build: both clean up CI signing certificates, so they must not overlap.
+concurrency:
+  group: ios-build
+  cancel-in-progress: false
+
+env:
+  BUNDLE_ID: com.avradip.tidyatlas
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          echo "::notice::$(xcodebuild -version | tr '\n' ' ')"
+
+      - name: Unit tests (organizer logic)
+        run: swift test --package-path Packages/TidyCore
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build for iPhone (unsigned)
+        run: |
+          xcodebuild -project TidyAtlas.xcodeproj -scheme TidyAtlas -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} TA_GIT_COMMIT=${GITHUB_SHA::7} build > build.log 2>&1 || {
+              grep -E "error:|error -|BUILD FAILED" build.log | sort -u | head -80
+              grep -E ": error: " build.log | sort -u | head -40 | while IFS= read -r line; do
+                f=$(echo "$line" | cut -d: -f1); l=$(echo "$line" | cut -d: -f2); m=$(echo "$line" | sed 's/^.*: error: //')
+                echo "::error file=${f#$GITHUB_WORKSPACE/},line=$l::$m"
+              done
+              grep -E "error:" build.log | grep -v ": error: " | sort -u | head -10 | while IFS= read -r line; do echo "::error::$line"; done
+              exit 1
+            }
+          grep -E "warning:" build.log | sort -u | head -40 || true
+          test -d build/Build/Products/Release-iphoneos/TidyAtlas.app
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/TidyAtlas.app Payload/
+          zip -qry TidyAtlas.ipa Payload
+          ls -la TidyAtlas.ipa
+
+      - name: Publish IPA and version.json to the ipa-tidy-atlas branch
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          mkdir -p /tmp/pub && cp TidyAtlas.ipa /tmp/pub/
+          VERSION=$(grep -E '^ *MARKETING_VERSION:' project.yml | head -1 | sed -E 's/.*"(.*)".*/\1/')
+          python3 - "$VERSION" "${{ github.run_number }}" "$SHA" > /tmp/pub/version.json <<'PY'
+          import json, sys, datetime
+          version, build, sha = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+          notes, seen = [], False
+          for line in open("ReleaseNotes.md", encoding="utf-8"):
+              if line.startswith("## "):
+                  if seen: break
+                  seen = True
+              elif seen and line.startswith("- "):
+                  notes.append(line[2:].strip())
+          print(json.dumps({"version": version, "build": build, "commit": sha,
+                            "date": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%MZ"), "notes": notes}, indent=2))
+          PY
+          cat /tmp/pub/version.json
+          cd /tmp/pub
+          git init -q -b ipa-tidy-atlas
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -qm "Tidy Atlas IPA from $SHA"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ipa-tidy-atlas
+
+      - name: Check TestFlight keys
+        id: tf
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$ASC_KEY_P8" ] && [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::TestFlight upload skipped: add ASC_KEY_P8, ASC_KEY_ID, ASC_ISSUER_ID and APPLE_TEAM_ID as repository secrets."
+          fi
+
+      # Registers the bundle ID (so it appears in App Store Connect › New App), removes CI development certificates
+      # left by earlier runs, and checks that the app record exists before trying to upload.
+      - name: Prepare App Store Connect
+        id: asc
+        if: steps.tf.outputs.enabled == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          python3 -m pip install --quiet --break-system-packages pyjwt cryptography
+          python3 - <<'PY'
+          import os, time, json, urllib.request, urllib.error, urllib.parse, jwt
+          bundle = os.environ["BUNDLE_ID"]
+          now = int(time.time())
+          tok = jwt.encode({"iss": os.environ["ASC_ISSUER_ID"], "iat": now, "exp": now + 900, "aud": "appstoreconnect-v1"},
+                           os.environ["ASC_KEY_P8"], algorithm="ES256", headers={"kid": os.environ["ASC_KEY_ID"], "typ": "JWT"})
+          def call(method, path, body=None):
+              req = urllib.request.Request("https://api.appstoreconnect.apple.com" + path, method=method,
+                                           data=json.dumps(body).encode() if body else None,
+                                           headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"})
+              with urllib.request.urlopen(req) as f:
+                  raw = f.read()
+              return json.loads(raw) if raw else None
+          q = urllib.parse.quote(bundle)
+          ids = call("GET", f"/v1/bundleIds?filter[identifier]={q}&limit=5")["data"]
+          if not any(b["attributes"]["identifier"] == bundle for b in ids):
+              try:
+                  call("POST", "/v1/bundleIds", {"data": {"type": "bundleIds", "attributes": {
+                      "identifier": bundle, "name": "Tidy Atlas", "platform": "IOS"}}})
+                  print("Registered bundle ID", bundle)
+              except urllib.error.HTTPError as e:
+                  print("Bundle ID registration:", e.code, e.read()[:300])
+          else:
+              print("Bundle ID already registered")
+          try:
+              certs = call("GET", "/v1/certificates?limit=200")["data"]
+              for c in certs:
+                  a = c["attributes"]
+                  label = a.get("name", "") + " " + (a.get("displayName") or "")
+                  if a.get("certificateType") in ("DEVELOPMENT", "IOS_DEVELOPMENT") and "Created via API" in label:
+                      call("DELETE", "/v1/certificates/" + c["id"])
+                      print("Removed an old CI development certificate")
+          except Exception as e:
+              print("Certificate clean-up skipped:", e)
+          apps = call("GET", f"/v1/apps?filter[bundleId]={q}")["data"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"app_exists={'true' if apps else 'false'}\n")
+          if not apps:
+              print(f"::warning::No App Store Connect app for {bundle} yet. Create it once: App Store Connect › Apps › + › New App, "
+                    f"platform iOS, name 'Tidy Atlas' (or any free name), bundle ID {bundle}, SKU tidyatlas. Then re-run this workflow.")
+          PY
+
+      - name: Sign and upload to TestFlight
+        if: steps.tf.outputs.enabled == 'true' && steps.asc.outputs.app_exists == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          xcodebuild -project TidyAtlas.xcodeproj -scheme TidyAtlas -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -archivePath build/TidyAtlas.xcarchive \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION=${{ github.run_number }} TA_GIT_COMMIT=${GITHUB_SHA::7} \
+            "${AUTH[@]}" archive > archive.log 2>&1 || {
+              grep -E "error:|error -|ARCHIVE FAILED" archive.log | sort -u | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+              exit 1
+            }
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath build/TidyAtlas.xcarchive -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/upload "${AUTH[@]}" > upload.log 2>&1 || {
+              grep -iE "error|failed" upload.log | sort -u | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+              exit 1
+            }
+          rm -f "$KEY"
+          echo "::notice::Build ${{ github.run_number }} uploaded to App Store Connect. It appears in TestFlight after Apple finishes processing (usually 5-15 minutes)."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TidyAtlas-ipa
+          path: TidyAtlas.ipa
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
