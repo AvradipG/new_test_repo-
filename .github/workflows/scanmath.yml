@@ -1,0 +1,27 @@
+name: ScanMath tests
+
+on:
+  push:
+    branches: ['scanmath-*']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          swift test -c release -Xswiftc -enable-testing --package-path Packages/ScanMath 2>&1 | tee test.log
+      - name: Report
+        if: always()
+        run: |
+          grep -E "error:" test.log | head -10 | while IFS= read -r l; do echo "::error::${l: -900}"; done
+          grep -E "Executed|Test Suite 'All tests'" test.log | tail -3 | while IFS= read -r l; do echo "::notice::$l"; done
+          grep -E "passed \(|failed \(" test.log | grep "Test Case" | sed -E 's/.*\[ScanMathTests\.//' | tr '\n' ' ' | head -c 3000 | { read -r l; echo "::notice::$l"; }

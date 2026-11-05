@@ -1,0 +1,178 @@
+import Foundation
+import simd
+
+/// The pencil or marker line drawn on a sample to record which side faced the X-ray source (red towards the
+/// top, black towards the bottom in the DigitalSCAL convention). Found in an unrolled image of the side surface.
+public struct MarkDetection: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        /// Red and black parts on one line (red part = top).
+        case redBlackLine = "red_black_line"
+        /// Red and black lines side by side; the angle is midway between them.
+        case redBlackPair = "red_black_pair"
+        case redLine = "red_line"
+        case blackLine = "black_line"
+        /// Short red mark (a spot or tick, not a line).
+        case redSpot = "red_spot"
+    }
+    public enum RedEnd: String, Codable, Sendable { case top, bottom, unknown }
+
+    /// Angle of the mark in the unrolled image's angle scale (degrees, as given by `columnAngles`).
+    public var angle: Double
+    public var kind: Kind
+    /// 0…1. Below 0.35 the app asks the user to check the mark.
+    public var confidence: Double
+    /// How far the mark stands out from the rest of the circumference (robust z-score).
+    public var contrast: Double
+    /// Share of the sample height the mark covers.
+    public var heightShare: Double
+    /// Width of the mark, degrees.
+    public var widthDegrees: Double
+    /// Where the red part is along the sample as scanned (top = first image row).
+    public var redEnd: RedEnd
+    /// True when the red part is at the bottom: the sample was scanned upside down.
+    public var upsideDown: Bool { redEnd == .bottom }
+}
+
+public enum MarkFinder {
+    /// Colour classes of one pixel (values 0…1).
+    @inline(__always) static func hsv(_ c: SIMD3<Float>) -> (h: Float, s: Float, v: Float) {
+        let mx = Swift.max(c.x, Swift.max(c.y, c.z)), mn = Swift.min(c.x, Swift.min(c.y, c.z))
+        let d = mx - mn
+        var h: Float = 0
+        if d > 1e-6 {
+            if mx == c.x { h = 60 * ((c.y - c.z) / d).truncatingRemainder(dividingBy: 6) }
+            else if mx == c.y { h = 60 * ((c.z - c.x) / d + 2) }
+            else { h = 60 * ((c.x - c.y) / d + 4) }
+        }
+        if h < 0 { h += 360 }
+        return (h, mx > 1e-6 ? d / mx : 0, mx)
+    }
+
+    @inline(__always) static func isRed(_ c: SIMD3<Float>) -> Bool {
+        let (h, s, v) = hsv(c)
+        return (h <= 22 || h >= 335) && s >= 0.38 && v >= 0.18 && c.x - Swift.max(c.y, c.z) >= 0.12
+    }
+
+    @inline(__always) static func luma(_ c: SIMD3<Float>) -> Float { 0.299 * c.x + 0.587 * c.y + 0.114 * c.z }
+
+    /// Finds the mark in an unrolled side image.
+    /// - Parameters:
+    ///   - rgb: row-major pixels, row 0 = top of the sample, values 0…1.
+    ///   - valid: optional mask (false = background or no surface).
+    ///   - columnAngles: angle of each column (degrees); default 0…360 evenly.
+    public static func detect(rgb: [SIMD3<Float>], width: Int, height: Int, valid: [Bool]? = nil,
+                              columnAngles: [Double]? = nil) -> MarkDetection? {
+        guard width >= 24, height >= 8, rgb.count == width * height else { return nil }
+        let angles = columnAngles ?? (0..<width).map { (Double($0) + 0.5) * 360 / Double(width) }
+        let degPerCol = 360.0 / Double(width)
+
+        // Dark marker: clearly darker than this sample's own surface (works on light rock; weaker on shale).
+        var lumas: [Double] = []
+        lumas.reserveCapacity(rgb.count / 4 + 1)
+        for i in stride(from: 0, to: rgb.count, by: 3) where valid?[i] ?? true { lumas.append(Double(luma(rgb[i]))) }
+        guard lumas.count > 50 else { return nil }
+        let medY = Float(ScanMath.median(lumas))
+        let darkLimit = Swift.min(0.5 * medY, medY - 0.12)
+
+        var red = [Double](repeating: 0, count: width), black = [Double](repeating: 0, count: width)
+        var count = [Double](repeating: 0, count: width)
+        var redRows = [[Int]](repeating: [], count: width), blackRows = [[Int]](repeating: [], count: width)
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = y * width + x
+                if let v = valid, !v[i] { continue }
+                let c = rgb[i]
+                count[x] += 1
+                if isRed(c) { red[x] += 1; redRows[x].append(y) }
+                else if luma(c) < darkLimit && hsv(c).s < 0.45 { black[x] += 1; blackRows[x].append(y) }
+            }
+        }
+        for x in 0..<width where count[x] > 0 { red[x] /= count[x]; black[x] /= count[x] }
+
+        // Smooth round the circumference over about 3°.
+        let half = Swift.max(1, Int((1.5 / degPerCol).rounded()))
+        func smooth(_ a: [Double]) -> [Double] {
+            (0..<width).map { x in
+                var s = 0.0
+                for k in -half...half { s += a[(x + k + width) % width] }
+                return s / Double(2 * half + 1)
+            }
+        }
+        let rs = smooth(red), bs = smooth(black)
+        let score = (0..<width).map { rs[$0] + 0.8 * bs[$0] }
+        let med = ScanMath.median(score)
+        let mad = ScanMath.median(score.map { abs($0 - med) }) * 1.4826
+        guard let peak = score.indices.max(by: { score[$0] < score[$1] }) else { return nil }
+        let z = (score[peak] - med) / (mad + 0.004)
+        guard score[peak] - med >= 0.02, z >= 4 else { return nil }
+
+        // Width: columns round the peak above half its height.
+        let halfLevel = med + (score[peak] - med) / 2
+        var lo = 0, hi = 0
+        while lo < width / 4 && score[(peak - lo - 1 + width) % width] >= halfLevel { lo += 1 }
+        while hi < width / 4 && score[(peak + hi + 1) % width] >= halfLevel { hi += 1 }
+        let band = (-lo...hi).map { (peak + $0 + width) % width }
+
+        // Rows covered, and where the red and black parts sit.
+        var rowsHit = Set<Int>(), redY: [Int] = [], blackY: [Int] = []
+        for x in band {
+            redY += redRows[x]
+            blackY += blackRows[x]
+        }
+        rowsHit.formUnion(redY)
+        rowsHit.formUnion(blackY)
+        let heightShare = Double(rowsHit.count) / Double(height)
+        let redShare = Double(redY.count) / Double(Swift.max(1, redY.count + blackY.count))
+
+        // A second line of the other colour close by (red and black lines drawn side by side)?
+        var pairAngle: Double?
+        let primaryRed = redShare >= 0.5
+        let other = primaryRed ? bs : rs
+        let otherMed = ScanMath.median(other)
+        let otherMad = ScanMath.median(other.map { abs($0 - otherMed) }) * 1.4826
+        let reach = Int((25 / degPerCol).rounded())
+        var bestOther = -1
+        for k in -reach...reach where abs(k) > hi + lo + 1 {
+            let x = (peak + k + width) % width
+            if bestOther < 0 || other[x] > other[bestOther] { bestOther = x }
+        }
+        if bestOther >= 0, other[bestOther] - otherMed >= 0.02, (other[bestOther] - otherMed) / (otherMad + 0.004) >= 4 {
+            pairAngle = circularMean(angles[peak], angles[bestOther])
+        }
+
+        let kind: MarkDetection.Kind
+        var redEnd: MarkDetection.RedEnd = .unknown
+        if pairAngle != nil {
+            kind = .redBlackPair
+        } else if redY.count >= 10 && blackY.count >= 10 && redShare > 0.15 && redShare < 0.85 {
+            kind = .redBlackLine
+            let rMean = Double(redY.reduce(0, +)) / Double(redY.count)
+            let bMean = Double(blackY.reduce(0, +)) / Double(blackY.count)
+            if abs(rMean - bMean) > Double(height) * 0.1 { redEnd = rMean < bMean ? .top : .bottom }
+        } else if primaryRed {
+            kind = heightShare >= 0.3 ? .redLine : .redSpot
+        } else {
+            kind = .blackLine
+            // A dark spot is too easily a natural grain or vug: only lines count.
+            guard heightShare >= 0.3 else { return nil }
+        }
+        if kind == .redLine || kind == .redSpot, redY.count >= 10 {
+            // Red mark at one end only: that end is the top.
+            let rMean = Double(redY.reduce(0, +)) / Double(redY.count) / Double(height)
+            if heightShare < 0.6 { redEnd = rMean < 0.5 ? .top : .bottom }
+        }
+
+        let lineFactor = kind == .redSpot ? 0.7 : Swift.min(1, 0.5 + heightShare)
+        let colourFactor = kind == .blackLine ? 0.75 : 1.0
+        let confidence = Swift.max(0, Swift.min(1, (z - 3) / 9)) * lineFactor * colourFactor
+        return MarkDetection(angle: pairAngle ?? angles[peak], kind: kind, confidence: confidence, contrast: z,
+                             heightShare: heightShare, widthDegrees: Double(band.count) * degPerCol, redEnd: redEnd)
+    }
+
+    static func circularMean(_ a: Double, _ b: Double) -> Double {
+        let x = cos(a * .pi / 180) + cos(b * .pi / 180), y = sin(a * .pi / 180) + sin(b * .pi / 180)
+        var m = atan2(y, x) * 180 / .pi
+        if m < 0 { m += 360 }
+        return m
+    }
+}

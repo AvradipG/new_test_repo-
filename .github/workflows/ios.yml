@@ -35,7 +35,7 @@ jobs:
           grep -h -B1 -A2 -E "ContinuedProcessing|requiredResources|supportedResources|updateTitle|SubmissionStrategy" "$H"/*.h | head -120 || true
 
       - name: Unit tests (measurement maths)
-        run: swift test --package-path Packages/ScanMath
+        run: swift test -c release -Xswiftc -enable-testing --package-path Packages/ScanMath
 
       - name: Generate Xcode project
         run: |
