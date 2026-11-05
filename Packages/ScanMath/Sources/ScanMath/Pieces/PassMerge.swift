@@ -21,9 +21,9 @@ public enum SideMerger {
         var out: [simd_double3x3] = []
         let golden = Double.pi * (3 - 5.0.squareRoot())
         for i in 0..<directions {
-            let y = 1 - 2 * (Double(i) + 0.5) / Double(directions)
-            let r = (1 - y * y).squareRoot()
-            let th = golden * Double(i)
+            let y: Double = 1 - 2 * (Double(i) + 0.5) / Double(directions)
+            let r: Double = (1 - y * y).squareRoot()
+            let th: Double = golden * Double(i)
             let d = SIMD3(r * cos(th), y, r * sin(th))
             let R0 = Pose.align(SIMD3(0, 1, 0), to: d)
             for k in 0..<yaws {
@@ -80,11 +80,32 @@ public enum SideMerger {
             }
         }
         starts.sort { $0.0 > $1.0 }
+        // Keep starts that really differ (a near-symmetric piece otherwise fills the list with one wrong guess).
+        var seeds: [Pose] = []
+        for (_, T) in starts {
+            let dup = seeds.contains { S in
+                Pose(R: S.R.transpose * T.R).angleDegrees < 25 && simd_length(S.t - T.t) < 4 * h
+            }
+            if !dup { seeds.append(T) }
+            if seeds.count >= 40 { break }
+        }
+        // Short refinement on a subset, then full refinement of the best few.
+        let subIdx = Array(stride(from: 0, to: b.points.count, by: Swift.max(1, b.points.count / 600)))
+        let sp = subIdx.map { b.points[$0] }, sn = subIdx.map { b.normals[$0] }
+        let sw = [Double](repeating: 1, count: subIdx.count)
+        var rough: [(Double, Pose)] = []
+        for T0 in seeds {
+            let T = PieceMatcher.contactICP(src: sp, srcN: sn, srcW: sw, tree: a.tree, tgtN: a.normals, start: T0, h: h,
+                                            iterations: 16, dStart: 7, dEnd: 1.5, sigma: 0.3 * h, opposed: false)
+            let s = score(a, b, T, floorA: floorA, probe: probe, h: h)
+            rough.append((s.overlap - 2 * s.conflict, T))
+        }
+        rough.sort { $0.0 > $1.0 }
         var best: SideMerge?
         let w = [Double](repeating: 1, count: b.points.count)
-        for (_, T0) in starts.prefix(16) {
+        for (_, T0) in rough.prefix(4) {
             let T = PieceMatcher.contactICP(src: b.points, srcN: b.normals, srcW: w, tree: a.tree, tgtN: a.normals, start: T0, h: h,
-                                            iterations: 28, dStart: 7, dEnd: 1.2, sigma: 0.3 * h, opposed: false)
+                                            iterations: 20, dStart: 2.5, dEnd: 1.0, sigma: 0.3 * h, opposed: false)
             let s = score(a, b, T, floorA: floorA, probe: probe, h: h)
             let value = s.overlap - 2 * s.conflict
             if best == nil || value > best!.overlap - 2 * best!.conflict {

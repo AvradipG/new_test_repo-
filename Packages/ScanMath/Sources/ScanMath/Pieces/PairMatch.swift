@@ -7,9 +7,9 @@ import simd
 /// how little the pieces overlap. A low residual alone is never taken as a match: a pose with little contact is
 /// not a match.
 public struct MatchParams: Sendable {
-    public var spins = 12
+    public var spins = 24
     public var facetPairs = 30
-    public var preIterations = 6
+    public var preIterations = 10
     public var preSamples = 300
     public var keepAfterPre = 8
     public var iterations = 18
@@ -49,8 +49,9 @@ public enum PieceMatcher {
                            opposed: Bool = true) -> Pose {
         var T = start
         for it in 0..<iterations {
-            let f = Swift.min(1, Double(it) / Swift.max(1, Double(iterations) * 0.6))
-            let dmax = h * (dStart + (dEnd - dStart) * f)
+            let ramp: Double = Swift.max(1, Double(iterations) * 0.6)
+            let f: Double = Swift.min(1, Double(it) / ramp)
+            let dmax: Double = h * (dStart + (dEnd - dStart) * f)
             var rows: [(SIMD3<Double>, SIMD3<Double>, Double, Double)] = []
             rows.reserveCapacity(src.count)
             for i in src.indices {
@@ -67,7 +68,8 @@ public enum PieceMatcher {
             let s = Swift.max(sigma, 1.4826 * ScanMath.median(rows.map { abs($0.2) }))
             var A = [Double](repeating: 0, count: 36), b = [Double](repeating: 0, count: 6)
             for (cpm, m, r, w0) in rows {
-                let w = w0 / (1 + (r / (2 * s)) * (r / (2 * s)))
+                let q: Double = r / (2 * s)
+                let w: Double = w0 / (1 + q * q)
                 let J = [cpm.x, cpm.y, cpm.z, m.x, m.y, m.z]
                 for u in 0..<6 {
                     let ju = J[u] * w
@@ -94,8 +96,11 @@ public enum PieceMatcher {
             let m = tgt.normals[nn.index]
             guard simd_dot(T.rotate(src.normals[i]), m) < -0.5 else { continue }
             let d = abs(simd_dot(p - tgt.points[nn.index], m))
-            let k = exp(-0.5 * (d / sigma) * (d / sigma))
-            let wt = (Swift.max(0, Swift.min(1, src.fracture[i])) * Swift.max(0, Swift.min(1, tgt.fracture[nn.index]))).squareRoot()
+            let ds: Double = d / sigma
+            let k: Double = exp(-0.5 * ds * ds)
+            let fa: Double = Swift.max(0, Swift.min(1, src.fracture[i]))
+            let fb: Double = Swift.max(0, Swift.min(1, tgt.fracture[nn.index]))
+            let wt: Double = (fa * fb).squareRoot()
             area += k
             weighted += wt * k
             if d < 2 * sigma {
@@ -129,7 +134,8 @@ public enum PieceMatcher {
         let tol = 1.5 * Swift.max(a.spacing, b.spacing)
         let pen = Swift.max(penetration(a, T, b, tol: tol), penetration(b, T.inverse, a, tol: tol))
         let rr = [c1.rms, c2.rms].filter { $0.isFinite }
-        let score = weighted / denom * exp(-pen / 0.03)
+        let damp: Double = exp(-pen / 0.03)
+        let score: Double = weighted / denom * damp
         return PairCandidate(pose: T, score: score, contactShare: area / denom, penetration: pen,
                              rms: rr.isEmpty ? .infinity : rr.reduce(0, +) / Double(rr.count))
     }
@@ -150,11 +156,13 @@ public enum PieceMatcher {
         let h = Swift.max(a.spacing, b.spacing)
         let sig = sigma(a, b)
         // Facet pairs of compatible size.
+        // Whole break against whole break first, then facet against facet.
         var pairs: [(Double, Int, Int)] = []
         for (i, fa) in a.facets.enumerated() {
-            for (j, fb) in b.facets.enumerated() {
+            for (j, fb) in b.facets.enumerated() where fa.coarse == fb.coarse {
                 let r = fa.area / fb.area
-                if r > 0.2 && r < 5 { pairs.append((abs(log(r)), i, j)) }
+                let rank: Double = abs(log(r)) + (fa.coarse ? 0 : 10)
+                if r > 0.2 && r < 5 { pairs.append((rank, i, j)) }
             }
         }
         pairs.sort { $0.0 < $1.0 }

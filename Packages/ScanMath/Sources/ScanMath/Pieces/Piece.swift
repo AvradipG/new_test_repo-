@@ -10,6 +10,8 @@ public final class Piece {
         public var area: Double
         public var centroid: SIMD3<Double>
         public var normal: SIMD3<Double>
+        /// A whole break surface (grown loosely) rather than one facet of it.
+        public var coarse: Bool = false
     }
 
     public let id: Int
@@ -86,7 +88,9 @@ public final class Piece {
                 var u = rng.unit(), v = rng.unit()
                 if u + v > 1 { u = 1 - u; v = 1 - v }
                 let p0 = positions[t.x], p1 = positions[t.y], p2 = positions[t.z]
-                pts.append(p0 + (p1 - p0) * u + (p2 - p0) * v)
+                let e1: SIMD3<Double> = (p1 - p0) * u
+                let e2: SIMD3<Double> = (p2 - p0) * v
+                pts.append(p0 + e1 + e2)
                 nrm.append(normals[k])
                 next += step
             }
@@ -123,7 +127,8 @@ public final class Piece {
         let nx = Int(ext.x / cell) + 1, ny = Int(ext.y / cell) + 1, nz = Int(ext.z / cell) + 1
         var inside = 0
         for i in 0..<nx { for j in 0..<ny { for k in 0..<nz {
-            let q = lo + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * cell
+            let idx = SIMD3<Double>(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5)
+            let q: SIMD3<Double> = lo + idx * cell
             if signedDistance(q) < 0 { inside += 1 }
         } } }
         return Double(inside) * cell * cell * cell
@@ -146,8 +151,10 @@ public final class Piece {
     /// `exterior` marks samples known to lie on the original outside (from the target shape); they get 0.05.
     func classify(roughness rough: [Double], lowQuantile: Double, highQuantile: Double, exterior: [Bool]?) {
         var f = rough.map { r -> Double in
-            let x = (r - lowQuantile) / Swift.max(1e-9, highQuantile - lowQuantile)
-            return 0.3 + 0.7 * Swift.max(0, Swift.min(1, x))
+            let span: Double = Swift.max(1e-9, highQuantile - lowQuantile)
+            let x: Double = (r - lowQuantile) / span
+            let c: Double = Swift.max(0, Swift.min(1, x))
+            return 0.3 + 0.7 * c
         }
         // Large flat faces: almost certainly cut or polished surfaces, not breaks.
         for facet in Self.regionGrow(self, members: Array(points.indices), maxAngle: 8, planeTolerance: 0.4 * spacing)
@@ -160,14 +167,18 @@ public final class Piece {
         fracture = f
     }
 
-    /// Facets of the break surface, largest first.
+    /// Whole break surfaces first (each break of a core is one), then facets of them, largest first.
     func buildFacets(limit: Int = 6) {
         var members = points.indices.filter { fracture[$0] > 0.5 }
         if members.count < 40 { members = Array(points.indices) }
+        var whole = Self.regionGrow(self, members: members, maxAngle: 70, planeTolerance: nil)
+            .filter { $0.members.count >= 30 }
+            .sorted { $0.area > $1.area }
+        for k in whole.indices { whole[k].coarse = true }
         let found = Self.regionGrow(self, members: members, maxAngle: 28, planeTolerance: nil)
             .filter { $0.members.count >= 12 }
             .sorted { $0.area > $1.area }
-        facets = Array(found.prefix(limit))
+        facets = Array(whole.prefix(3)) + Array(found.prefix(limit))
     }
 
     /// Groups neighbouring samples with similar normals.

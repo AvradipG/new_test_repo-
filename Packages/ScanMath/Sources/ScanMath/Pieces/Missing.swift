@@ -48,7 +48,9 @@ public struct PlacedEnvelope: Sendable {
     }
 
     public var volume: Double {
-        kind == .cylinder ? .pi * half.x * half.x * 2 * half.y : 8 * half.x * half.y * half.z
+        let cyl: Double = Double.pi * half.x * half.x * 2 * half.y
+        let box: Double = 8 * half.x * half.y * half.z
+        return kind == .cylinder ? cyl : box
     }
 }
 
@@ -219,7 +221,8 @@ public enum MissingFinder {
         func index(_ i: Int, _ j: Int, _ k: Int) -> Int { (k * ny + j) * nx + i }
         var filled = 0, empty = 0
         for k in 0..<nz { for j in 0..<ny { for i in 0..<nx {
-            let q = lo + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * cell
+            let idx = SIMD3<Double>(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5)
+            let q: SIMD3<Double> = lo + idx * cell
             guard env.contains(q) else { continue }
             var inside = false
             for p in placed {
@@ -276,7 +279,8 @@ public enum MissingFinder {
             }
             let pts = queue.map { c -> SIMD3<Double> in
                 let i = c % nx, j = (c / nx) % ny, k = c / (nx * ny)
-                return lo + SIMD3(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5) * cell
+                let idx = SIMD3<Double>(Double(i) + 0.5, Double(j) + 0.5, Double(k) + 0.5)
+                return lo + idx * cell
             }
             let centroid = pts.centroid
             let frame = ScanMath.principalFrame(pts.map { SIMD3<Float>($0) })
@@ -298,7 +302,8 @@ public enum MissingFinder {
             var axial: Double?, angle: Double?
             if env.kind == .cylinder {
                 let a = env.axes[0]
-                axial = (simd_dot(centroid - env.center, a) + env.half.y) / (2 * env.half.y)
+                let along: Double = simd_dot(centroid - env.center, a)
+                axial = (along + env.half.y) / (2 * env.half.y)
                 let u = simd_normalize(simd_cross(a, abs(a.x) < 0.9 ? SIMD3(1, 0, 0) : SIMD3(0, 1, 0)))
                 let v = simd_cross(a, u)
                 let d = centroid - env.center

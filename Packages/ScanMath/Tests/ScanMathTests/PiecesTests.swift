@@ -131,7 +131,7 @@ final class PiecesTests: XCTestCase {
         let B = Piece(id: 2, points: bm.points, normals: bm.normals, spacing: h)
         prepare([A, B], radius: R)
         var params = MatchParams()
-        params.facetPairs = 16
+        params.facetPairs = 24
         let m = PieceMatcher.match(A, B, params: params)
         let best = try! XCTUnwrap(m.best)
         // True pose of A into B's (moved) frame is G.
@@ -156,7 +156,7 @@ final class PiecesTests: XCTestCase {
         }
         prepare(parts, radius: R)
         var params = MatchParams()
-        params.facetPairs = 16
+        params.facetPairs = 24
         var pairs: [String: PairMatch] = [:]
         for i in 0..<3 { for j in (i + 1)..<3 {
             pairs[PieceAssembler.key(parts[i].id, parts[j].id)] = PieceMatcher.match(parts[i], parts[j], params: params)
