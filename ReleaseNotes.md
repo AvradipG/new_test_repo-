@@ -3,6 +3,15 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 2.0
+- Scan and AR in one app: a new AR view tab stands several scanned samples on the real table side by side
+- In AR: real size, or bigger or smaller (10 % to 500 %); pinch to resize, twist or use the dial to turn, drag to move
+- Measure in 3D: sizes drawn on the sample (height, length, width, cylinder or sphere diameter, micro-CT clearance), each switchable
+- Core plugs and balls are recognised automatically: diameter, length, radius and how straight the axis stands
+- Blue millimetre ruler beside the sample and a 360° protractor (as in SliceLock) that keeps the exact turn angle, with the Rot_pos/neg name
+- Sample sheet: true-scale virtual photos (four sides, top, bottom) with a ruler, saved and sent to Google Drive
+- Cross-section images now have millimetre rulers along two edges
+
 ## 1.10
 - Fixed: orange or empty sectors on the ring now turn green. Hold the phone still on one and the app takes the photo itself, even when the 3D camera had decided it had enough
 - New shutter button (Photo here) for any spot you want covered

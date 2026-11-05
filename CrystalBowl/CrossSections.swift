@@ -214,6 +214,7 @@ enum CrossSectionMaker {
                     ? String(format: "%@ %.1f mm%@ | area %.1f mm2", depthLabel, row.depthMM, sizeText, row.areaMM2)
                     : String(format: "%@ %.1f mm%@ | outline open: no area", depthLabel, row.depthMM, sizeText)
                 (info as NSString).draw(at: CGPoint(x: Self.margin, y: 36), withAttributes: small)
+                drawRulers(ctx.cgContext)
                 // 10 mm scale bar
                 let barLen = CGFloat(10 * pxPerMM)
                 let y = size.height - Self.footer / 2
@@ -221,6 +222,43 @@ enum CrossSectionMaker {
                 ctx.fill(CGRect(x: Self.margin, y: y, width: barLen, height: 4))
                 ("10 mm" as NSString).draw(at: CGPoint(x: Self.margin + barLen + 8, y: y - 9), withAttributes: small)
             }
+        }
+
+        /// Millimetre rulers along the bottom and left edges of the drawing area (0 at the lower left),
+        /// with centimetre numbers, so every section can be read like a photo next to a ruler.
+        func drawRulers(_ g: CGContext) {
+            let w = size.width - 2 * Self.margin, h = size.height - Self.header - Self.footer
+            let px = CGFloat(pxPerMM)
+            let x0 = Self.margin, yBase = Self.header + h
+            let tickColor = UIColor(red: 0.45, green: 0.7, blue: 1, alpha: 1)
+            let font: [NSAttributedString.Key: Any] = [.font: UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium), .foregroundColor: tickColor]
+            g.setFillColor(tickColor.cgColor)
+            let fine = px >= 3
+            var mm = 0
+            while CGFloat(mm) * px <= w + 0.5 {
+                let level = mm % 10 == 0 ? 2 : (mm % 5 == 0 ? 1 : 0)
+                if fine || level > 0 {
+                    let len: CGFloat = [4, 7, 11][level]
+                    g.fill(CGRect(x: x0 + CGFloat(mm) * px - 0.5, y: yBase + 2, width: 1, height: len))
+                    if level == 2 && mm > 0 {
+                        ("\(mm / 10)" as NSString).draw(at: CGPoint(x: x0 + CGFloat(mm) * px - 3, y: yBase + 13), withAttributes: font)
+                    }
+                }
+                mm += 1
+            }
+            mm = 0
+            while CGFloat(mm) * px <= h + 0.5 {
+                let level = mm % 10 == 0 ? 2 : (mm % 5 == 0 ? 1 : 0)
+                if fine || level > 0 {
+                    let len: CGFloat = [4, 7, 11][level]
+                    g.fill(CGRect(x: x0 - 2 - len, y: yBase - CGFloat(mm) * px - 0.5, width: len, height: 1))
+                    if level == 2 && mm > 0 {
+                        ("\(mm / 10)" as NSString).draw(at: CGPoint(x: 4, y: yBase - CGFloat(mm) * px - 6), withAttributes: font)
+                    }
+                }
+                mm += 1
+            }
+            ("cm" as NSString).draw(at: CGPoint(x: 4, y: yBase + 13), withAttributes: font)
         }
 
         func contactSheet(_ sections: [CrossSection], rows: [SectionRow], title: String) -> Data {

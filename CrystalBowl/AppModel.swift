@@ -6,12 +6,17 @@ import ScanMath
 @MainActor
 final class AppModel: ObservableObject {
     enum Phase { case home, capturing }
+    enum Tab: Hashable { case scan, ar }
     enum CaptureStage { case initializing, ready, detecting, capturing, finishing, completed, failed }
 
     @Published var phase: Phase = .home
     @Published var scans: [Scan] = []
     @Published var path: [Scan] = []
     @Published var errorMessage: String?
+
+    // Main tabs: scanning, and AR view of finished scans
+    @Published var tab: Tab = .scan
+    @Published var arSelection: Set<String> = []
 
     // Capture
     @Published var captureSession: ObjectCaptureSession?

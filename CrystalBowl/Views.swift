@@ -27,7 +27,14 @@ struct RootView: View {
         Group {
             switch model.phase {
             case .home:
-                HomeView()
+                TabView(selection: $model.tab) {
+                    HomeView()
+                        .tabItem { Label("Scan", systemImage: "camera.viewfinder") }
+                        .tag(AppModel.Tab.scan)
+                    ARStudioHome()
+                        .tabItem { Label("AR view", systemImage: "arkit") }
+                        .tag(AppModel.Tab.ar)
+                }
             case .capturing:
                 if let session = model.captureSession {
                     CaptureView(guide: model.guide, session: session)
@@ -677,6 +684,7 @@ struct ScanDetailView: View {
     @State private var copied = false
     @State private var showDetailCamera = false
     @State private var showAR = false
+    @State private var showMeasure = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
@@ -691,8 +699,11 @@ struct ScanDetailView: View {
                         ModelPreview(url: scan.modelURL)
                             .frame(height: 320)
                             .listRowInsets(EdgeInsets())
+                        Button { showMeasure = true } label: {
+                            Label("Measure in 3D: sizes, ruler, protractor, sample sheet", systemImage: "ruler")
+                        }
                         Button { showAR = true } label: {
-                            Label("See it life-size on the table (AR)", systemImage: "arkit")
+                            Label("See it on the table in AR (real size or scaled)", systemImage: "arkit")
                         }
                     } else if model.buildingID == scan.id {
                         VStack(alignment: .leading, spacing: 8) {
@@ -802,11 +813,10 @@ struct ScanDetailView: View {
                 Text("The model, photos and slices on this iPhone are deleted. Copies on Google Drive stay.")
             }
             .fullScreenCover(isPresented: $showAR) {
-                NavigationStack {
-                    ARModelPreview(url: scan.modelURL)
-                        .ignoresSafeArea()
-                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { showAR = false } } }
-                }
+                ARStudioScreen(scans: [scan])
+            }
+            .fullScreenCover(isPresented: $showMeasure) {
+                MeasureViewer(scan: scan)
             }
             .fullScreenCover(isPresented: $showDetailCamera) {
                 DetailCaptureView(scan: scan) {
