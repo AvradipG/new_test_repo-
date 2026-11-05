@@ -24,6 +24,7 @@ public enum Prompts {
     - action: keep (already in a good home), move, donate, trash (rubbish, empty packaging, broken), decide (needs the owner's judgement).
     - reason: one short, kind, concrete sentence ("Lives with the other chargers in the desk drawer.").
     - tags: 2-5 lowercase words that help search (colour, material, owner, use).
+    - size_cm: the thing's rough real size in centimetres (length >= width, then height), judged from what is around it. For a group, the size of the pile.
     - clutter_score: 0 = tidy, 10 = overwhelming. summary: one warm, non-judgemental sentence about the space.
     """
 
@@ -72,7 +73,7 @@ public enum Prompts {
        "size_w":{"type":"number"},"size_h":{"type":"number"},"size_d":{"type":"number"},"exists_now":{"type":"boolean"}}}},
      "items":{"type":"array","items":{"type":"object","additionalProperties":false,
       "required":["existing_item_ref","name","category","tags","description","quantity","bbox","pos_x","pos_y","pos_z",
-                  "current_zone_ref","out_of_place","suggested_zone_ref","action","reason"],
+                  "current_zone_ref","out_of_place","suggested_zone_ref","action","reason","size_cm"],
       "properties":{"existing_item_ref":{"anyOf":[{"type":"string"},{"type":"null"}]},"name":{"type":"string"},
        "category":{"type":"string","enum":CATEGORIES},"tags":{"type":"array","items":{"type":"string"}},
        "description":{"type":"string"},"quantity":{"type":"integer"},
@@ -81,7 +82,9 @@ public enum Prompts {
        "pos_x":{"type":"number"},"pos_y":{"type":"number"},"pos_z":{"type":"number"},
        "current_zone_ref":{"anyOf":[{"type":"string"},{"type":"null"}]},"out_of_place":{"type":"boolean"},
        "suggested_zone_ref":{"anyOf":[{"type":"string"},{"type":"null"}]},
-       "action":{"type":"string","enum":ACTIONS},"reason":{"type":"string"}}}}}}
+       "action":{"type":"string","enum":ACTIONS},"reason":{"type":"string"},
+       "size_cm":{"type":"object","additionalProperties":false,"required":["length","width","height"],
+        "properties":{"length":{"type":"number"},"width":{"type":"number"},"height":{"type":"number"}}}}}}}}
     """
 
     public static let planSchema = """

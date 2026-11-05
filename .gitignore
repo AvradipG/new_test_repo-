@@ -2,6 +2,7 @@ build/
 *.xcodeproj/
 TidyAtlas/Info.plist
 Packages/TidyCore/.build/
+Packages/ScanMath/.build/
 Payload/
 *.ipa
 .DS_Store

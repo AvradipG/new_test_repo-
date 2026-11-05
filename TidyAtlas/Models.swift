@@ -42,6 +42,8 @@ final class Room {
     var layoutData: Data?
     /// File name of the RoomPlan USDZ in Documents/RoomScans.
     var usdzFile: String?
+    /// File name of the saved ARKit world map in Documents/WorldMaps, so AR labels come back in the same spots.
+    var worldMapFile: String?
     var createdAt: Date = Date()
     var place: Place?
     @Relationship(deleteRule: .cascade, inverse: \Zone.room) var zones: [Zone] = []
@@ -79,6 +81,10 @@ final class Zone {
     /// A storage idea from Claude that isn't set up in the room yet.
     var isIdea: Bool = false
     var createdAt: Date = Date()
+    /// Position in the room's AR world map (metres), when placed in AR.
+    var arX: Double?
+    var arY: Double?
+    var arZ: Double?
     var room: Room?
 
     init(name: String, kind: ZoneKind) {
@@ -89,6 +95,11 @@ final class Zone {
     var kind: ZoneKind {
         get { ZoneKind(rawValue: kindRaw) ?? .other }
         set { kindRaw = newValue.rawValue }
+    }
+
+    var arPosition: SIMD3<Float>? {
+        guard let x = arX, let y = arY, let z = arZ else { return nil }
+        return SIMD3(Float(x), Float(y), Float(z))
     }
 }
 
@@ -118,10 +129,31 @@ final class Item {
     var thumbFile: String?
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    /// Real size in centimetres, longest side first, then height. `sizeSource` is "LiDAR" or "estimate".
+    var sizeLengthCM: Double?
+    var sizeWidthCM: Double?
+    var sizeHeightCM: Double?
+    var sizeSource: String?
+    /// Position in the room's AR world map (metres), when seen in AR with LiDAR.
+    var arX: Double?
+    var arY: Double?
+    var arZ: Double?
     var room: Room?
 
     init(name: String) {
         self.name = name
+    }
+
+    var sizeText: String? {
+        guard let l = sizeLengthCM, let w = sizeWidthCM, let h = sizeHeightCM else { return nil }
+        let t = DepthMeasure.label(length: l, width: w, height: h)
+        guard !t.isEmpty else { return nil }
+        return sizeSource == "LiDAR" ? t + " (LiDAR)" : "≈ " + t
+    }
+
+    var arPosition: SIMD3<Float>? {
+        guard let x = arX, let y = arY, let z = arZ else { return nil }
+        return SIMD3(Float(x), Float(y), Float(z))
     }
 
     var action: ItemAction {

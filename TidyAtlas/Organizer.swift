@@ -36,10 +36,31 @@ enum OrganizerError: LocalizedError {
 /// Everything that talks to Claude or changes several records at once.
 @MainActor
 final class Organizer: ObservableObject {
+    /// The one organizer, reachable from iOS background callbacks (uploads finishing with the app closed).
+    static weak var current: Organizer?
+    let container: ModelContainer
+
     @Published var progress: ScanProgress?
     @Published var busy = false
     @Published var latestRemote: RemoteVersion?
     @Published var lastUpdateCheck: Date?
+
+    // Google Drive
+    @Published var driveSignedIn = false
+    @Published var driveEmail: String?
+    @Published var isSyncing = false
+    @Published var driveStatus: String?
+    @Published var folderLinked = false
+    @Published var folderName: String?
+    @Published var lastDriveSync: Date?
+    var pendingUploads = 0
+    var pendingSync: Task<Void, Never>?
+
+    init(container: ModelContainer) {
+        self.container = container
+        Organizer.current = self
+        refreshDriveAccount()
+    }
 
     // MARK: Scanning
 
@@ -83,7 +104,25 @@ final class Organizer: ObservableObject {
         }
         try? context.save()
         if outcome.failed < outcome.photos { Haptics.success() }
+        scheduleDriveSync()
         return outcome
+    }
+
+    /// One AR snapshot: the upright photo plus the LiDAR depth taken at the same instant. Things Claude finds are
+    /// measured from the depth and pinned to their real place in the room's AR world.
+    func scanAR(jpeg: Data, depth: DepthFrame?, into room: Room, context: ModelContext) async throws -> MergePlan {
+        progress = ScanProgress(label: "Claude is looking and measuring…", done: 0, total: 1)
+        defer { progress = nil }
+        let file = try Storage.saveCapture(jpeg)
+        let capture = Capture(file: file)
+        capture.room = room
+        context.insert(capture)
+        if let depth { DepthStore.save(depth, for: capture.uid) }
+        try? context.save()
+        let plan = try await analyze(capture, in: room, context: context)
+        Haptics.success()
+        scheduleDriveSync()
+        return plan
     }
 
     /// Runs (or re-runs) Claude on one stored photo and merges the answer into the room.
@@ -130,7 +169,8 @@ final class Organizer: ObservableObject {
             )
             let plan = MergePlanner.plan(analysis, knownItems: itemRefs, knownZones: zoneRefs)
             if plan.ops.isEmpty && plan.newZones.isEmpty { throw OrganizerError.nothingFound }
-            apply(plan, capture: capture, room: room, firstPhoto: firstPhoto, context: context)
+            let placed = apply(plan, capture: capture, room: room, firstPhoto: firstPhoto, context: context)
+            measure(placed, depth: DepthStore.load(for: capture.uid))
             capture.status = .analyzed
             capture.itemCount = plan.ops.count
             try? context.save()
@@ -143,7 +183,30 @@ final class Organizer: ObservableObject {
         }
     }
 
-    private func apply(_ plan: MergePlan, capture: Capture, room: Room, firstPhoto: Bool, context: ModelContext) {
+    /// Sizes from LiDAR depth when the photo has it (measured, pinned in AR), otherwise Claude's estimate.
+    private func measure(_ placed: [(Item, PhotoBox, MergedItem)], depth: DepthFrame?) {
+        for (item, box, merged) in placed {
+            if let depth, let m = DepthMeasure.measure(box, in: depth) {
+                item.sizeLengthCM = m.lengthCM
+                item.sizeWidthCM = m.widthCM
+                item.sizeHeightCM = m.heightCM
+                item.sizeSource = "LiDAR"
+                item.arX = m.centerX
+                item.arY = m.centerY
+                item.arZ = m.centerZ
+            } else if item.sizeSource != "LiDAR", let s = merged.sizeEstimate {
+                item.sizeLengthCM = s.length
+                item.sizeWidthCM = s.width
+                item.sizeHeightCM = s.height
+                item.sizeSource = "estimate"
+            }
+        }
+    }
+
+    @discardableResult
+    private func apply(_ plan: MergePlan, capture: Capture, room: Room, firstPhoto: Bool, context: ModelContext)
+        -> [(Item, PhotoBox, MergedItem)] {
+        var placed: [(Item, PhotoBox, MergedItem)] = []
         if room.roomType.isEmpty { room.roomType = plan.roomType }
         room.clutterScore = plan.clutterScore
         room.summary = plan.summary
@@ -189,6 +252,7 @@ final class Organizer: ObservableObject {
                 item.zoneID = resolve(m.currentZone)
                 item.suggestedZoneID = resolve(m.suggestedZone)
                 item.updatedAt = Date()
+                placed.append((item, m.bbox, m))
             case let .insert(m):
                 let item = Item(name: m.name)
                 item.category = m.category
@@ -213,8 +277,10 @@ final class Organizer: ObservableObject {
                 item.thumbFile = Storage.saveThumbnail(from: capture.file, box: m.bbox)
                 item.room = room
                 context.insert(item)
+                placed.append((item, m.bbox, m))
             }
         }
+        return placed
     }
 
     /// A finished LiDAR room scan: real size, wall layout, and furniture as starting storage zones.
@@ -250,6 +316,7 @@ final class Organizer: ObservableObject {
         }
         try? context.save()
         Haptics.success()
+        scheduleDriveSync()
     }
 
     // MARK: Coaching
@@ -293,6 +360,7 @@ final class Organizer: ObservableObject {
             context.insert(step)
         }
         try? context.save()
+        scheduleDriveSync()
         return plan.pepTalk
     }
 
@@ -302,6 +370,7 @@ final class Organizer: ObservableObject {
         if let id = step.itemID, let item = room.items.first(where: { $0.uid == id }) { item.putAway() }
         try? context.save()
         Haptics.success()
+        scheduleDriveSync()
     }
 
     func skip(_ step: TidyStep, context: ModelContext) {

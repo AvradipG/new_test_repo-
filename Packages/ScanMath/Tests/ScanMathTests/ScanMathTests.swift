@@ -1,0 +1,253 @@
+import XCTest
+@testable import ScanMath
+
+final class ScanMathTests: XCTestCase {
+    /// Axis-aligned box mesh with outward-facing triangles.
+    func box(_ sx: Float, _ sy: Float, _ sz: Float) -> ([SIMD3<Float>], [UInt32]) {
+        var p: [SIMD3<Float>] = []
+        for i in 0..<8 {
+            p.append(SIMD3((i & 1 == 0 ? -sx : sx) / 2, (i & 2 == 0 ? -sy : sy) / 2, (i & 4 == 0 ? -sz : sz) / 2))
+        }
+        let f: [UInt32] = [
+            0, 2, 3, 0, 3, 1, // -z
+            4, 5, 7, 4, 7, 6, // +z
+            0, 1, 5, 0, 5, 4, // -y
+            2, 6, 7, 2, 7, 3, // +y
+            0, 4, 6, 0, 6, 2, // -x
+            1, 3, 7, 1, 7, 5, // +x
+        ]
+        return (p, f)
+    }
+
+    func rotate(_ p: [SIMD3<Float>], z: Float, x: Float) -> [SIMD3<Float>] {
+        p.map { v in
+            let a = SIMD3(v.x * cos(z) - v.y * sin(z), v.x * sin(z) + v.y * cos(z), v.z)
+            return SIMD3(a.x, a.y * cos(x) - a.z * sin(x), a.y * sin(x) + a.z * cos(x))
+        }
+    }
+
+    func testBoxVolumeAndClosure() {
+        let (p, f) = box(2, 3, 4)
+        XCTAssertEqual(ScanMath.signedVolume(positions: p, indices: f), 24, accuracy: 1e-9)
+        XCTAssertTrue(ScanMath.isClosed(indices: f))
+        XCTAssertFalse(ScanMath.isClosed(indices: Array(f.dropLast(3))))
+    }
+
+    func testMedianEdgeLength() {
+        let p: [SIMD3<Float>] = [SIMD3(0, 0, 0), SIMD3(0.003, 0, 0), SIMD3(0, 0.004, 0)] // 3-4-5 triangle, metres
+        let m = ScanMath.medianEdgeLength(positions: p, indices: [0, 1, 2])
+        XCTAssertEqual(m ?? 0, 0.004, accuracy: 1e-9)
+        XCTAssertNil(ScanMath.medianEdgeLength(positions: p, indices: []))
+        XCTAssertEqual(ScanMath.stats(positions: p, indices: [0, 1, 2]).medianEdgeMM ?? 0, 4, accuracy: 1e-6)
+    }
+
+    func testRotatedBoxAxes() {
+        let (p, _) = box(0.04, 0.02, 0.01) // metres
+        let r = rotate(p, z: 0.52, x: 0.35)
+        let e = ScanMath.principalExtents(r)
+        XCTAssertEqual(e.x, 0.04, accuracy: 1e-6)
+        XCTAssertEqual(e.y, 0.02, accuracy: 1e-6)
+        XCTAssertEqual(e.z, 0.01, accuracy: 1e-6)
+    }
+
+    func testSectionsAcrossEachAxisOfRotatedBox() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let r = rotate(p, z: 0.7, x: -0.4)
+        let frame = ScanMath.principalFrame(r)
+        XCTAssertEqual(frame.extents.x, 0.04, accuracy: 1e-6)
+        let expected = [0.02 * 0.03, 0.02 * 0.04, 0.03 * 0.04]
+        for axis in 0..<3 {
+            let s = ScanMath.crossSections(positions: r, indices: f, frame: frame, axis: axis, spacing: 0.005)
+            XCTAssertFalse(s.isEmpty)
+            for sec in s {
+                XCTAssertEqual(sec.loops.count, 1)
+                XCTAssertTrue(sec.openChains.isEmpty)
+                XCTAssertEqual(sec.area, expected[axis], accuracy: 1e-9)
+            }
+        }
+        let along = ScanMath.crossSections(positions: r, indices: f, frame: frame, axis: 0, spacing: 0.01)
+        XCTAssertEqual(along.map { ($0.depth * 1000).rounded() }, [5, 15, 25, 35])
+    }
+
+    func testHollowSectionSubtractsHole() {
+        let (outer, fo) = box(4, 4, 4)
+        let (inner, fi) = box(2, 2, 2)
+        let p = outer + inner
+        let f = fo + fi.map { $0 + 8 }
+        let frame = ScanMath.principalFrame(p)
+        let s = ScanMath.crossSection(positions: p, indices: f, frame: frame, axis: 2, at: 0.1)
+        XCTAssertEqual(s.loops.count, 2)
+        XCTAssertEqual(s.area, 12, accuracy: 1e-9)
+        XCTAssertEqual(s.perimeter, 16 + 8, accuracy: 1e-9)
+    }
+
+    func testFrameIsRightHanded() {
+        let (p, _) = box(0.05, 0.03, 0.01)
+        let fr = ScanMath.principalFrame(rotate(p, z: 2.1, x: 1.3))
+        let a = fr.axes[0], b = fr.axes[1], c = fr.axes[2]
+        let n = SIMD3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+        XCTAssertEqual((n * c).sum(), 1, accuracy: 1e-9)
+    }
+
+    func testStatsInLabUnits() {
+        let (p, f) = box(0.06, 0.04, 0.03) // 60 × 40 × 30 mm
+        let s = ScanMath.stats(positions: rotate(p, z: 1.1, x: 0.2), indices: f)
+        XCTAssertEqual(s.axisA, 60, accuracy: 1e-3)
+        XCTAssertEqual(s.axisB, 40, accuracy: 1e-3)
+        XCTAssertEqual(s.axisC, 30, accuracy: 1e-3)
+        XCTAssertEqual(s.volumeCM3, 72, accuracy: 1e-3)
+        XCTAssertEqual(s.triangleCount, 12)
+        XCTAssertTrue(s.isClosed)
+    }
+
+    func testDuplicatedTextureSeamVerticesFormClosedSections() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        // Triangle soup: every face corner has a separate vertex ID, as at UV seams.
+        let split = f.map { p[Int($0)] }
+        let ids = (0..<split.count).map { UInt32($0) }
+        let frame = ScanMath.principalFrame(p)
+        for axis in 0..<3 {
+            let reference = ScanMath.crossSection(positions: p, indices: f, frame: frame, axis: axis, at: 0.001)
+            let actual = ScanMath.crossSection(positions: split, indices: ids, frame: frame, axis: axis, at: 0.001)
+            XCTAssertTrue(actual.hasReliableMeasurements)
+            XCTAssertEqual(actual.loops.count, 1)
+            XCTAssertEqual(actual.area, reference.area, accuracy: 1e-12)
+            XCTAssertEqual(actual.perimeter, reference.perimeter, accuracy: 1e-12)
+        }
+        XCTAssertTrue(ScanMath.stats(positions: split, indices: ids).isClosed)
+    }
+
+    func testRealGapIsNotAutomaticallyBridged() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let split = f.map { p[Int($0)] }
+        let ids = (0..<split.count).map { UInt32($0) }
+        let frame = ScanMath.principalFrame(p)
+        // Remove one of the side triangles crossed by this plane.
+        let open = ScanMath.crossSection(positions: split, indices: Array(ids.dropLast(3)), frame: frame, axis: 0, at: 0.001)
+        XCTAssertFalse(open.hasReliableMeasurements)
+        XCTAssertFalse(open.openChains.isEmpty)
+        XCTAssertEqual(open.measurementStatus, "open_contours")
+    }
+
+    func testMixedClosedAndOpenSectionsAreNotReportedAsComplete() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let other = p.map { $0 + SIMD3<Float>(0.06, 0, 0) }
+        let ids = f + f.dropLast(3).map { $0 + UInt32(p.count) }
+        let frame = ScanMath.principalFrame(p)
+        let actual = ScanMath.crossSection(positions: p + other, indices: ids, frame: frame, axis: 0, at: 0.001)
+        XCTAssertFalse(actual.loops.isEmpty)
+        XCTAssertFalse(actual.openChains.isEmpty)
+        XCTAssertFalse(actual.hasReliableMeasurements)
+    }
+
+    func testEmptySectionHasExplicitStatus() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let actual = ScanMath.crossSection(positions: p, indices: f, frame: ScanMath.principalFrame(p), axis: 0, at: 1)
+        XCTAssertEqual(actual.measurementStatus, "empty_section")
+        XCTAssertFalse(actual.hasReliableMeasurements)
+    }
+
+    func testDuplicateFacesDoNotBreakSectionGraph() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let actual = ScanMath.crossSection(positions: p, indices: f + f, frame: ScanMath.principalFrame(p), axis: 0, at: 0.001)
+        XCTAssertTrue(actual.hasReliableMeasurements)
+        XCTAssertEqual(actual.area, 0.02 * 0.03, accuracy: 1e-9)
+    }
+
+    /// Box standing on the XZ plane (+Y up), turned about the vertical axis.
+    func uprightBox() -> ([SIMD3<Float>], [UInt32]) {
+        let (p, f) = box(0.05, 0.02, 0.03)
+        let a: Float = 0.6
+        return (p.map { SIMD3($0.x * cos(a) + $0.z * sin(a), $0.y, -$0.x * sin(a) + $0.z * cos(a)) }, f)
+    }
+
+    func testOpenSectionStillHasOutlineSize() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let split = f.map { p[Int($0)] }
+        let ids = (0..<split.count).map { UInt32($0) }
+        let open = ScanMath.crossSection(positions: split, indices: Array(ids.dropLast(3)), frame: ScanMath.principalFrame(p), axis: 0, at: 0.001)
+        XCTAssertFalse(open.hasReliableMeasurements)
+        let size = open.outlineSize
+        XCTAssertNotNil(size)
+        XCTAssertEqual(size?.maxFeret ?? 0, (0.02 * 0.02 + 0.03 * 0.03).squareRoot(), accuracy: 1e-6)
+        XCTAssertEqual(size?.minWidth ?? 0, 0.02, accuracy: 1e-6)
+    }
+
+    func testUprightSizeOfTurnedBox() {
+        let (p, _) = uprightBox()
+        let u = ScanMath.uprightSize(positions: p)
+        XCTAssertEqual(u?.heightMM ?? 0, 20, accuracy: 1e-3)
+        XCTAssertEqual(u?.lengthMM ?? 0, 50, accuracy: 1e-3)
+        XCTAssertEqual(u?.widthMM ?? 0, 30, accuracy: 1e-3)
+        XCTAssertEqual(u?.maxDiameterMM ?? 0, (50.0 * 50 + 30 * 30).squareRoot(), accuracy: 1e-3)
+        XCTAssertEqual(u?.minWidthMM ?? 0, 30, accuracy: 1e-3)
+        XCTAssertNil(ScanMath.uprightSize(positions: []))
+    }
+
+    func testHorizontalSectionsMeasureHeightFromBottom() {
+        let (p, f) = uprightBox()
+        let frame = ScanMath.uprightFrame(p)
+        XCTAssertEqual(frame.extents.x, 0.02, accuracy: 1e-6)
+        XCTAssertEqual(frame.extents.y, 0.05, accuracy: 1e-6)
+        XCTAssertEqual(frame.extents.z, 0.03, accuracy: 1e-6)
+        let s = ScanMath.crossSections(positions: p, indices: f, frame: frame, axis: 0, spacing: 0.005)
+        XCTAssertEqual(s.count, 4)
+        XCTAssertEqual(s.first?.depth ?? 0, 0.0025, accuracy: 1e-6)
+        for sec in s {
+            XCTAssertTrue(sec.hasReliableMeasurements)
+            XCTAssertEqual(sec.area, 0.05 * 0.03, accuracy: 1e-8)
+            XCTAssertEqual(sec.outlineSize?.extentU ?? 0, 0.05, accuracy: 1e-6)
+            XCTAssertEqual(sec.outlineSize?.extentV ?? 0, 0.03, accuracy: 1e-6)
+        }
+    }
+    func testBoxSizeIgnoresOrientationAndFragments() {
+        let (p, f) = box(0.06, 0.04, 0.03)
+        // A loose 2 mm crumb far away must not change the sizes.
+        let (cp, cf) = box(0.002, 0.002, 0.002)
+        let crumb = cp.map { $0 + SIMD3<Float>(0.2, 0, 0) }
+        let allP = rotate(p, z: 0.9, x: -0.6) + crumb
+        let allF = f + cf.map { $0 + UInt32(p.count) }
+        let s = ScanMath.stats(positions: allP, indices: allF)
+        XCTAssertEqual(s.removedPieces, 1)
+        XCTAssertEqual(s.axisA, 60, accuracy: 1e-3)
+        XCTAssertEqual(s.axisB, 40, accuracy: 1e-3)
+        XCTAssertEqual(s.axisC, 30, accuracy: 1e-3)
+        XCTAssertEqual(s.volumeCM3, 72, accuracy: 1e-3)
+        XCTAssertEqual(s.box?.maxFeretMM ?? 0, (60.0 * 60 + 40 * 40 + 30 * 30).squareRoot(), accuracy: 1e-3)
+        XCTAssertEqual(s.box?.minFeretMM ?? 0, 30, accuracy: 1e-3)
+    }
+
+    func testSeamSplitMeshIsOnePiece() {
+        let (p, f) = box(0.02, 0.03, 0.04)
+        let split = f.map { p[Int($0)] } // every triangle has its own vertices, as at texture seams
+        let ids = (0..<split.count).map { UInt32($0) }
+        let body = ScanMath.mainBody(positions: split, indices: ids)
+        XCTAssertEqual(body.removedPieces, 0)
+        XCTAssertEqual(body.indices.count, ids.count)
+    }
+
+    func testEnclosingCircleAndCylinder() {
+        let square: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(2, 0), SIMD2(2, 2), SIMD2(0, 2), SIMD2(1, 1), SIMD2(0.5, 1.5)]
+        let c = ScanMath.enclosingCircle(square)
+        XCTAssertEqual(c.radius, 2.0.squareRoot(), accuracy: 1e-9)
+        XCTAssertEqual(c.center.x, 1, accuracy: 1e-9)
+        XCTAssertEqual(c.center.y, 1, accuracy: 1e-9)
+        let tri: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(10, 0), SIMD2(5, 1)] // obtuse: circle on the long side
+        XCTAssertEqual(ScanMath.enclosingCircle(tri).radius, 5, accuracy: 1e-9)
+        let (p, _) = uprightBox()
+        XCTAssertEqual(ScanMath.uprightSize(positions: p)?.cylinderDiameterMM ?? 0, (50.0 * 50 + 30 * 30).squareRoot(), accuracy: 1e-3)
+    }
+
+    func testSharpnessAndBlurryPhotos() {
+        let w = 32, h = 32
+        let checker = (0..<(w * h)).map { Float(($0 % w / 2 + $0 / w / 2) % 2) }
+        let flat = [Float](repeating: 0.5, count: w * h)
+        XCTAssertGreaterThan(ScanMath.sharpness(gray: checker, width: w, height: h), 1)
+        XCTAssertEqual(ScanMath.sharpness(gray: flat, width: w, height: h), 0, accuracy: 1e-12)
+        var scores = [Double](repeating: 10, count: 20)
+        scores[3] = 1; scores[7] = 2; scores[9] = .nan
+        XCTAssertEqual(ScanMath.blurryIndices(scores), [3, 7])
+        XCTAssertEqual(ScanMath.blurryIndices(scores, maxFraction: 0.05), [3])
+        XCTAssertEqual(ScanMath.blurryIndices(Array(scores.prefix(5))), [])
+    }
+}

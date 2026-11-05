@@ -40,6 +40,14 @@ public struct PhotoAnalysis: Codable, Equatable, Sendable {
         public var suggestedZoneRef: String?
         public var action: String
         public var reason: String
+        /// Claude's rough size estimate (added in 1.1; optional so older answers still decode).
+        public var sizeCm: SizeEstimate?
+    }
+
+    public struct SizeEstimate: Codable, Equatable, Sendable {
+        public var length: Double
+        public var width: Double
+        public var height: Double
     }
 
     public var room: Room

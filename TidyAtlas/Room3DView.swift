@@ -181,7 +181,7 @@ struct Room3DView: UIViewRepresentable {
                 node.position = SCNVector3(z.center.x, z.center.y, z.center.z)
                 node.eulerAngles.y = z.yaw
                 root.addChildNode(node)
-                root.addChildNode(label(z.name, at: SCNVector3(z.center.x, z.center.y + z.size.y / 2 + 0.12, z.center.z),
+                root.addChildNode(SceneShapes.label(z.name, at: SCNVector3(z.center.x, z.center.y + z.size.y / 2 + 0.12, z.center.z),
                                         color: z.isIdea ? teal.withAlphaComponent(0.7) : teal))
             }
 
@@ -196,10 +196,10 @@ struct Room3DView: UIViewRepresentable {
                 node.position = SCNVector3(it.position.x, it.position.y, it.position.z)
                 root.addChildNode(node)
                 if selected {
-                    root.addChildNode(label(it.name, at: SCNVector3(it.position.x, it.position.y + 0.25, it.position.z), color: .label))
+                    root.addChildNode(SceneShapes.label(it.name, at: SCNVector3(it.position.x, it.position.y + 0.25, it.position.z), color: .label))
                 }
                 if let target = it.target, s.selected == nil || selected {
-                    root.addChildNode(arc(from: it.position, to: target, color: teal.withAlphaComponent(selected ? 1 : 0.6)))
+                    root.addChildNode(SceneShapes.arc(from: it.position, to: target, color: teal.withAlphaComponent(selected ? 1 : 0.6)))
                 }
             }
             return root
@@ -213,60 +213,6 @@ struct Room3DView: UIViewRepresentable {
             let n = SCNNode(geometry: plane)
             n.position = p
             n.eulerAngles.y = yaw
-            return n
-        }
-
-        private func label(_ text: String, at p: SCNVector3, color: UIColor) -> SCNNode {
-            let t = SCNText(string: text, extrusionDepth: 0.2)
-            t.font = UIFont.systemFont(ofSize: 10, weight: .bold)
-            t.flatness = 0.3
-            t.firstMaterial?.diffuse.contents = color
-            t.firstMaterial?.readsFromDepthBuffer = false
-            let n = SCNNode(geometry: t)
-            let (minB, maxB) = n.boundingBox
-            n.pivot = SCNMatrix4MakeTranslation((maxB.x - minB.x) / 2 + minB.x, minB.y, 0)
-            n.scale = SCNVector3(0.012, 0.012, 0.012)
-            let holder = SCNNode()
-            holder.position = p
-            holder.addChildNode(n)
-            holder.constraints = [SCNBillboardConstraint()]
-            holder.renderingOrder = 10
-            return holder
-        }
-
-        /// A raised curve from an item to where it belongs.
-        private func arc(from a: SIMD3<Float>, to b: SIMD3<Float>, color: UIColor) -> SCNNode {
-            let mid = SIMD3<Float>((a.x + b.x) / 2, max(a.y, b.y) + 0.8, (a.z + b.z) / 2)
-            let steps = 24
-            var points: [SCNVector3] = []
-            for i in 0...steps {
-                let t = Float(i) / Float(steps)
-                let u: Float = 1 - t
-                let wa: Float = u * u, wm: Float = 2 * u * t, wb: Float = t * t
-                let p: SIMD3<Float> = wa * a + wm * mid + wb * b
-                points.append(SCNVector3(p.x, p.y, p.z))
-            }
-            let node = SCNNode()
-            for i in 0..<steps where i % 2 == 0 {
-                node.addChildNode(segment(points[i], points[i + 1], color: color))
-            }
-            let dot = SCNNode(geometry: SCNSphere(radius: 0.04))
-            dot.geometry?.firstMaterial?.diffuse.contents = color
-            dot.position = points.last!
-            node.addChildNode(dot)
-            return node
-        }
-
-        private func segment(_ a: SCNVector3, _ b: SCNVector3, color: UIColor) -> SCNNode {
-            let va = SIMD3<Float>(a.x, a.y, a.z), vb = SIMD3<Float>(b.x, b.y, b.z)
-            let len = simd_length(vb - va)
-            let cyl = SCNCylinder(radius: 0.012, height: CGFloat(len))
-            cyl.firstMaterial?.diffuse.contents = color
-            cyl.firstMaterial?.lightingModel = .constant
-            let n = SCNNode(geometry: cyl)
-            n.simdPosition = (va + vb) / 2
-            let dir = simd_normalize(vb - va)
-            n.simdOrientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: dir)
             return n
         }
     }

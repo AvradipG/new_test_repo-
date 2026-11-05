@@ -20,6 +20,12 @@ public struct MergedItem: Equatable, Sendable {
     public var reason: String
     public var currentZone: ZoneTarget
     public var suggestedZone: ZoneTarget
+    /// Claude's rough size in centimetres (length, width, height), nil if it gave none.
+    public var estimatedSizeCM: (length: Double, width: Double, height: Double)? {
+        guard let s = sizeEstimate else { return nil }
+        return (s.length, s.width, s.height)
+    }
+    public var sizeEstimate: PhotoAnalysis.SizeEstimate?
     /// Things Claude says can stay where they are start out as already sorted.
     public var startsSorted: Bool { action == .keep && !outOfPlace }
 }
@@ -107,7 +113,12 @@ public enum MergePlanner {
                 action: ItemAction(rawValue: it.action) ?? .decide,
                 reason: Clamp.text(it.reason, 300),
                 currentZone: zone(it.currentZoneRef),
-                suggestedZone: zone(it.suggestedZoneRef)
+                suggestedZone: zone(it.suggestedZoneRef),
+                sizeEstimate: it.sizeCm.map { s in
+                    let sides = [s.length, s.width].map { Clamp.range($0, 0.5, 2000, fallback: 10) }.sorted(by: >)
+                    return PhotoAnalysis.SizeEstimate(length: sides[0], width: sides[1],
+                                                      height: Clamp.range(s.height, 0.5, 2000, fallback: 10))
+                }
             )
             if let ref = it.existingItemRef, let id = knownItems[ref], !seen.contains(id) {
                 seen.insert(id)

@@ -48,6 +48,8 @@ struct SettingsView: View {
                 Text("Stored in the iPhone Keychain, never in a file. Photos and your item list are sent to Anthropic's API only when you scan, plan or ask.")
             }
 
+            DriveSettingsSection()
+
             Section {
                 Toggle("Daily nudge", isOn: $nudgeOn)
                 if nudgeOn {
@@ -134,19 +136,25 @@ struct SettingsView: View {
 enum InventoryExport {
     @MainActor
     static func csv(items: [Item]) -> URL? {
+        guard let text = csvText(items: items) else { return nil }
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("TidyAtlas-inventory-\(df.string(from: Date())).csv")
+        return (try? text.write(to: url, atomically: true, encoding: .utf8)) != nil ? url : nil
+    }
+
+    @MainActor
+    static func csvText(items: [Item]) -> String? {
         func cell(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
-        var rows = ["place,room,spot,should_live_in,name,quantity,category,tags,status,plan,notes"]
+        var rows = ["place,room,spot,should_live_in,name,quantity,category,tags,size,status,plan,notes"]
         for it in items.sorted(by: { ($0.room?.name ?? "") < ($1.room?.name ?? "") }) {
             let room = it.room
             rows.append([
                 room?.place?.name ?? "", room?.name ?? "", room?.zone(it.zoneID)?.name ?? "",
                 room?.zone(it.suggestedZoneID)?.name ?? "", it.name, String(it.quantity), it.category,
-                it.tags.joined(separator: "; "), it.isSorted ? "put away" : "to sort", it.action.label, it.notes,
+                it.tags.joined(separator: "; "), it.sizeText ?? "", it.isSorted ? "put away" : "to sort", it.action.label, it.notes,
             ].map(cell).joined(separator: ","))
         }
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("TidyAtlas-inventory-\(df.string(from: Date())).csv")
-        return (try? rows.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)) != nil ? url : nil
+        return rows.joined(separator: "\n")
     }
 }

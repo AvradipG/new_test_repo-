@@ -98,6 +98,7 @@ struct HomeView: View {
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
+            DriveChip()
         }
     }
 

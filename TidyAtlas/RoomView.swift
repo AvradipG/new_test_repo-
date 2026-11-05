@@ -28,6 +28,8 @@ struct RoomView: View {
     @State private var toast: String?
     @State private var errorText: String?
     @State private var quickLook: URL?
+    @State private var showAR = false
+    @State private var mapStyle = 0
 
     var body: some View {
         ScrollView {
@@ -71,6 +73,7 @@ struct RoomView: View {
             RoomScanSheet { captured in organizer.applyRoomScan(captured, to: room, context: context); toast = "Room size and furniture added to the map" }
         }
         .fullScreenCover(isPresented: $focus) { FocusView(room: room) }
+        .fullScreenCover(isPresented: $showAR) { ARRoomScreen(room: room) }
         .sheet(item: $editingItem) { ItemEditor(item: $0, room: room) }
         .sheet(item: $editingZone) { ZoneEditor(zone: $0, room: room) }
         .sheet(isPresented: $editingRoom) { RoomEditor(room: room) }
@@ -155,6 +158,15 @@ struct RoomView: View {
                     .buttonStyle(.bordered)
                 }
                 .controlSize(.large)
+                if ARRoomController.isSupported {
+                    Button { showAR = true } label: {
+                        Label(room.worldMapFile == nil ? "AR: tag & measure things live" : "AR: see your labels in the room",
+                              systemImage: "arkit")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Palette.teal)
+                }
                 if RoomScanSupport.isAvailable {
                     Button { showRoomScan = true } label: {
                         Label(room.sizeFromScan ? "Re-scan room with LiDAR" : "Scan room shape with LiDAR", systemImage: "viewfinder")
@@ -187,10 +199,21 @@ struct RoomView: View {
 
     private var mapTab: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Room3DView(snapshot: RoomSnapshot(room: room, selected: selected)) { id in selected = id }
-                .frame(height: 420)
-                .background(Palette.card, in: RoundedRectangle(cornerRadius: 18))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
+            Picker("Map", selection: $mapStyle) {
+                Text("3D").tag(0)
+                Text("Floor plan").tag(1)
+            }
+            .pickerStyle(.segmented)
+            Group {
+                if mapStyle == 0 {
+                    Room3DView(snapshot: RoomSnapshot(room: room, selected: selected)) { id in selected = id }
+                } else {
+                    FloorPlanView(room: room)
+                }
+            }
+            .frame(height: 420)
+            .background(Palette.card, in: RoundedRectangle(cornerRadius: 18))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
             HStack(spacing: 14) {
                 legend(.accentColor, "to sort")
                 legend(.orange, "out of place")
@@ -281,6 +304,9 @@ struct RoomView: View {
                                 }
                                 Text(item.action.label + (room.zone(item.suggestedZoneID).map { " → \($0.name)" } ?? ""))
                                     .font(.caption).foregroundStyle(.secondary)
+                                if let size = item.sizeText {
+                                    Text(size).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                }
                                 if !item.tags.isEmpty {
                                     Text(item.tags.joined(separator: " · ")).font(.caption2).foregroundStyle(.tertiary)
                                 }
@@ -410,6 +436,7 @@ struct RoomView: View {
                     .contextMenu {
                         Button("Delete photo", systemImage: "trash", role: .destructive) {
                             Storage.remove(capture: c.file)
+                            DepthStore.remove(c.uid)
                             context.delete(c)
                             try? context.save()
                         }
@@ -444,6 +471,7 @@ struct ItemPanel: View {
                 GridRow { Text("Now").foregroundStyle(.secondary); Text(room.zone(item.zoneID)?.name ?? "Loose / on a surface") }
                 GridRow { Text("Goes to").foregroundStyle(.secondary); Text(room.zone(item.suggestedZoneID)?.name ?? (item.action == .keep ? "Stays where it is" : "Another room / not decided")) }
                 GridRow { Text("Plan").foregroundStyle(.secondary); Text(item.action.label) }
+                if let size = item.sizeText { GridRow { Text("Size").foregroundStyle(.secondary); Text(size).monospacedDigit() } }
             }
             .font(.callout)
             if !item.reason.isEmpty {
@@ -482,6 +510,7 @@ struct ItemEditor: View {
                         TextField("Name", text: $item.name).font(.headline)
                     }
                     Stepper("Quantity: \(item.quantity)", value: $item.quantity, in: 1...999)
+                    if let size = item.sizeText { LabeledContent("Size", value: size) }
                     Picker("Category", selection: $item.category) {
                         ForEach(Categories.all, id: \.self) { Label($0, systemImage: Categories.symbol($0)).tag($0) }
                     }

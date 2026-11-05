@@ -15,7 +15,8 @@ final class TidyCoreTests: XCTestCase {
        "out_of_place":true,"suggested_zone_ref":null,"action":"move","reason":""},
       {"existing_item_ref":null,"name":"Keys","category":"weird category","tags":["metal"],"description":"House keys",
        "quantity":0,"bbox":{"x":1.4,"y":-0.2,"w":0,"h":2},"pos_x":2,"pos_y":0.1,"pos_z":0.9,"current_zone_ref":"zz9",
-       "out_of_place":false,"suggested_zone_ref":"new-1","action":"keep","reason":"Hang them by the door."}]}
+       "out_of_place":false,"suggested_zone_ref":"new-1","action":"keep","reason":"Hang them by the door.",
+       "size_cm":{"length":3,"width":9,"height":-4}}]}
     """
 
     func testDecodeAndMerge() throws {
@@ -44,6 +45,10 @@ final class TidyCoreTests: XCTestCase {
         XCTAssertEqual(keys.currentZone, .none, "unknown refs are dropped")
         XCTAssertEqual(keys.suggestedZone, .new("new-1"))
         XCTAssertTrue(keys.startsSorted)
+        XCTAssertEqual(keys.sizeEstimate?.length, 9, "length is the longer side")
+        XCTAssertEqual(keys.sizeEstimate?.width, 3)
+        XCTAssertEqual(keys.sizeEstimate?.height, 0.5, "sizes are clamped")
+        XCTAssertNil(first.sizeEstimate, "older answers without size_cm still decode")
     }
 
     func testSchemasParse() {

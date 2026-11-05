@@ -21,7 +21,10 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         TAGitCommit: $(TA_GIT_COMMIT)
-        NSCameraUsageDescription: Tidy Atlas uses the camera to photograph rooms and things so Claude can tag them and suggest where they belong, and LiDAR to measure the room's shape.
+        TAGoogleClientID: $(TA_GOOGLE_CLIENT_ID)
+        BGTaskSchedulerPermittedIdentifiers: [com.avradip.tidyatlas.upload]
+        UIBackgroundModes: [processing]
+        NSCameraUsageDescription: Tidy Atlas uses the camera and LiDAR to photograph rooms and things so Claude can tag them, to measure their size, to map the room and to show labels in AR.
         NSMicrophoneUsageDescription: The microphone is only used because iPhone videos include sound. Tidy Atlas uses still frames from walkthrough videos and ignores the sound.
         UILaunchScreen: {}
         UIFileSharingEnabled: true
@@ -34,7 +37,9 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "1.0"
+        MARKETING_VERSION: "1.1"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TA_GIT_COMMIT: dev
+        # Same Google sign-in as Crystal Bowl; override with the repository variable GOOGLE_IOS_CLIENT_ID_TIDY.
+        TA_GOOGLE_CLIENT_ID: "60541649934-sfas6f95kuv4jsr323f81bc99imtp60e.apps.googleusercontent.com"

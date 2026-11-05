@@ -112,6 +112,7 @@ struct ItemRow: View {
                 Text([item.room?.place?.name, item.room?.name, item.room?.zone(item.zoneID)?.name ?? "loose"]
                     .compactMap { $0 }.joined(separator: " › "))
                     .font(.caption).foregroundStyle(.secondary)
+                if let size = item.sizeText { Text(size).font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }
                 if !item.isSorted && item.action != .keep {
                     Text(item.action.label + (item.room?.zone(item.suggestedZoneID).map { " → \($0.name)" } ?? ""))
                         .font(.caption2.weight(.bold)).foregroundStyle(.orange)

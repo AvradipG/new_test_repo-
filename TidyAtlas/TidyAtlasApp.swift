@@ -3,16 +3,24 @@ import SwiftUI
 
 @main
 struct TidyAtlasApp: App {
-    @StateObject private var organizer = Organizer()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environmentObject(organizer)
+                .environmentObject(delegate.organizer)
                 .tint(Palette.teal)
-                .task { await organizer.checkForUpdate() }
+                .task { await delegate.organizer.checkForUpdate() }
         }
-        .modelContainer(for: [Place.self, Room.self, Zone.self, Item.self, TidyStep.self, Capture.self])
+        .modelContainer(delegate.container)
+        .onChange(of: scenePhase) { _, phase in
+            // Back up to Google Drive whenever the app opens or goes to the background.
+            if phase == .active || phase == .background {
+                delegate.organizer.refreshDriveAccount()
+                Task { await delegate.organizer.syncDrive() }
+            }
+        }
     }
 }
 
