@@ -42,7 +42,7 @@ jobs:
       - name: Test report
         if: always()
         run: |
-          grep -E "error:" test.log | head -10 | while IFS= read -r l; do echo "::error::${l: -900}"; done
+          grep -E "error:|failed" test.log | grep -v "^s*$" | head -12 | while IFS= read -r l; do echo "::error::${l:0:1200}"; done
           grep -E "Executed" test.log | tail -2 | while IFS= read -r l; do echo "::notice::$l"; done
           grep -E "Test Case .*(passed|failed) \(" test.log | sed -E 's/.*ScanMathTests\.//; s/ \(([0-9.]+) seconds\)/ \1s/' | tr '\n' ';' | head -c 3500 | { read -r l; echo "::notice::$l"; } || true
 

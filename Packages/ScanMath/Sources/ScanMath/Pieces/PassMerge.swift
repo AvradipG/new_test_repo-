@@ -17,7 +17,7 @@ public struct SideMerge: Sendable {
 
 public enum SideMerger {
     /// Rotations covering all orientations about 25° apart.
-    static func rotations(directions: Int = 42, yaws: Int = 12) -> [simd_double3x3] {
+    static func rotations(directions: Int = 60, yaws: Int = 16) -> [simd_double3x3] {
         var out: [simd_double3x3] = []
         let golden = Double.pi * (3 - 5.0.squareRoot())
         for i in 0..<directions {
@@ -33,20 +33,26 @@ public enum SideMerger {
         return out
     }
 
-    static func score(_ a: Piece, _ b: Piece, _ T: Pose, floorA: Double, probe: [Int], h: Double) -> (overlap: Double, conflict: Double, rms: Double) {
+    /// - loose: wide tolerances, for ranking rough starting poses before any refinement.
+    static func score(_ a: Piece, _ b: Piece, _ T: Pose, floorA: Double, probe: [Int], h: Double, loose: Bool = false)
+        -> (overlap: Double, conflict: Double, rms: Double) {
+        let near = loose ? 5 * h : 1.5 * h
+        let ahead = loose ? 5 * h : 2 * h
+        let reach = loose ? 10 * h : 6 * h
+        let agree = loose ? 0.2 : 0.5
         var on = 0, bad = 0, sq = 0.0
         for i in probe {
             let p = T.apply(b.points[i])
-            if p.y < floorA - 2 * h {
+            if p.y < floorA - (loose ? 4 : 2) * h {
                 bad += 1
                 continue
             }
             guard let nn = a.tree.nearest(p) else { continue }
             let d = simd_dot(p - a.points[nn.index], a.normals[nn.index])
-            if nn.distance < 1.5 * h && simd_dot(T.rotate(b.normals[i]), a.normals[nn.index]) > 0.5 {
+            if nn.distance < near && simd_dot(T.rotate(b.normals[i]), a.normals[nn.index]) > agree {
                 on += 1
                 sq += d * d
-            } else if d > 2 * h && nn.distance < 6 * h && a.normals[nn.index].y > -0.3 {
+            } else if d > ahead && nn.distance < reach && a.normals[nn.index].y > -0.3 {
                 // In front of a surface the first scan saw: that space is empty.
                 bad += 1
             }
@@ -69,16 +75,16 @@ public enum SideMerger {
             for dy in [-0.5, 0.0, 0.5] {
                 let t = ca + SIMD3(0, dy * thick, 0) - R * cb
                 let T = Pose(R: R, t: t)
-                let s = score(a, b, T, floorA: floorA, probe: probe, h: h)
+                let s = score(a, b, T, floorA: floorA, probe: probe, h: h, loose: true)
                 starts.append((s.overlap - 2 * s.conflict, T))
             }
         }
         starts.sort { $0.0 > $1.0 }
         var best: SideMerge?
         let w = [Double](repeating: 1, count: b.points.count)
-        for (_, T0) in starts.prefix(10) {
+        for (_, T0) in starts.prefix(16) {
             let T = PieceMatcher.contactICP(src: b.points, srcN: b.normals, srcW: w, tree: a.tree, tgtN: a.normals, start: T0, h: h,
-                                            iterations: 20, dStart: 4, dEnd: 1.2, sigma: 0.3 * h, opposed: false)
+                                            iterations: 28, dStart: 7, dEnd: 1.2, sigma: 0.3 * h, opposed: false)
             let s = score(a, b, T, floorA: floorA, probe: probe, h: h)
             let value = s.overlap - 2 * s.conflict
             if best == nil || value > best!.overlap - 2 * best!.conflict {
