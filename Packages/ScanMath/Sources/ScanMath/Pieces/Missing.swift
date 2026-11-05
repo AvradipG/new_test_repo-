@@ -2,7 +2,7 @@ import Foundation
 import simd
 
 /// What the pieces were before they broke, as given by the user (sizes in mm) or found from the pieces.
-public struct TargetShape: Codable, Equatable, Sendable {
+public struct TargetShape: Codable, Hashable, Sendable {
     public enum Kind: String, Codable, Sendable { case auto, cylinder, cuboid, none }
     public var kind: Kind
     /// Cylinder: diameter. Cuboid: longest side.

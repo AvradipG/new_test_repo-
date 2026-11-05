@@ -33,6 +33,16 @@ struct Scan: Identifiable, Codable, Hashable {
     var sectionsRuled: Bool?
     /// Which set of automatic extras this scan has (see AppModel.extrasVersion).
     var extrasVersion: Int?
+    /// Reference mark: the marker line facing the X-ray source (3.0).
+    var mark: MarkRecord?
+    /// nil = one sample; "pieces" = broken pieces scanned together to be put back together (3.0).
+    var kind: String?
+    /// What the pieces were before they broke, as the user gave it.
+    var pieceTarget: TargetShape?
+    /// Photos of the second side (every piece turned over).
+    var side2PhotoCount: Int?
+    /// Latest reconstruction of the pieces.
+    var piecesResult: PiecesSummary?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {
@@ -56,11 +66,13 @@ struct Scan: Identifiable, Codable, Hashable {
     /// (no height profile, or section stacks without outline sizes).
     /// Finished, and missing the shape fit, sample sheet or ruled cross-sections that newer versions add.
     var needsExtras: Bool {
-        hasModel && buildRequested != true && (extrasVersion ?? 0) < AppModel.extrasVersion
+        !isPieces && hasModel && buildRequested != true && (extrasVersion ?? 0) < AppModel.extrasVersion
     }
 
+    var isPieces: Bool { kind == "pieces" }
+
     var needsRepair: Bool {
-        guard hasModel else { return false }
+        guard hasModel, !isPieces else { return false }
         guard let s = stats, let u = s.upright, u.cylinderDiameterMM != nil, s.box != nil else { return true }
         let stacks = sections ?? []
         if !stacks.contains(where: { $0.isHeightProfile }) { return true }
@@ -83,6 +95,13 @@ struct Scan: Identifiable, Codable, Hashable {
     var modelURL: URL { folderURL.appendingPathComponent("\(fileStem).usdz") }
     var hasModel: Bool { FileManager.default.fileExists(atPath: modelURL.path) }
     var hasPhotos: Bool { ScanStore.countPhotos(in: imagesURL) > 0 }
+    // Pieces: the second side.
+    var images2URL: URL { folderURL.appendingPathComponent("Images2", isDirectory: true) }
+    var checkpoint2URL: URL { folderURL.appendingPathComponent("Checkpoint2", isDirectory: true) }
+    var model2URL: URL { folderURL.appendingPathComponent("\(fileStem)_side2.usdz") }
+    var hasModel2: Bool { FileManager.default.fileExists(atPath: model2URL.path) }
+    var hasPhotos2: Bool { ScanStore.countPhotos(in: images2URL) > 0 }
+    var piecesURL: URL { exportsURL.appendingPathComponent("pieces", isDirectory: true) }
 
     var fileStem: String { storedStem ?? Self.stem(for: name, id: id) }
 
@@ -153,6 +172,8 @@ enum ScanStore {
     static func deletePhotos(_ scan: Scan) {
         try? FileManager.default.removeItem(at: scan.imagesURL)
         try? FileManager.default.removeItem(at: scan.checkpointURL)
+        try? FileManager.default.removeItem(at: scan.images2URL)
+        try? FileManager.default.removeItem(at: scan.checkpoint2URL)
     }
 
     /// Bytes used by everything in the scan folder.

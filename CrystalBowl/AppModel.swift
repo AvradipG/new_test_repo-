@@ -6,7 +6,7 @@ import ScanMath
 @MainActor
 final class AppModel: ObservableObject {
     enum Phase { case home, capturing }
-    enum Tab: Hashable { case scan, ar }
+    enum Tab: Hashable { case scan, pieces, ar }
     enum CaptureStage { case initializing, ready, detecting, capturing, finishing, completed, failed }
 
     @Published var phase: Phase = .home
@@ -54,6 +54,10 @@ final class AppModel: ObservableObject {
     /// Blurred photos found on the current side during capture.
     @Published var blurryShots = 0
     @Published var quickCapture = false
+    /// Capturing broken pieces (no flipping inside one capture: every piece is turned over between two captures).
+    @Published var piecesCapture = false
+    /// 1 or 2: which side of the pieces is being captured.
+    @Published var captureSide = 1
 
     // Drive folder chosen through the Files app
     @Published var folderLinked = false
@@ -63,12 +67,12 @@ final class AppModel: ObservableObject {
 
     let guide = CaptureGuide()
 
-    private(set) var currentScan: Scan?
+    var currentScan: Scan?
     private var pollTask: Task<Void, Never>?
     private var cancelling = false
-    private var buildQueue: [String] = []
-    private var photoSession: PhotogrammetrySession?
-    private var backgroundedDuringBuild = false
+    var buildQueue: [String] = []
+    var photoSession: PhotogrammetrySession?
+    var backgroundedDuringBuild = false
     private var shotScores: [String: Double] = [:]
     private var scoringShots = false
     private var pollCount = 0
@@ -100,33 +104,72 @@ final class AppModel: ObservableObject {
             var scan = try ScanStore.create(name: name)
             scan.quick = quick
             try? ScanStore.save(scan)
-            currentScan = scan
-            quickCapture = quick
-            shotScores = [:]
-            blurryShots = 0
-            pollCount = 0
-            let session = ObjectCaptureSession()
-            var config = ObjectCaptureSession.Configuration()
-            config.checkpointDirectory = scan.checkpointURL
-            session.start(imagesDirectory: scan.imagesURL, configuration: config)
-            captureSession = session
-            captureStage = .initializing
-            passCompleted = false
-            passNumber = 1
-            shotCount = 0
-            feedbackText = nil
-            requestedShots = 0
-            lightOn = false
-            lightDeclined = false
-            darkSince = nil
-            cancelling = false
-            phase = .capturing
-            UIApplication.shared.isIdleTimerDisabled = true
-            guide.start()
-            startPolling(session)
+            piecesCapture = false
+            captureSide = 1
+            beginCapture(scan, images: scan.imagesURL, checkpoint: scan.checkpointURL, quick: quick)
         } catch {
             errorMessage = "Couldn't create the scan folder: \(error.localizedDescription)"
         }
+    }
+
+    /// Broken pieces: all of them in one capture, spread out on a table or in a dish.
+    func startPiecesScan(name: String, target: TargetShape) {
+        guard isCaptureSupported else {
+            errorMessage = "This iPhone can't run 3D object capture. It needs a LiDAR iPhone (12 Pro or later Pro model) on iOS 17 or later."
+            return
+        }
+        do {
+            var scan = try ScanStore.create(name: name.isEmpty ? "Broken pieces" : name)
+            scan.kind = "pieces"
+            scan.pieceTarget = target
+            try? ScanStore.save(scan)
+            piecesCapture = true
+            captureSide = 1
+            beginCapture(scan, images: scan.imagesURL, checkpoint: scan.checkpointURL, quick: false)
+        } catch {
+            errorMessage = "Couldn't create the scan folder: \(error.localizedDescription)"
+        }
+    }
+
+    /// The same pieces after each was turned over where it lay.
+    func startSecondSide(_ scan: Scan) {
+        guard isCaptureSupported, buildingID != scan.id else { return }
+        let fm = FileManager.default
+        try? fm.removeItem(at: scan.images2URL)
+        try? fm.removeItem(at: scan.checkpoint2URL)
+        try? fm.removeItem(at: scan.model2URL)
+        try? fm.createDirectory(at: scan.images2URL, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: scan.checkpoint2URL, withIntermediateDirectories: true)
+        piecesCapture = true
+        captureSide = 2
+        beginCapture(scan, images: scan.images2URL, checkpoint: scan.checkpoint2URL, quick: false)
+    }
+
+    private func beginCapture(_ scan: Scan, images: URL, checkpoint: URL, quick: Bool) {
+        currentScan = scan
+        quickCapture = quick
+        shotScores = [:]
+        blurryShots = 0
+        pollCount = 0
+        let session = ObjectCaptureSession()
+        var config = ObjectCaptureSession.Configuration()
+        config.checkpointDirectory = checkpoint
+        session.start(imagesDirectory: images, configuration: config)
+        captureSession = session
+        captureStage = .initializing
+        passCompleted = false
+        passNumber = 1
+        shotCount = 0
+        feedbackText = nil
+        requestedShots = 0
+        lightOn = false
+        lightDeclined = false
+        darkSince = nil
+        cancelling = false
+        phase = .capturing
+        UIApplication.shared.isIdleTimerDisabled = true
+        guide.start()
+        startPolling(session)
     }
 
     /// Mirrors the session's state into published properties ten times a second and drives the capture guide.
@@ -199,7 +242,7 @@ final class AppModel: ObservableObject {
     private func checkNewShots() {
         guard !scoringShots, let scan = currentScan else { return }
         scoringShots = true
-        let dir = scan.imagesURL
+        let dir = captureSide == 2 ? scan.images2URL : scan.imagesURL
         let known = Set(shotScores.keys)
         Task { [weak self] in
             let fresh = await Task.detached { ShotQuality.scoreNew(in: dir, known: known) }.value
@@ -216,7 +259,7 @@ final class AppModel: ObservableObject {
     /// After a pass, blurred photos no longer count as coverage, so their spots show up as gaps to fill.
     private func markBlurryOnRing() {
         guard let scan = currentScan else { return }
-        let dir = scan.imagesURL
+        let dir = captureSide == 2 ? scan.images2URL : scan.imagesURL
         let known = Set(shotScores.keys)
         Task { [weak self] in
             let fresh = await Task.detached { ShotQuality.scoreNew(in: dir, known: known, limit: 2000) }.value
@@ -275,7 +318,15 @@ final class AppModel: ObservableObject {
         cancelling = true
         captureSession?.cancel()
         endCapture()
-        if let scan = currentScan { ScanStore.delete(scan) }
+        if let scan = currentScan {
+            if captureSide == 2 {
+                try? FileManager.default.removeItem(at: scan.images2URL)
+                try? FileManager.default.removeItem(at: scan.checkpoint2URL)
+            } else {
+                ScanStore.delete(scan)
+            }
+        }
+        captureSide = 1
         currentScan = nil
         phase = .home
         reload()
@@ -293,6 +344,7 @@ final class AppModel: ObservableObject {
 
     private func captureFailed(_ error: Error) {
         endCapture()
+        captureSide = 1
         if cancelling { return }
         errorMessage = "Capture stopped: \(error.localizedDescription). Photos taken so far are kept, and you can build a model from them in the scan list."
         if var scan = currentScan {
@@ -306,6 +358,20 @@ final class AppModel: ObservableObject {
     private func captureFinished() {
         endCapture()
         guard var scan = currentScan else { phase = .home; return }
+        if captureSide == 2 {
+            scan = scans.first { $0.id == scan.id } ?? scan
+            scan.side2PhotoCount = ScanStore.countPhotos(in: scan.images2URL)
+            scan.buildRequested = true
+            scan.buildAttempts = 0
+            try? ScanStore.save(scan)
+            currentScan = nil
+            captureSide = 1
+            phase = .home
+            tab = .pieces
+            reload()
+            reconstruct(scan)
+            return
+        }
         scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL)
         scan.passes = passNumber
         scan.coverage = guide.bandCoverage
@@ -316,7 +382,7 @@ final class AppModel: ObservableObject {
         currentScan = nil
         phase = .home
         reload()
-        path = [scan]
+        if scan.isPieces { tab = .pieces } else { path = [scan] }
         reconstruct(scan)
     }
 
@@ -345,6 +411,8 @@ final class AppModel: ObservableObject {
     func resumePendingBuilds() {
         for s in scans where s.buildRequested == true && (s.hasPhotos || s.hasModel) { enqueue(s.id) }
     }
+
+    func enqueueBuild(_ id: String) { enqueue(id) }
 
     func appMovedToBackground() {
         if buildingID != nil { backgroundedDuringBuild = true }
@@ -381,13 +449,17 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func setProgress(_ fraction: Double, _ note: String) {
+    func setProgress(_ fraction: Double, _ note: String) {
         progress = fraction
         progressNote = note
         BackgroundBuild.shared.update(fraction: fraction, note: note)
     }
 
     private func runBuild(_ original: Scan) async {
+        if original.isPieces {
+            await runPiecesBuild(original)
+            return
+        }
         var scan = original
         scan.buildAttempts = (scan.buildAttempts ?? 0) + 1
         try? ScanStore.save(scan)
@@ -458,21 +530,26 @@ final class AppModel: ObservableObject {
     }
 
     private func photogrammetry(_ scan: Scan) async throws {
-        setProgress(0.01, "Preparing \(ScanStore.countPhotos(in: scan.imagesURL)) photos…")
+        try await photogrammetry(input: scan.imagesURL, checkpoint: scan.checkpointURL, output: scan.modelURL, from: 0, to: 0.88, label: "Building the model")
+    }
+
+    /// Builds one model from a folder of photos; progress runs from `from` to `to`.
+    func photogrammetry(input: URL, checkpoint: URL, output: URL, from: Double, to: Double, label: String) async throws {
+        setProgress(from + 0.01, "Preparing \(ScanStore.countPhotos(in: input)) photos…")
         var config = PhotogrammetrySession.Configuration()
-        config.checkpointDirectory = scan.checkpointURL
+        config.checkpointDirectory = checkpoint
         // Guided capture saves photos in the order they were taken, which lets matching start from neighbours.
         config.sampleOrdering = .sequential
-        let session = try PhotogrammetrySession(input: scan.imagesURL, configuration: config)
+        let session = try PhotogrammetrySession(input: input, configuration: config)
         photoSession = session
-        try session.process(requests: [.modelFile(url: scan.modelURL)])
+        try session.process(requests: [.modelFile(url: output)])
         var failure: Error?
         // The outputs stream stays open after the last request finishes, so leave it on
         // processingComplete; waiting for the stream to end hangs at 100%.
         outputs: for try await output in session.outputs {
             switch output {
             case .requestProgress(_, let fraction):
-                setProgress(fraction * 0.88, "Building the model… \(Int(fraction * 100))%")
+                setProgress(from + fraction * (to - from), "\(label)… \(Int(fraction * 100))%")
             case .requestError(_, let error):
                 failure = error
             case .processingCancelled:
@@ -485,7 +562,7 @@ final class AppModel: ObservableObject {
             }
         }
         if let failure { throw failure }
-        guard FileManager.default.fileExists(atPath: scan.modelURL.path) else {
+        guard FileManager.default.fileExists(atPath: output.path) else {
             throw NSError(domain: "CrystalBowl", code: 2, userInfo: [NSLocalizedDescriptionKey: "No model file was produced"])
         }
     }

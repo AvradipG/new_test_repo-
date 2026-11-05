@@ -226,7 +226,8 @@ extension AppModel {
         let entries: [[String: Any]] = scans.compactMap { s in
             guard let d = s.drive, let folderID = d.folderID else { return nil }
             var e: [String: Any] = [
-                "scan_id": s.id, "name": s.name, "sample_key": s.sampleKey,
+                "scan_id": s.id, "name": s.name, "sample_key": s.sampleKey, "kind": s.isPieces ? "pieces" : "sample",
+                "pieces": s.piecesResult.map { $0.json(scan: s) as Any } ?? NSNull(),
                 "scanned_utc": f.string(from: s.created), "scanned_local": local.string(from: s.created),
                 "folder": "\(s.id)_\(s.fileStem)", "folder_id": folderID,
                 "folder_url": ScanPackage.folderLink(folderID)?.absoluteString ?? "",
@@ -246,6 +247,7 @@ extension AppModel {
                 e["volume_cm3"] = st.volumeCM3 * k * k * k
                 if let b = st.box { e["feret_mm"] = ["max": b.maxFeretMM * k, "min": b.minFeretMM * k] }
                 if let shape = s.shape { e["shape"] = shape.json(scale: k) }
+                if let m = s.mark { e["reference_mark_deg"] = m.angle; e["reference_mark_source"] = m.source }
                 if let u = st.upright {
                     e["micro_ct"] = ["height_mm": u.heightMM * k,
                                      "cylinder_diameter_mm": (u.cylinderDiameterMM ?? u.maxDiameterMM) * k]

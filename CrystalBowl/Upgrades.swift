@@ -22,12 +22,14 @@ struct ShapeRecord: Codable, Hashable {
 
     /// One line for reports and lists, true size.
     func text(scale k: Double) -> String {
+        let u = UnitPref.unit
         switch kind {
         case "cylinder":
-            return String(format: "Cylinder Ø %.1f mm × %.1f mm long (axis %.1f° from vertical, fit within %.2f mm)",
-                          diameterMM * k, lengthMM * k, tiltDegrees, residualMM * k)
+            return "Cylinder Ø " + u.format(diameterMM * k) + " × " + u.format(lengthMM * k) + " long"
+                + String(format: " (axis %.1f° from vertical, fit within ", tiltDegrees) + u.format(residualMM * k, decimals: u.decimals + 1) + ")"
         case "sphere":
-            return String(format: "Sphere Ø %.1f mm (radius %.1f mm, fit within %.2f mm)", diameterMM * k, diameterMM * k / 2, residualMM * k)
+            return "Sphere Ø " + u.format(diameterMM * k) + " (radius " + u.format(diameterMM * k / 2) + ", fit within "
+                + u.format(residualMM * k, decimals: u.decimals + 1) + ")"
         default:
             return "Irregular: no cylinder or sphere fits within 3 %"
         }
@@ -49,10 +51,11 @@ struct ShapeRecord: Codable, Hashable {
 }
 
 /// Brings every finished scan, old or new, up to the current set of extras by itself: shape fit (cylinder or
-/// sphere sizes), the true-scale sample sheet, and cross-sections with millimetre rulers. Runs one scan at a
-/// time when the app is open and nothing is being built or captured; results go to Google Drive like any change.
+/// sphere sizes), the reference mark, the clean and scientific sample sheets with the unrolled side, and
+/// cross-sections with rulers. Runs one scan at a time when the app is open and nothing is being built or
+/// captured; results go to Google Drive like any change.
 extension AppModel {
-    static let extrasVersion = 2
+    static let extrasVersion = 3
 
     func upgradeScans() async {
         guard !upgrading else { return }
@@ -67,7 +70,7 @@ extension AppModel {
             reload()
             let todo = scans.filter { $0.needsExtras }
             guard let next = todo.first else { break }
-            upgradeNote = "Adding sizes, shape and sample sheet to older scans: \(next.name) (\(todo.count) left)"
+            upgradeNote = "Finding the reference mark and making sample sheets: \(next.name) (\(todo.count) left)"
             await upgrade(next)
             done += 1
             await Task.yield()
@@ -85,7 +88,7 @@ extension AppModel {
             reload()
             scan = scans.first { $0.id == original.id } ?? scan
         } else if scan.sectionsRuled != true {
-            // Re-cut the existing stacks so their images carry millimetre rulers.
+            // Re-cut the existing stacks so their images carry rulers.
             var specs = (scan.sections ?? []).map { ($0.axis, $0.spacingMM) }
             if specs.isEmpty { specs = [(0, Self.defaultSpacingMM), (3, Self.defaultSpacingMM)] }
             scan.sections = await Self.cutStacks(scan, specs: specs)
@@ -95,15 +98,35 @@ extension AppModel {
         if let loaded = await SampleRig.load(scan) {
             if let fit = loaded.1.shape { scan.shape = ShapeRecord(fit) }
             let rig = SampleRig(scene: loaded.0, data: loaded.1, name: scan.name)
-            let panels = SampleSheet.render(rig: rig, scan: scan, angle: 0)
-            let montage = SampleSheet.montage(panels, title: "\(scan.name) – Sample views (virtual, true scale)")
-            _ = try? SampleSheet.save(panels, montage: montage, scan: scan, angle: 0)
+            let unrolled = Unroller.detectMark(rig: rig, scan: &scan)
+            let (ref, isMark) = SampleSheet.reference(for: scan)
+            let out = SampleSheet.make(rig: rig, scan: scan, reference: ref, referenceIsMark: isMark, unrolled: unrolled)
+            _ = try? SampleSheet.save(out, scan: scan)
         }
         scan.extrasVersion = Self.extrasVersion
         try? ScanStore.save(scan)
         let s = scan
         _ = MeshTools.writeReport(s)
         try? MeshTools.dimensionsData(s).write(to: MeshTools.dimensionsURL(s), options: .atomic)
+        reload()
+    }
+
+    /// The user turned the model until the mark faced them: that angle becomes 0° and the sheets are redone.
+    func setMark(_ scan: Scan, angle: Double) {
+        guard var s = scans.first(where: { $0.id == scan.id }) else { return }
+        s.mark = MarkRecord(angle: Rotation.normalized(angle), kind: "manual", confidence: 1, redEnd: s.mark?.redEnd ?? "unknown",
+                            source: "manual", date: Date())
+        s.extrasVersion = 2
+        try? ScanStore.save(s)
+        reload()
+    }
+
+    /// Forgets the mark; the automatic search runs again.
+    func clearMark(_ scan: Scan) {
+        guard var s = scans.first(where: { $0.id == scan.id }) else { return }
+        s.mark = nil
+        s.extrasVersion = 2
+        try? ScanStore.save(s)
         reload()
     }
 }

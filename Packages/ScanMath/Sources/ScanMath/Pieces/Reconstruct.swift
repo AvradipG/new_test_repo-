@@ -294,9 +294,53 @@ public enum PieceReconstructor {
             }
         }
         rec.items = items
+        upright(rec)
         rec.report = buildReport(rec, base: report, options: options)
         progress?(1, "Done")
         return rec
+    }
+
+    /// Stands the result upright: the target's axis (or the longest direction) vertical, centred, base at height 0.
+    static func upright(_ rec: Reconstruction) {
+        guard var asm = rec.assembly, let main = asm.clusters.first else { return }
+        let F = Dictionary(uniqueKeysWithValues: rec.items.map { ($0.id, $0.piece) })
+        var pts: [SIMD3<Double>] = []
+        for id in main {
+            guard let W = asm.placed[id]?.pose, let p = F[id] else { continue }
+            pts += stride(from: 0, to: p.points.count, by: 4).map { W.apply(p.points[$0]) }
+        }
+        guard pts.count > 10 else { return }
+        let axis: SIMD3<Double>
+        let centre: SIMD3<Double>
+        if let env = rec.envelope {
+            axis = env.axes[0]
+            centre = env.center
+        } else {
+            let frame = ScanMath.principalFrame(pts.map { SIMD3<Float>($0) })
+            axis = frame.axes[0]
+            centre = frame.center
+        }
+        let R = Pose.align(simd_normalize(axis), to: SIMD3(0, 1, 0))
+        var Q = Pose(R: R, t: -(R * centre))
+        let minY = pts.map { Q.apply($0).y }.min() ?? 0
+        Q.t.y -= minY
+        for (k, v) in asm.placed {
+            var p = v
+            p.pose = Q.compose(v.pose)
+            asm.placed[k] = p
+        }
+        rec.assembly = asm
+        if var env = rec.envelope {
+            env.center = Q.apply(env.center)
+            env.axes = env.axes.map { R * $0 }
+            rec.envelope = env
+        }
+        rec.missing = rec.missing.map { m in
+            var n = m
+            n.centroid = Q.apply(m.centroid)
+            n.cells = m.cells.map { Q.apply($0) }
+            return n
+        }
     }
 
     static func label(_ id: Int) -> String { "P\(id)" }
@@ -426,5 +470,22 @@ public enum PieceReconstructor {
             "Confidence: high = confirmed by a second neighbour or an independent pair match; medium = a clear single fit; low = check by eye.",
         ]
         return r
+    }
+}
+
+extension SceneMesh {
+    /// From a loaded model, with vertices at the same position welded (texture seams would otherwise split one
+    /// piece into several).
+    public static func welded(positions: [SIMD3<Float>], indices: [UInt32]) -> SceneMesh {
+        let canon = ScanMath.canonicalIndices(positions: positions, indices: indices)
+        var tris: [SIMD3<Int>] = []
+        tris.reserveCapacity(canon.count / 3)
+        var k = 0
+        while k + 2 < canon.count {
+            let a = Int(canon[k]), b = Int(canon[k + 1]), c = Int(canon[k + 2])
+            if a != b && b != c && a != c { tris.append(SIMD3(a, b, c)) }
+            k += 3
+        }
+        return SceneMesh(positions: positions.map { SIMD3<Double>($0) }, triangles: tris)
     }
 }

@@ -50,16 +50,19 @@ struct MeasureData: @unchecked Sendable {
         if let s = shape {
             switch s.kind {
             case .cylinder:
-                out.append(String(format: "Cylinder: Ø %.1f mm, length %.1f mm (radius %.2f mm)", s.diameter * 1000 * scaleFactor, s.length * 1000 * scaleFactor, s.radius * 1000 * scaleFactor))
-                out.append(String(format: "Axis %.1f° from vertical · fit within %.2f mm · %.0f%% of the surface on the cylinder", s.tiltDegrees, s.residual * 1000 * scaleFactor, s.inlierShare * 100))
+                out.append("Cylinder: Ø " + L(s.diameter * 1000 * scaleFactor) + ", length " + L(s.length * 1000 * scaleFactor)
+                           + " (radius " + L(s.radius * 1000 * scaleFactor) + ")")
+                out.append(String(format: "Axis %.1f° from vertical · fit within ", s.tiltDegrees) + L(s.residual * 1000 * scaleFactor)
+                           + String(format: " · %.0f%% of the surface on the cylinder", s.inlierShare * 100))
             case .sphere:
-                out.append(String(format: "Sphere: Ø %.1f mm (radius %.2f mm), fit within %.2f mm", s.diameter * 1000 * scaleFactor, s.radius * 1000 * scaleFactor, s.residual * 1000 * scaleFactor))
+                out.append("Sphere: Ø " + L(s.diameter * 1000 * scaleFactor) + " (radius " + L(s.radius * 1000 * scaleFactor)
+                           + "), fit within " + L(s.residual * 1000 * scaleFactor))
             case .irregular:
                 out.append("Irregular shape: no cylinder or sphere fits within 3 %")
             }
         }
-        out.append(String(format: "Height %.1f mm · footprint %.1f × %.1f mm", heightMM, lengthMM, widthMM))
-        out.append(String(format: "Turns inside a vertical cylinder of Ø %.1f mm (micro-CT clearance)", fitsDiameterMM))
+        out.append("Height " + L(heightMM) + " · footprint " + LL([lengthMM, widthMM]))
+        out.append("Turns inside a vertical cylinder of Ø " + L(fitsDiameterMM) + " (micro-CT clearance)")
         out.append(scaleFactor == 1 ? "Scale: LiDAR (add a caliper check to correct it)" : String(format: "Scale: caliper-corrected (× %.4f)", scaleFactor))
         return out
     }
@@ -191,7 +194,7 @@ final class SampleRig {
 
         // Height, beside the rock.
         let hx: SIMD2<Double> = c + halfL + ld * margin
-        dims.addChildNode(Self.dimension(p3(hx, y0), p3(hx, y1), text: String(format: "H %.1f mm", d.heightMM),
+        dims.addChildNode(Self.dimension(p3(hx, y0), p3(hx, y1), text: "H " + L(d.heightMM),
                                          color: Palette.height, r: lineRadius, tick: SIMD3(Float(ld.x), 0, Float(ld.y)), label: labelHeight))
 
         if kind != .cylinder {
@@ -203,12 +206,12 @@ final class SampleRig {
             let off: SIMD2<Double> = halfS + nd * margin
             let l0: SIMD2<Double> = c - halfL + off, l1: SIMD2<Double> = c + halfL + off
             dims.addChildNode(Self.dimension(p3(l0, y0), p3(l1, y0),
-                                             text: String(format: "L %.1f mm", d.lengthMM), color: Palette.length, r: lineRadius,
+                                             text: "L " + L(d.lengthMM), color: Palette.length, r: lineRadius,
                                              tick: SIMD3(Float(nd.x), 0, Float(nd.y)), label: labelHeight))
             let off2: SIMD2<Double> = -(halfL + ld * margin)
             let w0: SIMD2<Double> = c - halfS + off2, w1: SIMD2<Double> = c + halfS + off2
             dims.addChildNode(Self.dimension(p3(w0, y0), p3(w1, y0),
-                                             text: String(format: "W %.1f mm", d.widthMM), color: Palette.width, r: lineRadius,
+                                             text: "W " + L(d.widthMM), color: Palette.width, r: lineRadius,
                                              tick: SIMD3(Float(ld.x), 0, Float(ld.y)), label: labelHeight))
         }
 
@@ -225,13 +228,13 @@ final class SampleRig {
             // Diameter across the top face.
             let side: SIMD3<Float> = Self.perpendicular(a)
             let across: SIMD3<Float> = side * r
-            let dText = String(format: "Ø %.1f mm", s.diameter * 1000 * d.scaleFactor)
+            let dText = "Ø " + L(s.diameter * 1000 * d.scaleFactor)
             let up: SIMD3<Float> = a * (labelHeight * 1.2)
             dims.addChildNode(Self.dimension(top - across, top + across, text: dText, color: Palette.cylinder,
                                              r: lineRadius, tick: a, label: labelHeight, labelOffset: up))
             // Length along the side.
             let off: SIMD3<Float> = side * (r + Float(margin))
-            let lText = String(format: "L %.1f mm", s.length * 1000 * d.scaleFactor)
+            let lText = "L " + L(s.length * 1000 * d.scaleFactor)
             dims.addChildNode(Self.dimension(bottom + off, top + off, text: lText, color: Palette.length,
                                              r: lineRadius, tick: side, label: labelHeight))
         } else if let s = d.shape, s.kind == .sphere {
@@ -240,7 +243,7 @@ final class SampleRig {
             let dx = SIMD3<Float>(r, 0, 0)
             let upY = SIMD3<Float>(0, 1, 0)
             dims.addChildNode(Self.ring(center: ctr, axis: upY, radius: r, pipe: lineRadius * 0.8, color: Palette.cylinder))
-            let sText = String(format: "Ø %.1f mm (r %.1f)", s.diameter * 1000 * d.scaleFactor, s.radius * 1000 * d.scaleFactor)
+            let sText = "Ø " + L(s.diameter * 1000 * d.scaleFactor) + " (r " + UnitPref.unit.format(s.radius * 1000 * d.scaleFactor, symbol: false) + ")"
             let up: SIMD3<Float> = upY * (labelHeight * 1.2)
             dims.addChildNode(Self.dimension(ctr - dx, ctr + dx, text: sText, color: Palette.cylinder,
                                              r: lineRadius, tick: upY, label: labelHeight, labelOffset: up))
@@ -251,7 +254,7 @@ final class SampleRig {
         for y in [y0, y1] {
             dims.addChildNode(Self.ring(center: p3(cc, y), axis: SIMD3(0, 1, 0), radius: cr, pipe: lineRadius * 0.45, color: Palette.clearance))
         }
-        let lab = Self.label(String(format: "turns in Ø %.1f mm", d.fitsDiameterMM), color: Palette.clearance, height: labelHeight * 0.85)
+        let lab = Self.label("turns in Ø " + L(d.fitsDiameterMM), color: Palette.clearance, height: labelHeight * 0.85)
         let labAt: SIMD2<Double> = cc - nd * d.circleRadius
         lab.simdPosition = p3(labAt, y1) + SIMD3<Float>(0, labelHeight, 0)
         dims.addChildNode(lab)
@@ -262,7 +265,7 @@ final class SampleRig {
     private func buildRuler() {
         let mm = data.heightMM + 10
         guard let img = Self.rulerImage(coveringMM: mm) else { return }
-        let ticks = RulerTicks.ticks(coveringMM: mm)
+        let ticks = RulerTicks.ticks(coveringMM: mm, unit: UnitPref.unit)
         let lengthMM = ticks.last?.mm ?? mm
         let unit = 0.001 / data.scaleFactor // model metres per true millimetre
         let h = lengthMM * unit, w = 22 * unit
@@ -405,7 +408,7 @@ final class SampleRig {
 
     /// Blue lab ruler, 22 mm wide, white millimetre marks and centimetre numbers, 0 at the bottom.
     static func rulerImage(coveringMM mm: Double) -> UIImage? {
-        let ticks = RulerTicks.ticks(coveringMM: mm)
+        let ticks = RulerTicks.ticks(coveringMM: mm, unit: UnitPref.unit)
         guard let total = ticks.last?.mm, total > 0 else { return nil }
         let pxPerMM = CGFloat(Swift.min(16, 4000 / total))
         let size = CGSize(width: 22 * pxPerMM, height: CGFloat(total) * pxPerMM)
@@ -425,7 +428,7 @@ final class SampleRig {
                     s.draw(at: CGPoint(x: len + pxPerMM * 1.5, y: y - sz.height / 2), withAttributes: a)
                 }
             }
-            let unit = "cm" as NSString
+            let unit = UnitPref.unit.rulerCaption as NSString
             unit.draw(at: CGPoint(x: pxPerMM * 12, y: size.height - pxPerMM * 5),
                       withAttributes: [.font: UIFont.systemFont(ofSize: pxPerMM * 3, weight: .bold), .foregroundColor: UIColor.white])
         }

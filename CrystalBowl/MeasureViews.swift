@@ -147,6 +147,10 @@ struct MeasureViewer: View {
     @AppStorage("overlay.ruler") private var showRuler = true
     @AppStorage("overlay.protractor") private var showDial = true
     @State private var showSheet = false
+    @State private var sheetAtMark = true
+    @AppStorage(UnitPref.key) private var unitRaw = "mm"
+
+    private var current: Scan { model.scans.first { $0.id == scan.id } ?? scan }
 
     var body: some View {
         NavigationStack {
@@ -162,6 +166,14 @@ struct MeasureViewer: View {
                 if let rig {
                     VStack(spacing: 10) {
                         OverlayToggles(dimensions: $showDims, ruler: $showRuler, protractor: $showDial)
+                        UnitSegments().frame(maxWidth: 260)
+                        if let m = current.mark {
+                            HStack(spacing: 6) {
+                                Image(systemName: "line.diagonal").foregroundStyle(.red)
+                                Text(m.summary).font(.caption2)
+                                Button("Face it") { angle = m.angle }.font(.caption2.bold())
+                            }
+                        }
                         HStack(alignment: .center, spacing: 12) {
                             ProtractorDial(angle: $angle).frame(width: 150, height: 150)
                             VStack(alignment: .leading, spacing: 4) {
@@ -182,7 +194,16 @@ struct MeasureViewer: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button { showSheet = true } label: { Label("Sample sheet (virtual photos with scale)", systemImage: "photo.on.rectangle.angled") }
+                        if let m = current.mark, m.isTrusted {
+                            Button { sheetAtMark = true; showSheet = true } label: { Label("Sample sheet, 0° at the mark", systemImage: "photo.on.rectangle.angled") }
+                        }
+                        Button { sheetAtMark = false; showSheet = true } label: { Label("Sample sheet, 0° = this angle (\(Rotation.text(angle)))", systemImage: "photo.on.rectangle") }
+                        Divider()
+                        Button { model.setMark(scan, angle: angle) } label: { Label("The mark faces me now: set 0° here", systemImage: "scope") }
+                        if current.mark != nil {
+                            Button(role: .destructive) { model.clearMark(scan) } label: { Label("Forget the reference mark", systemImage: "xmark.circle") }
+                        }
+                        Divider()
                         Button { model.arSelection = [scan.id]; model.tab = .ar; dismiss() } label: { Label("Open in AR", systemImage: "arkit") }
                         Button { UIPasteboard.general.string = rig?.data.summary.joined(separator: "\n") } label: { Label("Copy sizes", systemImage: "doc.on.doc") }
                     } label: { Image(systemName: "ellipsis.circle") }
@@ -190,19 +211,21 @@ struct MeasureViewer: View {
                 }
             }
             .sheet(isPresented: $showSheet) {
-                if let rig { SampleSheetView(scan: scan, rig: rig, angle: angle) }
+                if let rig {
+                    let m = current.mark
+                    if sheetAtMark, let m, m.isTrusted {
+                        SampleSheetView(scan: current, rig: rig, reference: m.angle, referenceIsMark: true)
+                    } else {
+                        SampleSheetView(scan: current, rig: rig, reference: angle, referenceIsMark: false)
+                    }
+                }
             }
         }
         .task {
-            guard let loaded = await SampleRig.load(scan) else { failed = true; return }
-            let r = SampleRig(scene: loaded.0, data: loaded.1, name: scan.name)
-            let root = SCNScene()
-            root.rootNode.addChildNode(r.stage)
-            root.background.contents = UIColor(white: 0.08, alpha: 1)
-            r.show(dimensions: showDims, ruler: showRuler, protractor: showDial)
-            rig = r
-            scene = root
+            await load()
+            if let m = current.mark, m.isTrusted { angle = m.angle }
         }
+        .onChange(of: unitRaw) { _, _ in Task { await load() } }
         .onChange(of: angle) { _, a in rig?.angle = a }
         .onChange(of: showDims) { _, _ in applyToggles() }
         .onChange(of: showRuler) { _, _ in applyToggles() }
@@ -210,4 +233,17 @@ struct MeasureViewer: View {
     }
 
     private func applyToggles() { rig?.show(dimensions: showDims, ruler: showRuler, protractor: showDial) }
+
+    /// Builds the rig (again after a unit change, so labels and ruler use the new unit).
+    private func load() async {
+        guard let loaded = await SampleRig.load(scan) else { failed = true; return }
+        let r = SampleRig(scene: loaded.0, data: loaded.1, name: scan.name)
+        let root = SCNScene()
+        root.rootNode.addChildNode(r.stage)
+        root.background.contents = UIColor(white: 0.08, alpha: 1)
+        r.show(dimensions: showDims, ruler: showRuler, protractor: showDial)
+        r.angle = angle
+        rig = r
+        scene = root
+    }
 }

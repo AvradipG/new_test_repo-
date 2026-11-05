@@ -31,6 +31,9 @@ struct RootView: View {
                     HomeView()
                         .tabItem { Label("Scan", systemImage: "camera.viewfinder") }
                         .tag(AppModel.Tab.scan)
+                    PiecesHome()
+                        .tabItem { Label("Pieces", systemImage: "puzzlepiece.extension") }
+                        .tag(AppModel.Tab.pieces)
                     ARStudioHome()
                         .tabItem { Label("AR view", systemImage: "arkit") }
                         .tag(AppModel.Tab.ar)
@@ -84,7 +87,8 @@ struct HomeView: View {
 
     private var shownScans: [Scan] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        return q.isEmpty ? model.scans : model.scans.filter { $0.name.lowercased().contains(q) || $0.id.contains(q) }
+        let samples = model.scans.filter { !$0.isPieces }
+        return q.isEmpty ? samples : samples.filter { $0.name.lowercased().contains(q) || $0.id.contains(q) }
     }
 
     var body: some View {
@@ -242,6 +246,7 @@ struct HomeView: View {
                 Section {
                     Toggle("Vibration guidance while scanning", isOn: $haptics)
                     Toggle("Keep photos after the model is built", isOn: $keepPhotos)
+                    UnitPicker(title: "Show lengths in")
                 } header: {
                     Text("Settings")
                 } footer: {
@@ -283,7 +288,7 @@ struct HomeView: View {
                 }
             }
             .navigationDestination(for: Scan.self) { scan in
-                ScanDetailView(scanID: scan.id)
+                if scan.isPieces { PiecesDetailView(scanID: scan.id) } else { ScanDetailView(scanID: scan.id) }
             }
             .refreshable { model.reload() }
         }
@@ -409,6 +414,7 @@ struct TipRow: View {
 }
 
 struct ScanRow: View {
+    @AppStorage(UnitPref.key) private var unitRaw = "mm"
     let scan: Scan
     var building = false
     var progress = 0.0
@@ -426,7 +432,7 @@ struct ScanRow: View {
                     Text(scan.created, style: .date)
                     if let s = scan.stats {
                         let f = scan.scaleFactor
-                        Text(String(format: "%.1f × %.1f × %.1f mm", s.axisA * f, s.axisB * f, s.axisC * f)).monospacedDigit()
+                        Text(LL([s.axisA * f, s.axisB * f, s.axisC * f])).monospacedDigit()
                     } else if building {
                         Text("Building… \(Int(progress * 100))%").foregroundStyle(Theme.violet).monospacedDigit()
                     } else if scan.buildRequested == true {
@@ -530,14 +536,20 @@ struct CaptureView: View {
             ProgressView("Starting camera…")
         case .ready:
             VStack(spacing: 10) {
-                Text("Put the rock on a plain table and point the camera at it. The phone first finds the table surface, then the rock on it.")
+                Text(model.piecesCapture
+                     ? (model.captureSide == 2
+                        ? "Side 2: every piece turned over where it lay. Point the camera at the pieces; the phone finds the table first."
+                        : "Spread the pieces on a matte, textured surface, a finger-width apart, none touching. Point the camera at them; the phone finds the table first.")
+                     : "Put the rock on a plain table and point the camera at it. The phone first finds the table surface, then the rock on it.")
                     .multilineTextAlignment(.center)
                 Button("Continue") { model.startDetecting() }
                     .buttonStyle(.borderedProminent)
             }
         case .detecting:
             VStack(spacing: 10) {
-                Text("The table is found and the box sits on it round the rock. Drag the box edges so it just fits the rock, nothing else.")
+                Text(model.piecesCapture
+                     ? "Drag the box edges so it holds all the pieces (and the smallest grains), but as little else as possible."
+                     : "The table is found and the box sits on it round the rock. Drag the box edges so it just fits the rock, nothing else.")
                     .multilineTextAlignment(.center)
                 HStack {
                     Button("Reset box") { model.resetDetection() }.buttonStyle(.bordered)
@@ -600,7 +612,20 @@ struct CaptureView: View {
                 }
                 .frame(maxHeight: 150)
             }
-            if model.quickCapture && enoughForSize {
+            if model.piecesCapture {
+                Button { model.anotherPass() } label: {
+                    Label(needsMore ? "Fill the gaps (go round again, a bit higher)" : "Another pass, a bit higher", systemImage: "circle.dashed").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(needsMore ? .borderedProminent : .bordered)
+                Button { model.finishCapture() } label: {
+                    Label(model.captureSide == 2 ? "Finish side 2 and put the pieces together" : "Finish side 1", systemImage: "puzzlepiece.extension.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(needsMore ? .bordered : .borderedProminent)
+                Text(model.captureSide == 2
+                     ? "Both sides are then built and the pieces matched by themselves."
+                     : "Next, the app builds side 1. Then turn every piece over where it lies and scan side 2 from the Pieces tab.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if model.quickCapture && enoughForSize {
                 Button { model.finishCapture() } label: {
                     Label("Get the dimensions now", systemImage: "ruler.fill").frame(maxWidth: .infinity)
                 }
@@ -630,7 +655,7 @@ struct CaptureView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            if !(model.quickCapture && enoughForSize) {
+            if !(model.quickCapture && enoughForSize) && !model.piecesCapture {
                 Button { model.finishCapture() } label: {
                     Label("Finish and build the model", systemImage: "cube.fill").frame(maxWidth: .infinity)
                 }
@@ -686,6 +711,7 @@ struct CoverageRing: View {
 
 struct ScanDetailView: View {
     @EnvironmentObject var model: AppModel
+    @AppStorage(UnitPref.key) private var unitRaw = "mm"
     let scanID: String
     @State private var exports: [URL] = []
     @State private var exporting = false
@@ -697,6 +723,7 @@ struct ScanDetailView: View {
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
+    @State private var cleanSheet = false
 
     private var scan: Scan? { model.scans.first { $0.id == scanID } }
 
@@ -901,15 +928,32 @@ struct ScanDetailView: View {
             .filter { $0.pathExtension == "png" }
             .sorted { ((try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast)
                     > ((try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
-        if let sheet = files.first(where: { $0.lastPathComponent.contains("sample-sheet") }), let img = UIImage(contentsOfFile: sheet.path) {
+        let sci = files.first { $0.lastPathComponent.contains("sample-sheet-scientific") }
+        let clean = files.first { $0.lastPathComponent.contains("sample-sheet-clean") }
+        let older = files.first { $0.lastPathComponent.contains("sample-sheet") }
+        let chosen = (cleanSheet ? clean : sci) ?? sci ?? clean ?? older
+        if let sheet = chosen, let img = UIImage(contentsOfFile: sheet.path) {
             Section {
+                if sci != nil && clean != nil {
+                    Picker("Template", selection: $cleanSheet) {
+                        Text("Scientific").tag(false)
+                        Text("Clean").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
                 Image(uiImage: img).resizable().scaledToFit()
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                if let u = files.first(where: { $0.lastPathComponent.contains("_unrolled_") }), let ui = UIImage(contentsOfFile: u.path) {
+                    DisclosureGroup("Unrolled side (360°)") {
+                        Image(uiImage: ui).resizable().scaledToFit()
+                    }
+                }
                 ShareLink(items: files) { Label("Share the sample sheet (\(files.count) images)", systemImage: "square.and.arrow.up") }
             } header: {
                 Text("Sample sheet")
             } footer: {
-                Text("True-scale virtual photos with a ruler. Make it again at another angle from Measure in 3D.")
+                Text((scan.mark?.summary ?? "No marker line found: views count from the start of the scan. Set the mark by hand in Measure in 3D.")
+                     + ". Make it again at another angle from Measure in 3D.")
             }
         }
     }
@@ -971,21 +1015,21 @@ struct ScanDetailView: View {
     private func measurementsSection(_ scan: Scan, _ s: MeshStats) -> some View {
         let f = scan.scaleFactor
         return Section {
-            LabeledContent(s.box == nil ? "Axes a × b × c" : "Smallest box a × b × c", value: String(format: "%.1f × %.1f × %.1f mm", s.axisA * f, s.axisB * f, s.axisC * f))
+            LabeledContent(s.box == nil ? "Axes a × b × c" : "Smallest box a × b × c", value: LL([s.axisA * f, s.axisB * f, s.axisC * f]))
             if let b = s.box {
-                LabeledContent("Longest / narrowest (3D)", value: String(format: "%.1f / %.1f mm", b.maxFeretMM * f, b.minFeretMM * f))
+                LabeledContent("Longest / narrowest (3D)", value: L(b.maxFeretMM * f) + " / " + L(b.minFeretMM * f))
             }
             if let shape = scan.shape {
                 Text(shape.text(scale: f)).font(.callout)
             }
-            LabeledContent("Volume", value: String(format: "%.2f cm³", s.volumeCM3 * f * f * f))
+            LabeledContent("Volume", value: LV(cm3: s.volumeCM3 * f * f * f))
             if !s.isClosed {
                 Text("The mesh has small gaps, so the volume is approximate.").font(.footnote).foregroundStyle(.secondary)
             }
             if let u = s.upright {
-                LabeledContent("Height (as scanned)", value: String(format: "%.1f mm", u.heightMM * f))
-                LabeledContent("Footprint L × W", value: String(format: "%.1f × %.1f mm", u.lengthMM * f, u.widthMM * f))
-                LabeledContent("Widest across", value: String(format: "%.1f mm", u.maxDiameterMM * f))
+                LabeledContent("Height (as scanned)", value: L(u.heightMM * f))
+                LabeledContent("Footprint L × W", value: LL([u.lengthMM * f, u.widthMM * f]))
+                LabeledContent("Widest across", value: L(u.maxDiameterMM * f))
             }
             if let e = s.medianEdgeMM {
                 LabeledContent("Mesh detail", value: String(format: "%.2f mm edges", e))
@@ -1019,9 +1063,9 @@ extension ScanDetailView {
                 Image(systemName: "checkmark.seal.fill").foregroundStyle(.green).font(.title2)
                 Text("3D dimensions ready: enough to centre the sample in the micro-CT.").font(.callout.bold())
             }
-            LabeledContent("Height (as it stood)", value: String(format: "%.1f mm", u.heightMM * f))
-            LabeledContent("Fits a cylinder", value: String(format: "Ø %.1f mm", (u.cylinderDiameterMM ?? u.maxDiameterMM) * f))
-            LabeledContent("Footprint L × W", value: String(format: "%.1f × %.1f mm", u.lengthMM * f, u.widthMM * f))
+            LabeledContent("Height (as it stood)", value: L(u.heightMM * f))
+            LabeledContent("Fits a cylinder", value: "Ø " + L((u.cylinderDiameterMM ?? u.maxDiameterMM) * f))
+            LabeledContent("Footprint L × W", value: LL([u.lengthMM * f, u.widthMM * f]))
         } header: {
             Text("Micro-CT centring")
         } footer: {
@@ -1077,7 +1121,9 @@ struct RepeatsSection: View {
         let mean = values.reduce(0, +) / max(n, 1)
         let sd = n > 1 ? (values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / (n - 1)).squareRoot() : 0
         let lo = values.min() ?? 0, hi = values.max() ?? 0
-        return LabeledContent(title, value: values.isEmpty ? "–" : String(format: "%.1f ± %.1f mm (%.1f–%.1f)", mean, sd, lo, hi))
+        let un = UnitPref.unit
+        let text = un.format(mean, symbol: false) + " ± " + un.format(sd) + " (" + un.format(lo, symbol: false) + "–" + un.format(hi, symbol: false) + ")"
+        return LabeledContent(title, value: values.isEmpty ? "–" : text)
             .font(.callout.monospacedDigit())
     }
 }
@@ -1186,7 +1232,7 @@ struct SectionsPanel: View {
                 if s.rows.count > 1 {
                     Slider(value: $index, in: 0...Double(s.rows.count - 1), step: 1)
                 }
-                Text(String(format: "%@ slice %d of %d · %@ %.1f mm", s.title, i + 1, s.rows.count, s.isHeightProfile ? "height" : "depth", row.depthMM))
+                Text(String(format: "%@ slice %d of %d · %@ ", s.title, i + 1, s.rows.count, s.isHeightProfile ? "height" : "depth") + L(row.depthMM))
                     .font(.callout.monospacedDigit())
                 Text(row.measurementText)
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)

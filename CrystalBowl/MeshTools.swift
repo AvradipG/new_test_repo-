@@ -109,6 +109,7 @@ enum MeshTools {
                            "max_feret": b.maxFeretMM, "min_feret": b.minFeretMM]
         }
         if let shape = scan.shape { d["shape"] = shape.json(scale: f) }
+        if let m = scan.mark { d["reference_mark"] = m.json() }
         if let k = s.keptAreaShare { d["main_body_area_share"] = k }
         if let r = s.removedPieces { d["loose_pieces_dropped"] = r }
         if let c = scan.caliper {

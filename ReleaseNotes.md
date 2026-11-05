@@ -3,6 +3,14 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.0
+- New Pieces tab: scan broken pieces all together, turn each one over, scan again. The app finds every piece, matches the breaks, puts them back together, and shows what is missing and how big it is
+- Give the original shape (core plug diameter and length, or a block's sides) to help it; it also guides you: which piece to turn over or scan again
+- The red/black reference line is found by itself and becomes 0°; views and the new unrolled 360° side image count from it. Set it by hand in Measure in 3D if it is missed
+- Two sample-sheet templates: clean, and scientific with rulers, sizes, view angles, a protractor round the top view and a data box
+- Lengths in mm, cm, m or inches (Settings, or in Measure in 3D); lab files stay in mm
+- Old scans get the mark search and the new sheets by themselves
+
 ## 2.1
 - Older scans get the new extras by themselves: cylinder or sphere sizes, a sample sheet, and cross-sections with millimetre rulers. New scans get them right after building
 - A scan's page shows its sample sheet and its shape (for example Cylinder Ø 50.8 × 150.2 mm)

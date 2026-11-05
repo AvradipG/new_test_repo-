@@ -336,10 +336,12 @@ enum ScanPackage {
             }
         }
         if scan.hasModel { out.append(("model/\(scan.modelURL.lastPathComponent)", scan.modelURL)) }
+        if scan.hasModel2 { out.append(("model/\(scan.model2URL.lastPathComponent)", scan.model2URL)) }
         walk(scan.exportsURL, prefix: "model")
         walk(scan.sectionsURL, prefix: "sections")
         if includePhotos {
             walk(scan.imagesURL, prefix: "images")
+            walk(scan.images2URL, prefix: "images_side2")
             walk(scan.detailURL, prefix: "detail")
         }
         var seen = Set<String>()
@@ -355,7 +357,21 @@ enum ScanPackage {
     }
 
     static func role(_ rel: String) -> String {
-        if rel.hasPrefix("images/") { return "original_photo" }
+        if rel.hasPrefix("images/") || rel.hasPrefix("images_side2/") { return "original_photo" }
+        if rel.hasPrefix("model/pieces/") {
+            if rel.hasSuffix("_pieces.json") { return "pieces_report" }
+            if rel.hasSuffix(".csv") { return "pieces_table" }
+            if rel.hasSuffix("_assembled.obj") { return "pieces_assembled_model" }
+            if rel.hasSuffix("_missing.obj") { return "pieces_missing_model" }
+            return "pieces_image"
+        }
+        if rel.hasPrefix("model/sheet/") {
+            if rel.contains("scientific") { return "sample_sheet_scientific" }
+            if rel.contains("clean") { return "sample_sheet_clean" }
+            if rel.contains("unrolled") { return "unrolled_side_image" }
+            if rel.hasSuffix(".json") { return "sample_sheet_description" }
+            return "virtual_view"
+        }
         if rel == "detail/detail.json" { return "detail_photo_index" }
         if rel.hasPrefix("detail/") { return "detail_photo" }
         if rel.hasSuffix("dimensions.json") { return "dimensions" }
@@ -458,8 +474,11 @@ enum ScanPackage {
             "size_method": scan.stats?.box != nil
                 ? "a x b x c = sides of the smallest box around the main body (loose pieces under 5 % of the surface dropped)"
                 : "a x b x c = extents along principal axes (measured before 1.8; tap Repair to update)",
+            "kind": scan.isPieces ? "pieces" : "sample",
+            "pieces": scan.piecesResult.map { $0.json(scan: scan) as Any } ?? NSNull(),
             "shape": scan.shape.map { $0.json(scale: scan.scaleFactor) as Any } ?? NSNull(),
-            "sample_sheet": "model/sheet/ (true-scale views with a ruler: four sides, top, bottom, and a one-row overview)",
+            "reference_mark": scan.mark.map { $0.json() as Any } ?? NSNull(),
+            "sample_sheet": "model/sheet/: clean and scientific sheets (views counted from the reference mark), single views, the unrolled 360° side and sample-sheet.json",
             "box_mm": scan.stats?.box.map { b -> Any in
                 ["length": b.lengthMM, "width": b.widthMM, "thickness": b.thicknessMM,
                  "max_feret": b.maxFeretMM, "min_feret": b.minFeretMM]
@@ -509,6 +528,18 @@ enum ScanPackage {
     manifest.json is on Drive), sizes in mm (size_mm a >= b >= c, feret_mm, micro_ct height and
     cylinder diameter), volume_cm3 and scale (LiDAR or caliper-corrected). Software should read
     index.json first, then the manifest.json of each scan it needs.
+
+    model/sheet/ (single samples): the clean and the scientific sample sheet, views at 0, +90, 180 and -90
+    degrees from the reference mark (the red/black line facing the X-ray source; + = sample turned
+    counter-clockwise seen from above), top and bottom views, the unrolled 360-degree side image and
+    sample-sheet.json (angles and pixels per mm of every image). manifest.json "reference_mark" gives
+    the mark's protractor angle, how it was found and how sure.
+
+    Piece sets (kind "pieces" in index.json and manifest.json): broken pieces scanned together, side 1
+    and side 2 (every piece turned over). model/pieces/ holds <sample>_pieces.json (every piece: size,
+    volume, where it lay, its 4x4 pose into the assembled frame, neighbours, confidence; missing regions
+    with size and position; what to do next), <sample>_pieces.csv, <sample>_assembled.obj (+ .mtl,
+    one group per piece, metres, target axis vertical), <sample>_missing.obj and PNG pictures.
 
     Folder names: <yyyyMMdd-HHmmss>_<sample name>, so they sort by scan time.
     """
