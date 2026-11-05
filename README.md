@@ -14,6 +14,23 @@ setup (SwiftUI app generated with XcodeGen, built, signed and sent to TestFlight
 - **Coaching**: Claude plans 1–5 minute steps grouped into carry trips, tuned to energy and minutes. Focus mode shows
   one step with a timer, Done / Skip / "Too big?" (Claude splits it), cheers, a daily streak and an optional daily nudge.
 - **Find**: search everything, or ask Claude "where is my passport?".
+- **AR organizer** (1.1): a live AR view of the room. "Tag & measure what I see" sends one frame to Claude and uses
+  the LiDAR depth of the same instant to measure each thing and pin its label (name, size, where it goes) on the real
+  object. Storage spots are placed at the crosshair; arcs in the room show where to carry things. The ARKit world map
+  is saved per room, so the labels reappear in the same places next time.
+- **Automatic sizes** (1.1): LiDAR-measured in AR with Crystal Bowl's ScanMath (`uprightSize`: height and smallest
+  footprint rectangle of the thing's point cloud); otherwise Claude's estimate from the photo (shown with ≈).
+- **Floor plan** (1.1): top-down map per room (walls from the LiDAR scan, spots, numbered things, arrows, legend).
+- **Google Drive backup** (1.1, from Crystal Bowl): after every change and when the app opens or closes, My Drive ›
+  Tidy Atlas gets `inventory.json` (the whole database, schema `tidy-atlas.inventory/1`), `inventory.csv`, and per
+  room `room.json`, `floor-plan.png`, `room-scan.usdz`, `things/` thumbnails and, on Wi-Fi, `photos/`. Uploads run in
+  iOS's background session (app closed, phone locked). Two routes, as in Crystal Bowl: a folder in the Google Drive
+  app (no sign-in) or direct Google sign-in.
+
+## Reused from the Crystal Bowl Scanner 1.10
+`Packages/ScanMath` (unchanged, with its tests), `TidyAtlas/Drive.swift`, `DriveBackground.swift`, the folder copy
+in `DriveSync.swift`, the Drive screens in `DriveViews.swift`, `CameraAssist.swift`, and the update banner/problem
+report in `Updates.swift`.
 - **Private**: all data stays in the iPhone's database (SwiftData) and Files › On My iPhone › Tidy Atlas. Photos and
   the item list go to Anthropic's API only when you scan, plan or ask, using your own key stored in the Keychain.
   Export the inventory as CSV from Settings.

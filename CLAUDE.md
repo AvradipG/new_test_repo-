@@ -13,7 +13,14 @@ plain-language requests, each ending with a push that reaches the phone through 
   `FocusView`, `FindView`, `SettingsView`, `Updates.swift` (update banner, problem report), `Theme.swift`.
 - `Packages/TidyCore/`: platform-independent logic with XCTest tests: prompts and JSON schemas, Claude request body
   and response parsing, `MergePlanner` (resolves "i3"/"z2"/"new-1" refs, clamps, de-duplicates), streaks, thumbnail
-  crop maths, RoomPlan layout maths.
+  crop maths, RoomPlan layout maths, `DepthMeasure` (LiDAR depth in a photo box → AR-world points → sizes).
+- `Packages/ScanMath/`: copied unchanged from Crystal Bowl 1.10 (keep it in step with `crystal-bowl-ios` when that
+  package changes there; its tests run in this workflow too).
+- AR: `ARRoomView.swift` (ARKit session, depth snapshot, labels/arcs via `SceneShapes.swift`, world map per room in
+  Documents/WorldMaps; depth per photo in Documents/Depth via `DepthStore`).
+- Drive: `Drive.swift`, `DriveBackground.swift` (from Crystal Bowl), `DriveSync.swift` (`TidyPackage` export written
+  to Documents/DriveMirror only when content changes; upload state in drive-state.json / drive-folder-state.json),
+  `DriveViews.swift`. `FloorPlan.swift` draws the plan PNG.
 - `project.yml`: XcodeGen spec (bundle ID `com.avradip.tidyatlas`); the Xcode project is generated in CI.
 - `ReleaseNotes.md`: newest section first; its bullets show in the app's update banner.
 
