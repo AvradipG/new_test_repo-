@@ -79,6 +79,8 @@ final class AppModel: ObservableObject {
     var photosBefore = 0
     var photoFiles: Int?
     var lastRefusalLog = Date.distantPast
+    /// The rock was flipped during this capture, so the underside was photographed.
+    var flippedThisCapture = false
     var logUploadScheduled = false
     var savingToPhotos = false
     @Published var photosNote: String?
@@ -182,6 +184,7 @@ final class AppModel: ObservableObject {
         requestedShots = 0
         // Photos already in the folder (adding photos to an earlier capture) are not this capture's coverage.
         photosBefore = ShotQuality.photos(in: images).count
+        flippedThisCapture = false
         photoFiles = nil
         lightOn = false
         lightDeclined = false
@@ -348,6 +351,7 @@ final class AppModel: ObservableObject {
     func flipAndContinue() {
         captureSession?.beginNewScanPassAfterFlip()
         guide.newPass(flipped: true)
+        flippedThisCapture = true
         passNumber += 1
     }
 
@@ -425,6 +429,7 @@ final class AppModel: ObservableObject {
         scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL)
         scan.passes = passNumber
         scan.coverage = guide.bandCoverage
+        if flippedThisCapture { scan.underside = true } else if scan.underside == nil { scan.underside = false }
         scan.buildRequested = true
         scan.buildAttempts = 0
         scan.pauses = 0

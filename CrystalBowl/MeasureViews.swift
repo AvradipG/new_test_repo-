@@ -152,6 +152,12 @@ struct MeasureViewer: View {
 
     private var current: Scan { model.scans.first { $0.id == scan.id } ?? scan }
 
+    /// The dial and the angle buttons count from the reference mark when there is one: the mark is 0° (3.7).
+    private var zero: Double { (current.mark?.isTrusted ?? false) ? (current.mark?.angle ?? 0) : 0 }
+    private var shown: Binding<Double> {
+        Binding(get: { Rotation.normalized(angle - zero) }, set: { angle = Rotation.normalized($0 + zero) })
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
@@ -171,17 +177,17 @@ struct MeasureViewer: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "line.diagonal").foregroundStyle(.red)
                                 Text(m.summary).font(.caption2)
-                                Button("Face it") { angle = m.angle }.font(.caption2.bold())
+                                Button("Face the mark (0°)") { angle = m.angle }.font(.caption2.bold())
                             }
                         }
                         HStack(alignment: .center, spacing: 12) {
-                            ProtractorDial(angle: $angle).frame(width: 150, height: 150)
+                            ProtractorDial(angle: shown).frame(width: 150, height: 150)
                             VStack(alignment: .leading, spacing: 4) {
                                 ForEach(rig.data.summary, id: \.self) { Text($0).font(.caption2) }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        AngleControls(angle: $angle)
+                        AngleControls(angle: shown)
                     }
                     .padding(12)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))

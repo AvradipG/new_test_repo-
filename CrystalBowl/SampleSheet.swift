@@ -128,7 +128,9 @@ enum SampleSheet {
 
     @MainActor
     static func make(rig: SampleRig, scan: Scan, reference: Double, referenceIsMark: Bool, unrolled: Unroller.Result?) -> Output {
-        let views = renderViews(rig: rig, reference: reference)
+        var views = renderViews(rig: rig, reference: reference)
+        // No bottom view when the underside was never photographed: it would only show a guessed flat face (3.7).
+        if !showsBottom(scan, views.first { $0.id == "bottom" }) { views.removeAll { $0.id == "bottom" } }
         let unit = UnitPref.unit
         let ref = Rotation.normalized(reference)
         let unrolledImage = unrolled.map { centred($0, on: ref) }
@@ -329,7 +331,7 @@ enum SampleSheet {
             if let top = views.first(where: { $0.id == "top" }), let idx = views.firstIndex(where: { $0.id == "top" }) {
                 let x = gap + CGFloat(idx) * (panel + gap)
                 scaleBar(g, at: CGPoint(x: x, y: head + panel + 80), pxPerMM: CGFloat(top.pxPerMM) * s, unit: unit, maxWidth: panel * 0.6)
-                text("top and bottom", at: CGPoint(x: x, y: head + panel + 124), size: 18, color: .gray)
+                text(views.contains { $0.id == "bottom" } ? "top and bottom" : "top", at: CGPoint(x: x, y: head + panel + 124), size: 18, color: .gray)
             }
         }
     }
@@ -572,6 +574,37 @@ enum SampleSheet {
         try JSONSerialization.data(withJSONObject: o.json, options: [.prettyPrinted, .sortedKeys]).write(to: j, options: .atomic)
         urls.append(j)
         return urls
+    }
+
+    /// Whether the sheet shows the bottom: yes when the rock was flipped; no when it wasn't, for a quick scan or a
+    /// single pass. Older scans don't record a flip, so their bottom is kept only when it carries texture
+    /// (an unphotographed underside is one flat grey).
+    static func showsBottom(_ scan: Scan, _ bottom: View3D?) -> Bool {
+        if scan.underside == true { return true }
+        if scan.underside == false || scan.quick == true || (scan.passes ?? 1) <= 1 { return false }
+        guard let img = bottom?.image else { return false }
+        return !looksUntextured(img)
+    }
+
+    /// Spread of brightness over the rock's pixels (the white background left out) is tiny for a face
+    /// Object Capture filled in without photos.
+    static func looksUntextured(_ img: UIImage) -> Bool {
+        guard let cg = img.cgImage else { return false }
+        let n = 64
+        var px = [UInt8](repeating: 0, count: n * n * 4)
+        guard let ctx = CGContext(data: &px, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: n, height: n))
+        var lumas: [Double] = []
+        for i in 0..<(n * n) {
+            let r = Double(px[i * 4]) / 255, g = Double(px[i * 4 + 1]) / 255, b = Double(px[i * 4 + 2]) / 255
+            if r > 0.97 && g > 0.97 && b > 0.97 { continue } // background
+            lumas.append(0.299 * r + 0.587 * g + 0.114 * b)
+        }
+        guard lumas.count > 200 else { return true }
+        let mean = lumas.reduce(0, +) / Double(lumas.count)
+        let sd = (lumas.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(lumas.count)).squareRoot()
+        return sd < 0.03
     }
 
     /// The angle used as 0° for a scan: its trusted mark, else 0.

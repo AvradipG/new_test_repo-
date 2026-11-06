@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.7
+- Fixed: a written label (like "4002-2") was taken for the reference line. The app now looks for a narrow line that runs along the sample, and finds the mark again on your existing scans (marks you set by hand are kept). The mark is 0°: the 3D view turns to it and the dial reads 0° there
+- Every picture of the sample sheet opens full screen on its own: the sheets, each view, the top, the bottom and the unrolled side. Pinch to zoom, swipe to the next, share or save each one
+- The bottom view is left out when the rock wasn't flipped and its underside scanned
+
 ## 3.6
 - Safer Google Drive uploads: a busy or failed update no longer leaves a second copy of a file, and photos are only removed from the iPhone after every file's checksum was read and the package is complete
 - Cross-sections are cut next to the old stack and swapped in only when complete, so a failed cut keeps the previous slices

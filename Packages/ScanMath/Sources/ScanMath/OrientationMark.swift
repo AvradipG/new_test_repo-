@@ -67,8 +67,9 @@ public enum MarkFinder {
     ///   - rgb: row-major pixels, row 0 = top of the sample, values 0…1.
     ///   - valid: optional mask (false = background or no surface).
     ///   - columnAngles: angle of each column (degrees); default 0…360 evenly.
+    ///   - circumferenceMM: the sample's circumference when known, so "narrow like a drawn line" can be judged in mm.
     public static func detect(rgb: [SIMD3<Float>], width: Int, height: Int, valid: [Bool]? = nil,
-                              columnAngles: [Double]? = nil) -> MarkDetection? {
+                              columnAngles: [Double]? = nil, circumferenceMM: Double? = nil) -> MarkDetection? {
         guard width >= 24, height >= 8, rgb.count == width * height else { return nil }
         var angles: [Double] = []
         if let given = columnAngles {
@@ -127,16 +128,71 @@ public enum MarkFinder {
         let med = ScanMath.median(score)
         let dev: [Double] = score.map { abs($0 - med) }
         let mad: Double = ScanMath.median(dev) * 1.4826
-        guard let peak = score.indices.max(by: { score[$0] < score[$1] }) else { return nil }
+        // Every stripe that stands out is a candidate (3.7). The darkest one is not always the mark: a written label
+        // ("4002-2") has more ink than a thin drawn line. A drawn line is narrow and runs unbroken along the sample,
+        // so each candidate is weighed by how narrow and how continuous it is.
+        let minSep = Swift.max(1, Int((8 / degPerCol).rounded()))
+        var candidates: [Int] = []
+        for x in score.indices.sorted(by: { score[$0] > score[$1] }) {
+            let r = score[x] - med
+            if r < 0.02 || r / (mad + 0.004) < 4 { break }
+            let apart = candidates.allSatisfy { c in
+                let d = abs(c - x)
+                return Swift.min(d, width - d) >= minSep
+            }
+            if apart { candidates.append(x) }
+            if candidates.count >= 6 { break }
+        }
+        guard !candidates.isEmpty else { return nil }
+        let maxLineDeg: Double = {
+            guard let c = circumferenceMM, c > 0 else { return 12 }
+            return Swift.max(4, Swift.min(14, 3.0 / (c / 360))) // about 3 mm
+        }()
+        let raw: [Double] = (0..<width).map { red[$0] + 0.8 * black[$0] }
+        func halfWidth(_ p: Int) -> (lo: Int, hi: Int) {
+            let level = med + (score[p] - med) / 2
+            var lo = 0, hi = 0
+            while lo < width / 4 && score[(p - lo - 1 + width) % width] >= level { lo += 1 }
+            while hi < width / 4 && score[(p + hi + 1) % width] >= level { hi += 1 }
+            return (lo, hi)
+        }
+        /// Longest stretch along the sample covered by the stripe's centre columns, short breaks bridged.
+        func continuity(_ p: Int) -> Double {
+            var centre = p
+            for k in -half...half where raw[(p + k + width) % width] > raw[centre] { centre = (p + k + width) % width }
+            let core = Swift.max(0, Int((0.75 / degPerCol).rounded()))
+            var rows = Set<Int>()
+            for k in -core...core {
+                let x = (centre + k + width) % width
+                rows.formUnion(redRows[x])
+                rows.formUnion(blackRows[x])
+            }
+            let sorted = rows.sorted()
+            guard var start = sorted.first else { return 0 }
+            let bridge = Swift.max(1, height / 50)
+            var prev = start, best = 1
+            for y in sorted.dropFirst() {
+                if y - prev > bridge + 1 { start = y }
+                best = Swift.max(best, y - start + 1)
+                prev = y
+            }
+            return Double(best) / Double(height)
+        }
+        var peak = candidates[0]
+        var bestValue = -Double.infinity
+        var peakNarrow = 1.0
+        for p in candidates {
+            let (l, h) = halfWidth(p)
+            let widthDeg = Double(l + h + 1) * degPerCol
+            let narrow = Swift.min(1, pow(maxLineDeg / widthDeg, 2))
+            let value = (score[p] - med) * (0.25 + continuity(p)) * narrow
+            if value > bestValue { bestValue = value; peak = p; peakNarrow = narrow }
+        }
         let rise: Double = score[peak] - med
         let z: Double = rise / (mad + 0.004)
-        guard score[peak] - med >= 0.02, z >= 4 else { return nil }
 
         // Width: columns round the peak above half its height.
-        let halfLevel: Double = med + rise / 2
-        var lo = 0, hi = 0
-        while lo < width / 4 && score[(peak - lo - 1 + width) % width] >= halfLevel { lo += 1 }
-        while hi < width / 4 && score[(peak + hi + 1) % width] >= halfLevel { hi += 1 }
+        let (lo, hi) = halfWidth(peak)
         var band: [Int] = []
         for k in -lo...hi { band.append((peak + k + width) % width) }
 
@@ -186,8 +242,9 @@ public enum MarkFinder {
             kind = heightShare >= 0.3 ? .redLine : .redSpot
         } else {
             kind = .blackLine
-            // A dark spot is too easily a natural grain or vug: only lines count.
-            guard heightShare >= 0.3 else { return nil }
+            // A dark spot is too easily a natural grain or vug: only lines count. A wide dark band (a written
+            // label, a dark layer) is not a drawn line either.
+            guard heightShare >= 0.3, peakNarrow >= 0.4 else { return nil }
         }
         if kind == .redLine || kind == .redSpot, redY.count >= 10 {
             // Red mark at one end only: that end is the top.

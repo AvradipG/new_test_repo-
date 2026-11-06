@@ -756,6 +756,16 @@ struct CaptureView: View {
     }
 }
 
+/// Small "enlarge" badge on pictures that open full screen.
+struct EnlargeBadge: View {
+    var body: some View {
+        Image(systemName: "arrow.up.left.and.arrow.down.right")
+            .font(.caption.weight(.bold)).foregroundStyle(.white)
+            .padding(7).background(.black.opacity(0.55), in: Circle()).padding(8)
+            .accessibilityHidden(true)
+    }
+}
+
 /// Big turn arrow while filling gaps: which way round the rock and how far. It turns the same way as the ring,
 /// where the user's walking direction is clockwise.
 struct GapArrow: View {
@@ -836,6 +846,7 @@ struct ScanDetailView: View {
     @State private var showAR = false
     @State private var showMeasure = false
     @State private var sectionViewer: SectionViewerTarget?
+    @State private var gallery: GalleryTarget?
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
@@ -976,6 +987,9 @@ struct ScanDetailView: View {
             .fullScreenCover(item: $sectionViewer) { target in
                 SectionViewerHost(target: target).environmentObject(model)
             }
+            .fullScreenCover(item: $gallery) { target in
+                GalleryViewer(target: target).environmentObject(model)
+            }
             .fullScreenCover(isPresented: $showDetailCamera) {
                 DetailCaptureView(scan: scan) {
                     showDetailCamera = false
@@ -1062,11 +1076,37 @@ struct ScanDetailView: View {
                     }
                     .pickerStyle(.segmented)
                 }
+                let pictures = SheetPictures.items(scan)
                 Image(uiImage: img).resizable().scaledToFit()
+                    .overlay(alignment: .bottomTrailing) { EnlargeBadge() }
+                    .contentShape(Rectangle())
+                    .onTapGesture { open(pictures, sheet) }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint("Opens the sheet full screen to zoom")
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                // Each view on its own: tap to open it full screen.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 8) {
+                        ForEach(pictures.filter { !$0.url.lastPathComponent.contains("sample-sheet") }) { p in
+                            Button { open(pictures, p.url) } label: {
+                                VStack(spacing: 3) {
+                                    SectionThumb(url: p.url, maxPixel: 240)
+                                        .frame(width: 84, height: 84)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    Text(p.title).font(.caption2).lineLimit(2).multilineTextAlignment(.center).frame(width: 84)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
                 if let u = files.first(where: { $0.lastPathComponent.contains("_unrolled_") }), let ui = UIImage(contentsOfFile: u.path) {
                     DisclosureGroup("Unrolled side (360°)") {
                         Image(uiImage: ui).resizable().scaledToFit()
+                            .overlay(alignment: .bottomTrailing) { EnlargeBadge() }
+                            .contentShape(Rectangle())
+                            .onTapGesture { open(pictures, u) }
                     }
                 }
                 ShareLink(items: files) { Label("Share the sample sheet (\(files.count) images)", systemImage: "square.and.arrow.up") }
@@ -1077,6 +1117,11 @@ struct ScanDetailView: View {
                      + ". Make it again at another angle from Measure in 3D.")
             }
         }
+    }
+
+    private func open(_ items: [GalleryItem], _ url: URL) {
+        guard !items.isEmpty else { return }
+        gallery = GalleryTarget(items: items, start: items.firstIndex { $0.url == url } ?? 0)
     }
 
     private func driveSection(_ scan: Scan) -> some View {

@@ -50,6 +50,8 @@ struct Scan: Identifiable, Codable, Hashable {
     var grainDensity: Double?
     var coring: [CoringRecord]?
     var bedding: [BeddingRecord]?
+    /// True when the rock was flipped and its underside scanned; false when it wasn't (3.7). Nil for older scans.
+    var underside: Bool?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {

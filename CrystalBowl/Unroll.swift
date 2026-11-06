@@ -31,8 +31,9 @@ struct MarkRecord: Codable, Hashable {
     }
 
     var summary: String {
-        if source == "manual" { return "Reference mark set by hand at " + Rotation.text(angle) }
-        var s = String(format: "Reference mark found: %@ at %@ (confidence %.0f%%)", kindText, Rotation.text(angle), confidence * 100)
+        if source == "manual" { return "Reference mark set by hand: it is 0°" }
+        var s = String(format: "Reference mark found: %@ (confidence %.0f%%). It is 0°%@", kindText, confidence * 100,
+                       isTrusted ? "" : ", but check it: the 0° view should show the line")
         if upsideDown { s += ". The red end is at the bottom: the sample stood upside down in this scan" }
         return s
     }
@@ -145,7 +146,8 @@ enum Unroller {
         }
         let angles = (0..<totalW).map { x in Rotation.normalized((Double(totalW - x) - 0.5) / Double(totalW) * 360) }
         let positive = angles.map { $0 < 0 ? $0 + 360 : $0 }
-        let mark = MarkFinder.detect(rgb: rgb, width: totalW, height: rows, valid: valid, columnAngles: positive)
+        let mark = MarkFinder.detect(rgb: rgb, width: totalW, height: rows, valid: valid, columnAngles: positive,
+                                     circumferenceMM: 2 * .pi * R / unitPerMM)
         // Background to white for display.
         let shown = whitened(out)
         return Result(image: shown, pxPerMM: pxPerMM, heightMM: H / unitPerMM, circumferenceMM: 2 * .pi * R / unitPerMM,

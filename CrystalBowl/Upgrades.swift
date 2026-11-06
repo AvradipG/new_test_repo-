@@ -55,7 +55,9 @@ struct ShapeRecord: Codable, Hashable {
 /// cross-sections with rulers. Runs one scan at a time when the app is open and nothing is being built or
 /// captured; results go to Google Drive like any change.
 extension AppModel {
-    static let extrasVersion = 3
+    /// 4 (3.7): the mark is looked for again with the line-versus-label check, and the sheets are made again
+    /// (no bottom view when the underside wasn't scanned). Marks set by hand are kept.
+    static let extrasVersion = 4
 
     func upgradeScans() async {
         guard !upgrading else { return }
