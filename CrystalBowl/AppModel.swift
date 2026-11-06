@@ -543,11 +543,15 @@ final class AppModel: ObservableObject {
                      + "left the screen during the build: \(backgroundedDuringBuild), iOS took the background time back: \(BackgroundBuild.shared.expired), "
                      + "phone unlocked: \(UIApplication.shared.isProtectedDataAvailable), heat \(AppLog.thermal()), memory \(AppLog.memoryInUseMB()) MB",
                      error, scan: scan)
-        guard interrupted else { return false }
+        let ns = error as NSError
+        let kind = BuildStop.classify(interrupted: interrupted, domain: ns.domain, code: ns.code, pausesSoFar: scan.pauses ?? 0)
+        guard kind == .pause else {
+            if interrupted { AppLog.warn("build", "Stopped while off screen, but counted as a real failure (\(ns.domain) \(ns.code))", scan: scan) }
+            return false
+        }
         // A pause isn't a failed attempt: only real failures count towards giving up.
         scan.buildAttempts = max(0, (scan.buildAttempts ?? 1) - 1)
         scan.pauses = (scan.pauses ?? 0) + 1
-        guard (scan.pauses ?? 0) <= 30 else { return false }
         try? ScanStore.save(scan)
         buildPausedNote = "\(scan.name) paused at \(Int(progress * 100))% when the phone locked or another app opened. It carries on from its last checkpoint while Crystal Bowl is on screen."
         AppLog.info("build", "Paused (pause \(scan.pauses ?? 0)); it carries on when the app is on screen again", scan: scan)

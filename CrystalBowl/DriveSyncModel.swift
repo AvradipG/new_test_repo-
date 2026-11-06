@@ -243,6 +243,13 @@ extension AppModel {
                 for (rel, url) in files { h[rel] = ScanPackage.sha256(url) }
                 return h
             }.value
+            // Every file needs its checksum before the package counts as complete and photos may be deleted (3.6).
+            let unhashed = files.filter { hashes[$0.0] == nil }.map { $0.0 }
+            guard unhashed.isEmpty else {
+                AppLog.warn("drive", "Manifest held back: \(unhashed.count) file(s) could not be read for a checksum, e.g. \(unhashed.prefix(3).joined(separator: ", "))", scan: scan)
+                driveStatus[id] = nil
+                return
+            }
             let manifestURL = scan.folderURL.appendingPathComponent("manifest.json")
             try ScanPackage.manifest(for: scan, files: files, hashes: hashes, photosUploaded: photos).write(to: manifestURL, options: .atomic)
             let client = DriveClient()
@@ -268,7 +275,13 @@ extension AppModel {
     /// Updates a file in place; if it was deleted on Drive, uploads it as a new file.
     private func uploadReplacing(_ client: DriveClient, _ url: URL, name: String, parent: String, existing: String?) async throws -> String {
         if let existing {
-            if let id = try? await client.upload(url, name: name, parent: parent, existingID: existing) { return id }
+            do {
+                return try await client.upload(url, name: name, parent: parent, existingID: existing)
+            } catch let e as DriveError where e.fileGone {
+                AppLog.info("drive", "\(name) was gone from Drive (HTTP \(e.status ?? 0)); uploading it as a new file")
+            }
+            // Any other failure (busy, 5xx, network) is thrown, so the next try updates the same file
+            // instead of leaving a duplicate on Drive (3.6).
         }
         return try await client.upload(url, name: name, parent: parent, existingID: nil)
     }

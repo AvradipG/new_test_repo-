@@ -33,7 +33,11 @@ enum Keychain {
 
 struct DriveError: LocalizedError {
     var message: String
+    /// HTTP status when Google answered (3.6), so "file gone" can be told from "try again later".
+    var status: Int? = nil
     var errorDescription: String? { message }
+    /// The file to update no longer exists on Drive: only then is a new one created instead.
+    var fileGone: Bool { status == 404 || status == 410 }
 }
 
 @MainActor
@@ -186,7 +190,7 @@ struct DriveClient {
         }
         guard (200..<300).contains(http.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw DriveError(message: "Google Drive error \(http.statusCode): \(body.prefix(200))")
+            throw DriveError(message: "Google Drive error \(http.statusCode): \(body.prefix(200))", status: http.statusCode)
         }
         return (data, http)
     }
@@ -231,9 +235,10 @@ struct DriveClient {
         put.setValue(Self.mimeType(for: file.pathExtension), forHTTPHeaderField: "Content-Type")
         put.timeoutInterval = 600
         let (data, resp) = try await URLSession.shared.upload(for: put, fromFile: file)
-        guard let code = (resp as? HTTPURLResponse)?.statusCode, (200..<300).contains(code),
+        let code = (resp as? HTTPURLResponse)?.statusCode
+        guard let code, (200..<300).contains(code),
               let id = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["id"] as? String else {
-            throw DriveError(message: "Upload of \(name) failed.")
+            throw DriveError(message: "Upload of \(name) failed (HTTP \(code.map(String.init) ?? "none")).", status: code)
         }
         return id
     }
@@ -329,7 +334,7 @@ enum ScanPackage {
             for url in items.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
                 let rel = prefix.isEmpty ? url.lastPathComponent : "\(prefix)/\(url.lastPathComponent)"
                 if (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-                    walk(url, prefix: rel)
+                    if !url.lastPathComponent.hasPrefix(".") { walk(url, prefix: rel) } // skips staging folders
                 } else if !url.lastPathComponent.hasPrefix(".") && url.pathExtension != "zip" {
                     out.append((rel, url))
                 }
@@ -353,7 +358,11 @@ enum ScanPackage {
         guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? h.close() }
         var hasher = SHA256()
-        while let chunk = try? h.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        do {
+            while let chunk = try h.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        } catch {
+            return nil // a read error must not pass for the hash of the part that was read
+        }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 

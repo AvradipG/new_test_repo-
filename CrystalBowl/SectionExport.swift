@@ -13,7 +13,8 @@ enum PhotoSaver {
     static var mode: String { UserDefaults.standard.string(forKey: modeKey) ?? "every" }
     static let deniedCode = 22
 
-    static func save(_ urls: [URL]) async throws -> Int {
+    /// `onChunk` gets the running total after every committed chunk, so a later failure can resume after it.
+    static func save(_ urls: [URL], onChunk: (Int) -> Void = { _ in }) async throws -> Int {
         guard !urls.isEmpty else { return 0 }
         var status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
         if status == .notDetermined { status = await PHPhotoLibrary.requestAuthorization(for: .addOnly) }
@@ -33,6 +34,7 @@ enum PhotoSaver {
                 }
             }
             saved += chunk.count
+            onChunk(saved)
         }
         return saved
     }
@@ -40,6 +42,8 @@ enum PhotoSaver {
 
 extension AppModel {
     static let photosPendingKey = "photos.pending"
+    /// Files of a pending stack already in Photos, so a retry after a partial failure doesn't add them twice.
+    static let photosDoneKey = "photos.pendingDone"
 
     /// Saves files to Photos now (a button press) and says how it went.
     func saveToPhotos(_ urls: [URL], what: String) {
@@ -59,7 +63,13 @@ extension AppModel {
     func queueSectionsForPhotos(_ scan: Scan, _ series: [SectionSeries]) {
         guard PhotoSaver.mode != "off", !series.isEmpty else { return }
         var pending = UserDefaults.standard.stringArray(forKey: Self.photosPendingKey) ?? []
-        for s in series where !pending.contains("\(scan.id)|\(s.id)") { pending.append("\(scan.id)|\(s.id)") }
+        var done = UserDefaults.standard.dictionary(forKey: Self.photosDoneKey) as? [String: Int] ?? [:]
+        for s in series {
+            let key = "\(scan.id)|\(s.id)"
+            done[key] = nil
+            if !pending.contains(key) { pending.append(key) }
+        }
+        UserDefaults.standard.set(done, forKey: Self.photosDoneKey)
         UserDefaults.standard.set(pending, forKey: Self.photosPendingKey)
         Task { await flushPhotosPending() }
     }
@@ -70,9 +80,15 @@ extension AppModel {
         guard !pending.isEmpty else { return }
         let mode = PhotoSaver.mode
         let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-        if mode == "off" || status == .denied || status == .restricted {
-            if mode != "off" { AppLog.warn("photos", "Photos access is off, \(pending.count) stack(s) not saved there") }
+        if mode == "off" {
             UserDefaults.standard.removeObject(forKey: Self.photosPendingKey)
+            UserDefaults.standard.removeObject(forKey: Self.photosDoneKey)
+            return
+        }
+        if status == .denied || status == .restricted {
+            // Kept waiting: once access is given in Settings they are saved, nothing is lost (3.6).
+            AppLog.warn("photos", "Photos access is off; \(pending.count) stack(s) wait until it is allowed")
+            photosNote = "\(pending.count) cross-section stack(s) are waiting for Photos access: Settings › Apps › Crystal Bowl › Photos › Add Photos Only."
             return
         }
         // iOS can only ask for permission while the app is on screen.
@@ -87,8 +103,14 @@ extension AppModel {
                 var urls = mode == "every" ? s.imageURLs(in: scan) : []
                 let one = s.allInOneURL(in: scan)
                 if FileManager.default.fileExists(atPath: one.path) { urls.append(one) }
+                var done = UserDefaults.standard.dictionary(forKey: Self.photosDoneKey) as? [String: Int] ?? [:]
+                let already = min(done[key] ?? 0, urls.count)
+                urls.removeFirst(already)
                 do {
-                    let n = try await PhotoSaver.save(urls)
+                    let n = try await PhotoSaver.save(urls) { total in
+                        done[key] = already + total
+                        UserDefaults.standard.set(done, forKey: Self.photosDoneKey)
+                    }
                     AppLog.info("photos", "Saved \(n) PNG(s) of \(s.folderName) to Photos", scan: scan)
                     photosNote = "Saved \(n) cross-section PNG\(n == 1 ? "" : "s") of \(scan.name) to Photos."
                 } catch {
@@ -99,6 +121,9 @@ extension AppModel {
             }
             pending.removeFirst()
             UserDefaults.standard.set(pending, forKey: Self.photosPendingKey)
+            var done = UserDefaults.standard.dictionary(forKey: Self.photosDoneKey) as? [String: Int] ?? [:]
+            done[key] = nil
+            UserDefaults.standard.set(done, forKey: Self.photosDoneKey)
         }
     }
 

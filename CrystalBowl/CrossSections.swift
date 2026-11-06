@@ -91,7 +91,9 @@ enum CrossSectionMaker {
                               extentUMM: size.map { $0.extentU * 1000 }, extentVMM: size.map { $0.extentV * 1000 })
         })
         let fm = FileManager.default
-        let dir = series.folderURL(in: scan)
+        let final = series.folderURL(in: scan)
+        // Written to a staging folder first; the old stack is replaced only when the new one is complete (3.6).
+        let dir = final.deletingLastPathComponent().appendingPathComponent(".\(series.folderName).new", isDirectory: true)
         try? fm.removeItem(at: dir)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
 
@@ -99,7 +101,7 @@ enum CrossSectionMaker {
         for (i, s) in sections.enumerated() {
             let png = layout.renderPNG(s, title: "\(scan.name) · \(series.title) section \(i + 1)/\(sections.count)",
                                        row: series.rows[i], depthLabel: upright ? "height" : "depth")
-            try png.write(to: series.imageURL(in: scan, index: i))
+            try png.write(to: dir.appendingPathComponent(series.imageURL(in: scan, index: i).lastPathComponent))
         }
         if !sections.isEmpty {
             try layout.contactSheet(sections, rows: series.rows, title: "\(scan.name) · \(series.title) every \(SectionSeries.format(spacingMM)) mm")
@@ -142,6 +144,8 @@ enum CrossSectionMaker {
             .write(to: dir.appendingPathComponent("\(series.folderName)-geometry.json"), options: .atomic)
         // Overall dimensions travel with every section stack, so a stack shared on its own still carries them.
         try? MeshTools.dimensionsData(scan).write(to: dir.appendingPathComponent("dimensions.json"), options: .atomic)
+        try? fm.removeItem(at: final)
+        try fm.moveItem(at: dir, to: final)
         do {
             _ = try makeAllInOne(series, in: scan)
         } catch {
@@ -159,15 +163,13 @@ enum CrossSectionMaker {
             throw NSError(domain: "CrystalBowl", code: 21, userInfo: [NSLocalizedDescriptionKey: "The stack has no slice images"])
         }
         let n = urls.count
-        let cols = max(1, Int(ceil(sqrt(Double(n)))))
-        let rowsN = Int(ceil(Double(n) / Double(cols)))
-        let w0 = Double(probe.size.width), h0 = Double(probe.size.height)
-        var s = min(1, sqrt(32e6 / (Double(n) * w0 * h0)))
-        s = min(s, 10_000 / (Double(cols) * w0), 10_000 / (Double(rowsN) * h0))
-        let tw = CGFloat(floor(w0 * s)), th = CGFloat(floor(h0 * s))
+        guard let plan = AllInOneLayout.plan(count: n, tileWidth: Int(probe.size.width), tileHeight: Int(probe.size.height)) else {
+            throw NSError(domain: "CrystalBowl", code: 23, userInfo: [NSLocalizedDescriptionKey: "Too many slices for one readable picture"])
+        }
+        let cols = plan.cols
+        let tw = CGFloat(plan.tileWidth), th = CGFloat(plan.tileHeight)
         let gap: CGFloat = 8, header: CGFloat = 64
-        let size = CGSize(width: CGFloat(cols) * tw + CGFloat(cols + 1) * gap,
-                          height: header + CGFloat(rowsN) * th + CGFloat(rowsN + 1) * gap)
+        let size = CGSize(width: plan.width, height: plan.height)
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1
         fmt.opaque = true

@@ -120,6 +120,13 @@ extension AppModel {
             for (rel, url) in files { h[rel] = ScanPackage.sha256(url) }
             return h
         }.value
+        let unhashed = files.filter { hashes[$0.0] == nil }
+        guard unhashed.isEmpty else {
+            AppLog.warn("folder", "Manifest held back: \(unhashed.count) file(s) could not be read for a checksum", scan: scan)
+            scan.folderSync = state
+            try? ScanStore.save(scan)
+            return
+        }
         let manifestURL = scan.folderURL.appendingPathComponent("manifest.json")
         let readmeURL = FileManager.default.temporaryDirectory.appendingPathComponent("README.txt")
         do {

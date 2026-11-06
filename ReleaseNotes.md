@@ -3,6 +3,13 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.6
+- Safer Google Drive uploads: a busy or failed update no longer leaves a second copy of a file, and photos are only removed from the iPhone after every file's checksum was read and the package is complete
+- Cross-sections are cut next to the old stack and swapped in only when complete, so a failed cut keeps the previous slices
+- Photos: stacks wait (instead of being dropped) while Photos access is off, and a retry after a partial save doesn't add pictures twice
+- A real build failure (for example a full iPhone) while the app is in the background is no longer taken for a pause
+- The all-in-one slice picture now stays within its size limit, gaps and title included
+
 ## 3.5
 - Two more Extra tools (off until switched on in Settings): a change map between two scans of the same rock, coloured where the surface moved (picture, coloured PLY and numbers), and a phone scale reference from scanning an object of known size once
 - The self-test also checks the change map and the scale reference
