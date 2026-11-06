@@ -7,9 +7,13 @@ struct SettingsView: View {
     @EnvironmentObject private var organizer: Organizer
     @Query(sort: \Place.createdAt) private var places: [Place]
     @Query private var items: [Item]
-    @State private var keyText = ""
+    @State private var claudeKeyText = ""
+    @State private var openAIKeyText = ""
     @State private var keyStatus: String?
-    @State private var testing = false
+    @State private var testing: AIProvider?
+    @State private var keysVersion = 0
+    @AppStorage(AIService.preferenceKey) private var preference = AIPreference.claudeFirst.rawValue
+    @AppStorage(AIService.openAIModelKey) private var openAIModel = ""
     @AppStorage("nudgeOn") private var nudgeOn = false
     @AppStorage("nudgeMinutes") private var nudgeMinutes = 18 * 60
     @State private var problem = ""
@@ -19,33 +23,25 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
-                SecureField(KeyStore.hasKey ? "Key saved. Paste a new one to replace it" : "sk-ant-…", text: $keyText)
+                Picker("Who answers", selection: $preference) {
+                    ForEach(AIPreference.allCases, id: \.self) { Text($0.label).tag($0.rawValue) }
+                }
+                keyRow(.claude, text: $claudeKeyText, placeholder: "sk-ant-…")
+                keyRow(.chatgpt, text: $openAIKeyText, placeholder: "sk-…")
+                TextField("ChatGPT model (blank = newest available)", text: $openAIModel)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                HStack {
-                    Button("Save key") {
-                        KeyStore.save(keyText)
-                        keyText = ""
-                        keyStatus = KeyStore.hasKey ? "Saved on this iPhone." : "Key removed."
-                    }
-                    .disabled(keyText.trimmingCharacters(in: .whitespaces).isEmpty)
-                    Spacer()
-                    Button {
-                        testing = true
-                        Task {
-                            do { keyStatus = "Works: " + (try await ClaudeService.testKey()) }
-                            catch { keyStatus = error.localizedDescription }
-                            testing = false
-                        }
-                    } label: { if testing { ProgressView() } else { Text("Test") } }
-                    .disabled(!KeyStore.hasKey || testing)
+                    .font(.footnote.monospaced())
+                if openAIModel.trimmingCharacters(in: .whitespaces).isEmpty, let auto = AIService.autoPickedModel {
+                    Text("Using \(auto)").font(.footnote).foregroundStyle(.secondary)
                 }
                 if let keyStatus { Text(keyStatus).font(.footnote).foregroundStyle(.secondary) }
-                Link("Get a key at console.anthropic.com", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
+                Link("Claude key: console.anthropic.com", destination: URL(string: "https://console.anthropic.com/settings/keys")!)
+                Link("ChatGPT key: platform.openai.com", destination: URL(string: "https://platform.openai.com/api-keys")!)
             } header: {
-                Text("Claude API key")
+                Text("AI: Claude and ChatGPT")
             } footer: {
-                Text("Stored in the iPhone Keychain, never in a file. Photos and your item list are sent to Anthropic's API only when you scan, plan or ask.")
+                Text("Keys stay through every update: they are kept in the iPhone Keychain (never in a file, the database or the app itself) and backed up by iCloud Keychain, so they also come back after reinstalling or on a new iPhone. Photos and your item list go to the service you choose only when you scan, plan or ask.")
             }
 
             DriveSettingsSection()
@@ -103,6 +99,50 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .onChange(of: problem) { _, _ in copied = false }
+    }
+
+    private func keyRow(_ p: AIProvider, text: Binding<String>, placeholder: String) -> some View {
+        let saved = keysVersion >= 0 && KeyStore.hasKey(p)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(p.label, systemImage: saved ? "checkmark.seal.fill" : "key")
+                    .foregroundStyle(saved ? Color.green : Color.primary)
+                    .font(.body.weight(.semibold))
+                Spacer()
+                Text(saved ? "Saved, kept through updates" : "No key").font(.caption).foregroundStyle(.secondary)
+            }
+            SecureField(saved ? "Paste a new key to replace it" : placeholder, text: text)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            HStack {
+                Button("Save") {
+                    KeyStore.save(text.wrappedValue, for: p)
+                    text.wrappedValue = ""
+                    keysVersion += 1
+                    keyStatus = "\(p.label) key saved."
+                }
+                .disabled(text.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
+                Spacer()
+                Button {
+                    testing = p
+                    Task {
+                        do { keyStatus = "\(p.label) works: " + (try await AIService.test(p)) }
+                        catch { keyStatus = "\(p.label): \(error.localizedDescription)" }
+                        testing = nil
+                    }
+                } label: { if testing == p { ProgressView() } else { Text("Test") } }
+                .disabled(!saved || testing != nil)
+                if saved {
+                    Button("Remove", role: .destructive) {
+                        KeyStore.save("", for: p)
+                        keysVersion += 1
+                        keyStatus = "\(p.label) key removed."
+                    }
+                }
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 4)
     }
 
     private var nudgeTime: Binding<Date> {

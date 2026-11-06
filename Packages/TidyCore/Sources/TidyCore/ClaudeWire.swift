@@ -56,14 +56,14 @@ public enum ClaudeWire {
 
         public var errorDescription: String? {
             switch self {
-            case .noKey: return "Add your Claude API key in Settings first."
-            case .badKey: return "Your Claude API key was rejected. Check it in Settings."
-            case .rateLimited: return "Claude is busy right now (rate limit). Give it a minute and try again."
-            case .overloaded: return "Claude is overloaded at the moment. Try again in a minute."
-            case .refused: return "Claude couldn't help with this one. Try a different photo or wording."
+            case .noKey: return "Add a Claude or ChatGPT API key in Settings first."
+            case .badKey: return "The API key was rejected. Check it in Settings."
+            case .rateLimited: return "The AI service is busy right now (rate limit). Give it a minute and try again."
+            case .overloaded: return "The AI service is overloaded at the moment. Try again in a minute."
+            case .refused: return "The AI couldn't help with this one. Try a different photo or wording."
             case .tooLong: return "That was too much for one go. Try a photo with fewer things in it."
-            case let .server(code, message): return "Claude request failed (\(code)): \(message)"
-            case .unreadable: return "Claude sent back an answer the app couldn't read. Please try again."
+            case let .server(code, message): return "AI request failed (\(code)): \(message)"
+            case .unreadable: return "The AI sent back an answer the app couldn't read. Please try again."
             }
         }
     }

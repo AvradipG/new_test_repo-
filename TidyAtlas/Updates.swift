@@ -42,7 +42,7 @@ enum AppInfo {
             "Tidy Atlas problem report",
             "App: \(label), commit \(commit), installed via \(InstallSource.current.rawValue)",
             "Device: \(deviceModel()), \(d.systemName) \(d.systemVersion), LiDAR room scan: \(RoomScanSupport.isAvailable ? "yes" : "no")",
-            "Claude key set: \(KeyStore.hasKey ? "yes" : "no")",
+            "AI keys: Claude \(KeyStore.hasKey(.claude) ? "yes" : "no"), ChatGPT \(KeyStore.hasKey(.chatgpt) ? "yes" : "no"), order: \(AIService.preference.label), last answer from \(AIService.lastProvider?.label ?? "none yet")",
             "Places: \(places.count), rooms: \(rooms.count), things: \(rooms.reduce(0) { $0 + $1.items.count })",
             "",
             "What happened:",

@@ -34,6 +34,17 @@ plain-language requests, each ending with a push that reaches the phone through 
    A red run means the owner gets nothing: fix and push again before reporting back.
 6. Done means the run's notice "Build N uploaded to App Store Connect".
 
+## AI keys and sign-ins (must survive every update)
+- Claude and ChatGPT keys live in the Keychain via `KeyStore` (service `com.avradip.tidyatlas.keys`, accounts
+  `claude` / `chatgpt`, synchronizable with iCloud Keychain). The Google refresh token and email use `Keychain` in
+  `Drive.swift` (service `TidyAtlas`, synchronizable). The Drive folder bookmark, AI preference and ChatGPT model live
+  in UserDefaults. Never rename these services, accounts or UserDefaults keys, never move keys into files, SwiftData
+  or the build (the IPA is public on the `ipa-tidy-atlas` branch), and keep the bundle ID: any of these would make
+  the owner re-enter keys after an update.
+- `AIService` (`AIService.swift`) routes every call by `AIPreference`, falling back to the other service on
+  rate limits, outages, refusals and unreadable answers. OpenAI uses the Responses API with strict JSON schema
+  (`OpenAIWire` in TidyCore); the model is the one typed in Settings, or the newest full GPT model the key can use.
+
 ## Data compatibility
 SwiftData migrates added properties automatically when they have default values. Never rename or remove stored
 properties; add new ones with defaults.

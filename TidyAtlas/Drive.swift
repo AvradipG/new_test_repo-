@@ -10,21 +10,30 @@ import UIKit
 // MARK: Keychain
 
 enum Keychain {
+    // Tidy Atlas change: synchronizable, so the Google sign-in survives reinstalling the app or a new iPhone (through
+    // iCloud Keychain) as well as every update. Reads and deletes match both kinds, so older items keep working.
     static func set(_ value: String?, for key: String) {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key,
                                    kSecAttrService as String: "TidyAtlas"]
-        SecItemDelete(base as CFDictionary)
+        var del = base
+        del[kSecAttrSynchronizable as String] = kSecAttrSynchronizableAny
+        SecItemDelete(del as CFDictionary)
         guard let value, let data = value.data(using: .utf8) else { return }
         var add = base
         add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(add as CFDictionary, nil)
+        add[kSecAttrSynchronizable as String] = kCFBooleanTrue
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        if SecItemAdd(add as CFDictionary, nil) != errSecSuccess {
+            add[kSecAttrSynchronizable as String] = kCFBooleanFalse
+            SecItemAdd(add as CFDictionary, nil)
+        }
     }
 
     static func get(_ key: String) -> String? {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: key,
                                 kSecAttrService as String: "TidyAtlas", kSecReturnData as String: true,
-                                kSecMatchLimit as String: kSecMatchLimitOne]
+                                kSecMatchLimit as String: kSecMatchLimitOne,
+                                kSecAttrSynchronizable as String: kSecAttrSynchronizableAny]
         var out: AnyObject?
         guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
         return String(data: data, encoding: .utf8)
@@ -59,7 +68,7 @@ final class GoogleAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
     }
 
     var isSignedIn: Bool { Keychain.get(Self.refreshKey) != nil }
-    var email: String? { UserDefaults.standard.string(forKey: Self.emailKey) }
+    var email: String? { UserDefaults.standard.string(forKey: Self.emailKey) ?? Keychain.get(Self.emailKey) }
 
     private func redirect(_ clientID: String) -> (scheme: String, uri: String) {
         let scheme = clientID.split(separator: ".").reversed().joined(separator: ".")
@@ -105,11 +114,13 @@ final class GoogleAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
         store(json)
         if let idToken = json["id_token"] as? String, let mail = Self.email(fromIDToken: idToken) {
             UserDefaults.standard.set(mail, forKey: Self.emailKey)
+            Keychain.set(mail, for: Self.emailKey)
         }
     }
 
     func signOut() {
         Keychain.set(nil, for: Self.refreshKey)
+        Keychain.set(nil, for: Self.emailKey)
         UserDefaults.standard.removeObject(forKey: Self.emailKey)
         accessToken = nil
     }

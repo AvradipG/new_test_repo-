@@ -160,10 +160,10 @@ final class Organizer: ObservableObject {
             ]
             let ctxText = String(data: try JSONSerialization.data(withJSONObject: ctx), encoding: .utf8) ?? "{}"
 
-            let analysis = try await ClaudeService.call(
+            let analysis = try await AIService.call(
                 PhotoAnalysis.self,
                 system: Prompts.analyzeSystem,
-                content: [ClaudeWire.jpegBlock(jpeg), ClaudeWire.textBlock("Room context (JSON):\n\(ctxText)\n\nAnalyse this photo.")],
+                content: [.jpeg(jpeg), .text("Room context (JSON):\n\(ctxText)\n\nAnalyse this photo.")],
                 schema: Prompts.analysisSchema,
                 effort: .medium
             )
@@ -344,8 +344,8 @@ final class Organizer: ObservableObject {
             "items": items,
         ]
         let text = String(data: try JSONSerialization.data(withJSONObject: ctx), encoding: .utf8) ?? "{}"
-        let plan = try await ClaudeService.call(PlanResult.self, system: Prompts.planSystem,
-                                                content: [ClaudeWire.textBlock(text)], schema: Prompts.planSchema,
+        let plan = try await AIService.call(PlanResult.self, system: Prompts.planSystem,
+                                                content: [.text(text)], schema: Prompts.planSchema,
                                                 effort: .medium)
         guard !plan.steps.isEmpty else { throw ClaudeWire.Failure.unreadable }
         for s in room.steps where s.status == .todo { context.delete(s) }
@@ -384,8 +384,8 @@ final class Organizer: ObservableObject {
         defer { busy = false }
         let text = String(data: try JSONSerialization.data(withJSONObject: ["step": step.title, "detail": step.detail]),
                           encoding: .utf8) ?? "{}"
-        let r = try await ClaudeService.call(BreakdownResult.self, system: Prompts.breakdownSystem,
-                                             content: [ClaudeWire.textBlock(text)], schema: Prompts.breakdownSchema,
+        let r = try await AIService.call(BreakdownResult.self, system: Prompts.breakdownSystem,
+                                             content: [.text(text)], schema: Prompts.breakdownSchema,
                                              effort: .low)
         let subs = Array(r.steps.prefix(4))
         guard !subs.isEmpty else { throw ClaudeWire.Failure.unreadable }
@@ -420,9 +420,9 @@ final class Organizer: ObservableObject {
                                       place: it.room?.place?.name ?? "?", room: it.room?.name ?? "?",
                                       spot: it.room?.zone(it.zoneID)?.name, notPutAway: !it.isSorted)
         }
-        let r = try await ClaudeService.call(
+        let r = try await AIService.call(
             AskResult.self, system: Prompts.askSystem,
-            content: [ClaudeWire.textBlock("Inventory:\n\(InventoryText.render(lines))\n\nQuestion: \(question)")],
+            content: [.text("Inventory:\n\(InventoryText.render(lines))\n\nQuestion: \(question)")],
             schema: Prompts.askSchema, effort: .low, maxTokens: 4000
         )
         return (r.answer, r.itemRefs.compactMap { byRef[$0] })

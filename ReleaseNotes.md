@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.2
+- ChatGPT works too: add a ChatGPT key next to your Claude key and choose who answers, or let one back up the other automatically
+- Your Claude key, ChatGPT key and Google Drive sign-in stay through every update, and come back after a reinstall or on a new iPhone (iCloud Keychain)
+- Settings shows which keys are saved and has a Test button for each
+
 ## 1.1
 - AR: tap "Tag & measure what I see" and labels with names, sizes and where each thing goes appear on the real things
 - Place storage spots where they really are in AR; arcs in the room show where to carry each thing

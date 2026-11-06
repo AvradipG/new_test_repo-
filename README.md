@@ -35,11 +35,15 @@ report in `Updates.swift`.
   the item list go to Anthropic's API only when you scan, plan or ask, using your own key stored in the Keychain.
   Export the inventory as CSV from Settings.
 
-## Claude
-`TidyAtlas/ClaudeService.swift` calls the Messages API over HTTPS (Swift has no official SDK) with model
-`claude-opus-5-5`, structured JSON output (`output_config.format`), and server-side refusal fallbacks
-(`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). Request/response handling, prompts and schemas live
-in `Packages/TidyCore` and are unit-tested.
+## Claude and ChatGPT
+`TidyAtlas/AIService.swift` calls either service over HTTPS, as chosen in Settings (Claude first with ChatGPT as
+backup by default). Claude: Messages API, model `claude-opus-5-5`, structured JSON output (`output_config.format`) and
+server-side refusal fallbacks (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). ChatGPT: Responses API
+with strict `json_schema` output; the model is the one typed in Settings or the newest full GPT model the key can use
+(falls back to `gpt-5`). Both use the same prompts and schemas from `Packages/TidyCore`, which are unit-tested.
+
+Keys and the Google sign-in are kept in the Keychain (synced by iCloud Keychain), so they survive every update, a
+reinstall and a new iPhone. They are never built into the app.
 
 ## Build and TestFlight
 Every push to branch `tidy-atlas-ios` runs `.github/workflows/tidy-atlas.yml` on a GitHub macOS runner: TidyCore

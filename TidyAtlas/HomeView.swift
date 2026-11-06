@@ -40,7 +40,7 @@ struct HomeView: View {
                 header
                 if !KeyStore.hasKey {
                     NavigationLink { SettingsView() } label: {
-                        Label("Add your Claude API key so the app can recognise your things", systemImage: "key.fill")
+                        Label("Add your Claude or ChatGPT API key so the app can recognise your things", systemImage: "key.fill")
                             .font(.callout.weight(.semibold))
                             .card(Color.orange.opacity(0.18))
                     }
