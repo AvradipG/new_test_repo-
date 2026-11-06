@@ -3,6 +3,12 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.2
+- Cross-sections: tap a slice to open it full screen. Pinch or double-tap to zoom, swipe to the next slice. A strip of small pictures under the slider, and "See all slices" shows the whole stack as a grid
+- Export PNG: this slice, every slice as separate PNGs, or all slices in one PNG (each with its rulers and 10 mm bar). Share them or save them to Photos
+- New stacks go to Google Drive and to Photos by themselves (choose every slice, only the all-in-one picture, or off)
+- The app log now reaches Google Drive at every start, every 15 minutes while the app is open and within a minute of any error. About › App log has "Send the log now"
+
 ## 3.1
 - Fixed: a build no longer fails when the phone locks. An iPhone lets apps use its graphics chip only on screen, so locking now pauses the build, and it carries on from where it stopped when you come back (pauses no longer count as failed tries)
 - The screen stays on while a model builds; tap "Dim the screen while it builds" to darken it and put the phone down

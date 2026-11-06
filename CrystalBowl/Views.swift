@@ -55,7 +55,16 @@ struct RootView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
-        .task { await model.checkForUpdate() }
+        .task {
+            await model.checkForUpdate()
+            // The new start (with its version line) goes to Drive straight away, then every 15 minutes on screen.
+            await model.syncAllPending()
+            await model.flushPhotosPending()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15 * 60 * 1_000_000_000)
+                if UIApplication.shared.applicationState == .active { await model.uploadAppLog() }
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             AppLog.setOnScreen(phase == .active)
             if phase == .active { AppLog.info("app", "On screen") }
@@ -66,6 +75,7 @@ struct RootView: View {
                 Task {
                     await model.checkForUpdate()
                     await model.syncAllPending()
+                    await model.flushPhotosPending()
                 }
             } else if phase == .background {
                 model.appMovedToBackground()
@@ -786,6 +796,7 @@ struct ScanDetailView: View {
     @State private var showDetailCamera = false
     @State private var showAR = false
     @State private var showMeasure = false
+    @State private var sectionViewer: SectionViewerTarget?
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
@@ -875,7 +886,7 @@ struct ScanDetailView: View {
                 if scan.hasModel {
                     detailSection(scan)
                     RepeatsSection(scan: scan, repeats: model.repeats(of: scan))
-                    SectionsPanel(scan: scan)
+                    SectionsPanel(scan: scan, viewer: $sectionViewer)
                 }
                 Section {
                     LabeledContent("Storage used", value: ByteCountFormatter.string(fromByteCount: ScanStore.size(of: scan), countStyle: .file))
@@ -921,6 +932,9 @@ struct ScanDetailView: View {
             }
             .fullScreenCover(isPresented: $showMeasure) {
                 MeasureViewer(scan: scan)
+            }
+            .fullScreenCover(item: $sectionViewer) { target in
+                SectionViewerHost(target: target).environmentObject(model)
             }
             .fullScreenCover(isPresented: $showDetailCamera) {
                 DetailCaptureView(scan: scan) {
@@ -1277,10 +1291,16 @@ struct SectionsPanel: View {
     @State private var spacing = AppModel.defaultSpacingMM
     @State private var working = false
     @State private var zipURL: URL?
+    @Binding var viewer: SectionViewerTarget?
+    @AppStorage(PhotoSaver.modeKey) private var photosMode = "every"
 
     private var series: SectionSeries? {
         let all = scan.sections ?? []
         return all.first { $0.id == seriesID } ?? all.first
+    }
+
+    private func open(_ s: SectionSeries, _ k: Int) {
+        viewer = SectionViewerTarget(scan: scan, series: s, index: k) { index = Double($0) }
     }
 
     var body: some View {
@@ -1293,11 +1313,40 @@ struct SectionsPanel: View {
                         .resizable()
                         .interpolation(.medium)
                         .scaledToFit()
-                        .listRowInsets(EdgeInsets())
+                        .frame(maxWidth: .infinity)
                         .background(Color.black)
+                        .overlay(alignment: .bottomTrailing) {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.caption.weight(.bold)).foregroundStyle(.white)
+                                .padding(7).background(.black.opacity(0.55), in: Circle()).padding(8)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { open(s, i) }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityHint("Opens the slice full screen to zoom")
+                        .listRowInsets(EdgeInsets())
+                } else {
+                    Text("This slice's picture is missing. Cut the stack again.").foregroundStyle(.secondary)
                 }
                 if s.rows.count > 1 {
                     Slider(value: $index, in: 0...Double(s.rows.count - 1), step: 1)
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 6) {
+                                ForEach(0..<s.rows.count, id: \.self) { k in
+                                    SectionThumb(url: s.imageURL(in: scan, index: k), maxPixel: 200)
+                                        .frame(width: 64, height: 64)
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(k == i ? Color.accentColor : .clear, lineWidth: 2))
+                                        .onTapGesture { index = Double(k) }
+                                        .onLongPressGesture { index = Double(k); open(s, k) }
+                                        .id(k)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        .onChange(of: i) { _, k in withAnimation { proxy.scrollTo(k, anchor: .center) } }
+                    }
                 }
                 Text(String(format: "%@ slice %d of %d · %@ ", s.title, i + 1, s.rows.count, s.isHeightProfile ? "height" : "depth") + L(row.depthMM))
                     .font(.callout.monospacedDigit())
@@ -1309,6 +1358,18 @@ struct SectionsPanel: View {
                             Text("\(s.title) · every \(SectionSeries.format(s.spacingMM)) mm").tag(s.id)
                         }
                     }
+                }
+                Button { open(s, i) } label: {
+                    Label("Open full screen to zoom", systemImage: "arrow.up.left.and.arrow.down.right")
+                }
+                NavigationLink {
+                    SectionGridView(scan: scan, series: s, start: i) { index = Double($0) }
+                } label: {
+                    Label("See all \(s.rows.count) slices", systemImage: "square.grid.3x3")
+                }
+                SectionExportMenu(scan: scan, series: s, index: i)
+                if let note = model.photosNote {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
                 }
                 if let zipURL {
                     ShareLink(item: zipURL) { Label("Share this stack (\(s.rows.count) PNG + CSV)", systemImage: "square.and.arrow.up") }
@@ -1326,7 +1387,7 @@ struct SectionsPanel: View {
         } header: {
             Text("Cross-sections")
         } footer: {
-            Text("Slices are cut across the rock's own axes (a longest, c shortest) or, for the height profile, horizontally up the model as it stood. Every slice gives its widest and narrowest size from the outline; area needs a closed outline. A surface scan can't see inside the rock.")
+            Text("Tap a slice to open it full screen: pinch or double-tap to zoom, swipe for the next one. Slices are cut across the rock's own axes (a longest, c shortest) or, for the height profile, horizontally up the model as it stood. Every slice gives its widest and narrowest size from the outline; area needs a closed outline. A surface scan can't see inside the rock.")
         }
 
         Section("Cut a new stack") {
@@ -1357,6 +1418,18 @@ struct SectionsPanel: View {
                 if working { ProgressView() } else { Label("Cut cross-sections", systemImage: "square.stack.3d.down.right") }
             }
             .disabled(working)
+        }
+
+        Section {
+            Picker("Save new stacks to Photos", selection: $photosMode) {
+                Text("Every slice and the all-in-one picture").tag("every")
+                Text("Only the all-in-one picture").tag("one")
+                Text("Off").tag("off")
+            }
+        } header: {
+            Text("Automatic copies")
+        } footer: {
+            Text("Every stack is saved as PNG pictures: one per slice and one with all slices together. They go to Google Drive by themselves (the scan's sections folder) and, with this setting, to Photos. Photos asks once for permission to add pictures.")
         }
     }
 }

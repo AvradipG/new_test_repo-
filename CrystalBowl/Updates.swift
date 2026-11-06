@@ -131,6 +131,8 @@ struct AboutView: View {
     @State private var checking = false
     @State private var copied = false
     @AppStorage(AppModel.uploadLogKey) private var uploadLog = true
+    @State private var sendingLog = false
+    @State private var lastLogUpload = UserDefaults.standard.object(forKey: AppModel.lastLogUploadKey) as? Date
 
     var body: some View {
         List {
@@ -186,10 +188,26 @@ struct AboutView: View {
                 NavigationLink { AppLogView() } label: { Label("Show the app log", systemImage: "doc.text.magnifyingglass") }
                 ShareLink(item: AppLog.todayFile) { Label("Share today's log file", systemImage: "square.and.arrow.up") }
                 Toggle("Send the app log to Google Drive", isOn: $uploadLog)
+                if uploadLog && model.driveSignedIn {
+                    Button {
+                        sendingLog = true
+                        Task {
+                            await model.uploadAppLog()
+                            sendingLog = false
+                            lastLogUpload = UserDefaults.standard.object(forKey: AppModel.lastLogUploadKey) as? Date
+                        }
+                    } label: {
+                        if sendingLog { ProgressView() } else { Label("Send the log now", systemImage: "icloud.and.arrow.up") }
+                    }
+                    .disabled(sendingLog)
+                    if let lastLogUpload {
+                        LabeledContent("Last sent", value: lastLogUpload.formatted(date: .abbreviated, time: .shortened))
+                    }
+                }
             } header: {
                 Text("App log")
             } footer: {
-                Text("The app writes down what it does: starts, phone locks, each build stage and how long it took, pauses, uploads, memory and heat warnings, and every error with its code. When the app crashes, iOS hands over a crash report at the next start, and it is kept too. Everything is in Files › On My iPhone › Crystal Bowl › App log, and goes to My Drive › Crystal Bowl Scans › _app-log. Each scan's own build log travels in its folder (logs/build-log.txt). No photos or passwords are written.")
+                Text("The app writes down what it does: starts, phone locks, each build stage and how long it took, pauses, uploads, memory and heat warnings, and every error with its code. When the app crashes, iOS hands over a crash report at the next start, and it is kept too. Everything is in Files › On My iPhone › Crystal Bowl › App log, and goes to My Drive › Crystal Bowl Scans › _app-log by itself: at every start (so each new version reports in), every 15 minutes while the app is open, within a minute of any error, and with every scan upload. Each scan's own build log travels in its folder (logs/build-log.txt). No photos or passwords are written.")
             }
         }
         .navigationTitle("About and updates")

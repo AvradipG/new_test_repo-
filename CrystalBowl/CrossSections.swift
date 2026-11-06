@@ -52,6 +52,14 @@ struct SectionSeries: Codable, Hashable, Identifiable {
     func imageURL(in scan: Scan, index: Int) -> URL {
         folderURL(in: scan).appendingPathComponent(String(format: "%@_%03d.png", folderName, index + 1))
     }
+    /// Every slice's PNG that is on disk, in order.
+    func imageURLs(in scan: Scan) -> [URL] {
+        (0..<rows.count).map { imageURL(in: scan, index: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+    /// All slices of the stack, full drawings with their rulers, tiled into one PNG (3.2).
+    func allInOneURL(in scan: Scan) -> URL {
+        folderURL(in: scan).appendingPathComponent("\(folderName)_all-slices.png")
+    }
 
     static func format(_ mm: Double) -> String {
         mm == mm.rounded() ? String(Int(mm)) : String(format: "%.1f", mm)
@@ -132,7 +140,53 @@ enum CrossSectionMaker {
             .write(to: dir.appendingPathComponent("\(series.folderName)-geometry.json"), options: .atomic)
         // Overall dimensions travel with every section stack, so a stack shared on its own still carries them.
         try? MeshTools.dimensionsData(scan).write(to: dir.appendingPathComponent("dimensions.json"), options: .atomic)
+        do {
+            _ = try makeAllInOne(series, in: scan)
+        } catch {
+            AppLog.error("sections", "All-in-one PNG for \(series.folderName) not made", error, scan: scan)
+        }
         return series
+    }
+
+    /// Tiles every slice PNG of a stack into one PNG, each slice with its own title, rulers and 10 mm bar.
+    /// The tiles are shrunk only as far as needed to keep the picture under about 32 megapixels.
+    @discardableResult
+    static func makeAllInOne(_ series: SectionSeries, in scan: Scan) throws -> URL {
+        let urls = series.imageURLs(in: scan)
+        guard let first = urls.first, let probe = UIImage(contentsOfFile: first.path) else {
+            throw NSError(domain: "CrystalBowl", code: 21, userInfo: [NSLocalizedDescriptionKey: "The stack has no slice images"])
+        }
+        let n = urls.count
+        let cols = max(1, Int(ceil(sqrt(Double(n)))))
+        let rowsN = Int(ceil(Double(n) / Double(cols)))
+        let w0 = Double(probe.size.width), h0 = Double(probe.size.height)
+        var s = min(1, sqrt(32e6 / (Double(n) * w0 * h0)))
+        s = min(s, 10_000 / (Double(cols) * w0), 10_000 / (Double(rowsN) * h0))
+        let tw = CGFloat(floor(w0 * s)), th = CGFloat(floor(h0 * s))
+        let gap: CGFloat = 8, header: CGFloat = 64
+        let size = CGSize(width: CGFloat(cols) * tw + CGFloat(cols + 1) * gap,
+                          height: header + CGFloat(rowsN) * th + CGFloat(rowsN + 1) * gap)
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        fmt.opaque = true
+        let title = "\(scan.name) · \(series.title) · \(n) slices every \(SectionSeries.format(series.spacingMM)) mm"
+        let data = UIGraphicsImageRenderer(size: size, format: fmt).pngData { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            let big: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 26, weight: .semibold), .foregroundColor: UIColor.white]
+            (title as NSString).draw(at: CGPoint(x: gap + 4, y: 16), withAttributes: big)
+            for (i, url) in urls.enumerated() {
+                autoreleasepool {
+                    let x = gap + CGFloat(i % cols) * (tw + gap), y = header + gap + CGFloat(i / cols) * (th + gap)
+                    UIImage(contentsOfFile: url.path)?.draw(in: CGRect(x: x, y: y, width: tw, height: th))
+                    UIColor(white: 0.3, alpha: 1).setStroke()
+                    UIBezierPath(rect: CGRect(x: x, y: y, width: tw, height: th)).stroke()
+                }
+            }
+        }
+        let out = series.allInOneURL(in: scan)
+        try data.write(to: out, options: .atomic)
+        return out
     }
 
     /// Zips a series folder for sharing (uses the system's built-in folder zipping).

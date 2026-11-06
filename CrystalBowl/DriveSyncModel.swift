@@ -54,6 +54,7 @@ extension AppModel {
     static let uploadLogKey = "applog.upload"
     private static let logRecordsKey = "applog.driveFiles"
     static let logCopyRecordsKey = "applog.folderFiles"
+    static let lastLogUploadKey = "applog.lastUpload"
 
     /// On by default: the app's diary and iOS crash reports go to Drive with the scans.
     var uploadLog: Bool { UserDefaults.standard.object(forKey: Self.uploadLogKey) as? Bool ?? true }
@@ -76,7 +77,10 @@ extension AppModel {
         AppLog.flush()
         var records = Self.loadRecords(Self.logRecordsKey)
         let todo = AppLog.files().filter { rel, url in records[rel].map { Self.changed(url, $0) } ?? true }
-        guard !todo.isEmpty else { return }
+        guard !todo.isEmpty else {
+            UserDefaults.standard.set(Date(), forKey: Self.lastLogUploadKey)
+            return
+        }
         let bg = UIApplication.shared.beginBackgroundTask(withName: "drive-log")
         defer { UIApplication.shared.endBackgroundTask(bg) }
         do {
@@ -95,6 +99,7 @@ extension AppModel {
                 records[rel] = DriveFileRecord(id: id, size: before.size, modified: before.modified)
                 Self.saveRecords(records, Self.logRecordsKey)
             }
+            UserDefaults.standard.set(Date(), forKey: Self.lastLogUploadKey)
         } catch {
             AppLog.warn("drive", "App log upload paused: \(AppLog.describe(error))")
         }

@@ -75,6 +75,9 @@ final class AppModel: ObservableObject {
     @Published var folderStatus: [String: String] = [:]
     var isFolderSyncing = false
     var uploadingLog = false
+    var logUploadScheduled = false
+    var savingToPhotos = false
+    @Published var photosNote: String?
 
     let guide = CaptureGuide()
 
@@ -573,6 +576,7 @@ final class AppModel: ObservableObject {
             setProgress(1, "Done")
             buildPausedNote = nil
             AppLog.info("build", "Build finished in \(buildMinutes), \(scan.pauses ?? 0) pause(s)", scan: scan)
+            queueSectionsForPhotos(scan, scan.sections ?? [])
             BackgroundBuild.shared.end(success: true)
             Task { await upgradeScans() } // shape fit and sample sheet for the new scan
             Notifier.post(id: "built-\(scan.id)", title: "\(scan.name): 3D model ready",
@@ -741,8 +745,11 @@ final class AppModel: ObservableObject {
             updated.sections = list
             try ScanStore.save(updated)
             reload()
+            AppLog.info("sections", "Cut \(series.title) every \(SectionSeries.format(spacingMM)) mm: \(series.rows.count) slices", scan: updated)
+            queueSectionsForPhotos(updated, [series])
             Task { await syncAllPending() }
         } catch {
+            AppLog.error("sections", "Cutting \(axis)-axis every \(spacingMM) mm failed", error, scan: scan)
             errorMessage = "Couldn't cut cross-sections: \(error.localizedDescription)"
         }
     }

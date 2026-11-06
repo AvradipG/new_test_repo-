@@ -381,6 +381,7 @@ enum ScanPackage {
             if rel.hasSuffix("-geometry.json") { return "section_geometry" }
             if rel.hasSuffix(".csv") { return "section_table" }
             if rel.contains("contact-sheet") { return "section_contact_sheet" }
+            if rel.hasSuffix("_all-slices.png") { return "section_all_in_one" }
             return "section_image"
         }
         switch (rel as NSString).pathExtension.lowercased() {
@@ -520,7 +521,8 @@ enum ScanPackage {
       sections/          cross-section PNG stacks with a CSV per stack: depth or height, max diameter,
                          min width, extents, and area/perimeter where the outline is closed (mm).
                          h-axis stacks are horizontal slices up the model as it stood (height profile).
-                         Each stack folder also carries dimensions.json.
+                         Each stack folder also carries dimensions.json, a contact sheet and
+                         <stack>_all-slices.png: every slice at full drawing with its rulers in one PNG.
       images/            original capture photos, only when photo upload is switched on.
       detail/            close-up photos for surface patterns (all lenses, sharp ones only) with
                          detail.json (lens, zoom, direction round the rock, sharpness). Wi-Fi only.

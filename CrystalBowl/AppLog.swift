@@ -68,6 +68,10 @@ enum AppLog {
             if let scanLog { append(line, to: scanLog) }
         }
         if now { queue.sync(execute: work) } else { queue.async(execute: work) }
+        // Errors reach Drive within a minute instead of waiting for the next scan upload.
+        if level.hasPrefix("ERROR") || level.hasPrefix("FATAL") {
+            Task { @MainActor in AppModel.current?.scheduleLogUpload() }
+        }
         #if DEBUG
         print(line, terminator: "")
         #endif
