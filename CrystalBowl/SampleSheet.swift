@@ -218,7 +218,8 @@ enum SampleSheet {
         let candidates: [Double] = unit == .inch ? [0.25, 0.5, 1, 2] : (unit == .m ? [0.005, 0.01, 0.02, 0.05] : [0.5, 1, 2, 5, 10])
         // Lengths in the unit; metric bars counted in cm for cm/m, mm for mm.
         let inMM: [Double] = candidates.map { unit == .mm ? $0 * 10 : unit.mm($0) }
-        let pick = zip(candidates, inMM).last { CGFloat($0.1) * pxPerMM <= maxWidth } ?? (candidates[0], inMM[0])
+        var pick: (Double, Double) = (candidates[0], inMM[0])
+        for (c, m) in zip(candidates, inMM) where CGFloat(m) * pxPerMM <= maxWidth { pick = (c, m) }
         let w = CGFloat(pick.1) * pxPerMM
         g.setFillColor(ink.cgColor)
         g.fill(CGRect(x: p.x, y: p.y, width: w, height: 6))

@@ -613,14 +613,17 @@ struct CaptureView: View {
                 .frame(maxHeight: 150)
             }
             if model.piecesCapture {
-                Button { model.anotherPass() } label: {
-                    Label(needsMore ? "Fill the gaps (go round again, a bit higher)" : "Another pass, a bit higher", systemImage: "circle.dashed").frame(maxWidth: .infinity)
+                let gapsLabel = Label(needsMore ? "Fill the gaps (go round again, a bit higher)" : "Another pass, a bit higher",
+                                      systemImage: "circle.dashed").frame(maxWidth: .infinity)
+                let finishLabel = Label(model.captureSide == 2 ? "Finish side 2 and put the pieces together" : "Finish side 1",
+                                        systemImage: "puzzlepiece.extension.fill").frame(maxWidth: .infinity)
+                if needsMore {
+                    Button { model.anotherPass() } label: { gapsLabel }.buttonStyle(.borderedProminent)
+                    Button { model.finishCapture() } label: { finishLabel }.buttonStyle(.bordered)
+                } else {
+                    Button { model.finishCapture() } label: { finishLabel }.buttonStyle(.borderedProminent)
+                    Button { model.anotherPass() } label: { gapsLabel }.buttonStyle(.bordered)
                 }
-                .buttonStyle(needsMore ? .borderedProminent : .bordered)
-                Button { model.finishCapture() } label: {
-                    Label(model.captureSide == 2 ? "Finish side 2 and put the pieces together" : "Finish side 1", systemImage: "puzzlepiece.extension.fill").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(needsMore ? .bordered : .borderedProminent)
                 Text(model.captureSide == 2
                      ? "Both sides are then built and the pieces matched by themselves."
                      : "Next, the app builds side 1. Then turn every piece over where it lies and scan side 2 from the Pieces tab.")
