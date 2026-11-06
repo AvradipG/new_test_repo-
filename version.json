@@ -1,0 +1,11 @@
+{
+  "version": "3.7",
+  "build": 44,
+  "commit": "fb5f1bc",
+  "date": "2026-11-06T22:00Z",
+  "notes": [
+    "Fixed: a written label (like \"4002-2\") was taken for the reference line. The app now looks for a narrow line that runs along the sample, and finds the mark again on your existing scans (marks you set by hand are kept). The mark is 0\u00b0: the 3D view turns to it and the dial reads 0\u00b0 there",
+    "Every picture of the sample sheet opens full screen on its own: the sheets, each view, the top, the bottom and the unrolled side. Pinch to zoom, swipe to the next, share or save each one",
+    "The bottom view is left out when the rock wasn't flipped and its underside scanned"
+  ]
+}
