@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.3
+- Fixed: orange gaps now turn green when you go back to them. Photos are counted reliably on a new pass, a photo the app asks for is placed where it was asked for, and the ring you walked is finished before you are sent to another height
+- Clearer directions while filling gaps: a big arrow and "go 45° on, about 25 cm round the rock", the height to hold the phone at, and when the camera won't take a photo by itself the Photo here button turns orange and asks you to tap it (or to step back a little and tap again)
+- Holes in every ring you have started show orange, also on the summary after a pass
+
 ## 3.2
 - Cross-sections: tap a slice to open it full screen. Pinch or double-tap to zoom, swipe to the next slice. A strip of small pictures under the slider, and "See all slices" shows the whole stack as a grid
 - Export PNG: this slice, every slice as separate PNGs, or all slices in one PNG (each with its rulers and 10 mm bar). Share them or save them to Photos

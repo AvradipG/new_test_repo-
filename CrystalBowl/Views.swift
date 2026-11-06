@@ -586,6 +586,9 @@ struct CaptureView: View {
                         }
                     }
                 }
+                if !model.passCompleted && model.captureStage == .capturing, let gap = guide.nextGap, gap != 0 {
+                    GapArrow(sectors: gap)
+                }
                 if !model.passCompleted, let text = model.feedbackText ?? guide.hint {
                     Text(text)
                         .font(.callout.bold())
@@ -635,7 +638,7 @@ struct CaptureView: View {
             } else {
                 VStack(spacing: 10) {
                     Text(guide.fillingGaps
-                         ? "Go to the orange sectors on the ring. The phone bumps when you reach a gap."
+                         ? "Follow the orange arrow to each orange sector, at the height the text says. Hold still for a second on each one. If the camera won't take it, Photo here turns orange: tap it."
                          : model.quickCapture
                             ? "Dimensions only: one slow walk round the rock, 25–40 cm away. A tick for each photo; a buzz means slow down, change height or a blurred photo."
                             : "Walk slowly round the rock, 25–40 cm away. Feel a tick for each photo; a buzz means slow down, change height or a blurred photo.")
@@ -648,8 +651,11 @@ struct CaptureView: View {
                         Button("Finish now") { model.finishCapture() }.buttonStyle(.bordered)
                         Button { model.takePhotoNow() } label: {
                             Label("Photo here", systemImage: "camera.circle.fill")
+                                .symbolEffect(.pulse, isActive: guide.askManual)
+                                .font(guide.askManual ? .title3.bold() : .body)
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(guide.askManual ? .orange : nil)
                     }
                 }
             }
@@ -741,6 +747,27 @@ struct CaptureView: View {
     }
 }
 
+/// Big turn arrow while filling gaps: which way round the rock and how far. It turns the same way as the ring,
+/// where the user's walking direction is clockwise.
+struct GapArrow: View {
+    let sectors: Int
+    var body: some View {
+        let degrees = abs(sectors) * 360 / CaptureGuide.sectorCount
+        HStack(spacing: 10) {
+            Image(systemName: sectors > 0 ? "arrow.clockwise" : "arrow.counterclockwise")
+                .font(.system(size: 34, weight: .bold))
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(degrees)° \(sectors > 0 ? "on" : "back")").font(.title3.bold().monospacedDigit())
+                Text(sectors > 0 ? "the same way you walked" : "the way you came").font(.caption)
+            }
+        }
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// Map of where photos were taken, seen from above: outer ring = low camera, inner ring = high camera.
 /// 12 o'clock is where the pass started; sectors run clockwise the way the user walked.
 struct CoverageRing: View {
@@ -762,7 +789,10 @@ struct CoverageRing: View {
                     let a0 = Angle.degrees(Double(s) * 360 / Double(n) - 90 + 1.5)
                     let a1 = Angle.degrees(Double(s + 1) * 360 / Double(n) - 90 - 1.5)
                     arc.addArc(center: c, radius: radius(b), startAngle: a0, endAngle: a1, clockwise: false)
-                    let color: Color = coverage[b][s] > 0 ? .green : (b == target?.rawValue ? .orange : Color.gray.opacity(0.35))
+                    // Orange: the ring being filled, and holes in any ring that already has photos.
+                    let started = coverage[b].contains { $0 > 0 }
+                    let color: Color = coverage[b][s] > 0 ? .green
+                        : (b == target?.rawValue ? .orange : (started ? Color.orange.opacity(0.75) : Color.gray.opacity(0.35)))
                     ctx.stroke(arc, with: .color(color), lineWidth: w * 0.78)
                 }
             }

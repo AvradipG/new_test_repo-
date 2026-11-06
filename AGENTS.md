@@ -3,6 +3,7 @@
 The project notes live in [CLAUDE.md](CLAUDE.md) and apply to every agent (Codex, Claude Code, others). Read it first.
 
 The short version:
+- Before each update, read the app log on the owner's Google Drive (Crystal Bowl Scans › `_app-log`) and fix what it shows.
 - Work on branch `crystal-bowl-ios` of `AvradipG/new_test_repo-`. Never push to `main`.
 - Every push to `crystal-bowl-ios` builds the app on GitHub and uploads it to TestFlight; the owner's iPhone updates itself.
 - Add a user-facing bullet to `ReleaseNotes.md` and bump `MARKETING_VERSION` in `project.yml` for visible changes.

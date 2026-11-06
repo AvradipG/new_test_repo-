@@ -56,8 +56,16 @@ final class CaptureGuide: ObservableObject {
     @Published private(set) var targetBand: Band = .middle
     @Published private(set) var fillingGaps = false
     @Published private(set) var tracking = false
+    /// Signed sectors to the nearest gap of the target ring while filling gaps (positive = the way the user walked).
+    @Published private(set) var nextGap: Int?
+    /// The camera ignored the app's requests here: the user should tap the shutter (or step back and tap).
+    @Published private(set) var askManual = false
     /// True for one update when the phone is held still on an empty sector: the app then asks for a photo itself.
     private(set) var wantsShot = false
+    /// Photos counted on the map so far (the larger of the session's count and the photos on disk).
+    var photoTotal: Int { ledger.counted }
+    /// One line for the app log: requests made, photos that came, requests the camera ignored.
+    var requestSummary: String { "asked \(ledger.requests), came \(ledger.landed), ignored \(ledger.failed)" }
 
     private let motion = CMMotionManager()
     private var shots: [Shot] = []
@@ -66,7 +74,9 @@ final class CaptureGuide: ObservableObject {
     private var lastTime: TimeInterval = 0
     private var rate: Double = 0 // smoothed, degrees per second, signed
     private var direction: Double = 0 // +1 or -1 once the user has walked far enough to tell
-    private var lastShotCount = 0
+    private var ledger = ShotLedger()
+    private var lastTarget: Band = .middle
+    private var ringDoneUntil = Date.distantPast
     private var lastWarning = Date.distantPast
     private var backwardSince: TimeInterval?
     private var inTargetBand = true
@@ -90,7 +100,9 @@ final class CaptureGuide: ObservableObject {
     func start() {
         shots = []
         sideOffset = 0
-        lastShotCount = 0
+        ledger = ShotLedger()
+        nextGap = nil
+        askManual = false
         reset(keepCoverage: false)
         fillingGaps = false
         targetBand = .middle
@@ -113,13 +125,18 @@ final class CaptureGuide: ObservableObject {
     func newPass(flipped: Bool) {
         reset(keepCoverage: !flipped)
         fillingGaps = !flipped
-        targetBand = flipped ? .middle : (mostMissingBand() ?? .high)
+        // Finish the ring that was walked before moving to another height (3.3; before, the emptiest ring was
+        // chosen, usually the high one, so the phone said "raise the phone" right at the middle ring's gaps).
+        targetBand = flipped ? .middle : (GapGuide.fillOrder(map).first.flatMap(Band.init(rawValue:)) ?? .high)
+        lastTarget = targetBand
         hint = nil
     }
 
     func passCompleted() {
         if hapticsOn { notify.notificationOccurred(.success) }
         hint = nil
+        nextGap = nil
+        askManual = false
     }
 
     private func reset(keepCoverage: Bool) {
@@ -138,9 +155,12 @@ final class CaptureGuide: ObservableObject {
 
     // MARK: Updates (called by AppModel about ten times a second)
 
-    func update(shotCount: Int, capturing: Bool, feedback: String?) {
-        defer { lastShotCount = shotCount }
-        guard tracking, let m = motion.deviceMotion else { return }
+    /// `sessionShots`: the capture session's own count; `files`: photos written to disk this capture, when known.
+    func update(sessionShots: Int, files: Int?, capturing: Bool, feedback: String?) {
+        guard tracking, let m = motion.deviceMotion else {
+            _ = ledger.update(session: sessionShots, files: files, pose: here, now: ProcessInfo.processInfo.systemUptime)
+            return
+        }
         let pose = Self.pose(m)
         lookDown = pose.lookDown
         let now = m.timestamp
@@ -162,25 +182,49 @@ final class CaptureGuide: ObservableObject {
             angle = Self.positive(rel * (direction == 0 ? 1 : direction))
         }
 
-        if shotCount > lastShotCount, capturing, let heading = lastHeading, let start = startHeading {
-            // Several photos can arrive between two updates; each one is placed on the map.
-            for _ in lastShotCount..<shotCount {
-                shots.append(Shot(heading: Self.wrap(heading - start), band: Band.of(pose.lookDown)))
+        // Several photos can arrive between two updates; each goes where it was taken (a requested photo where
+        // it was asked for). Photos are counted even before the heading is known, so the totals stay in step.
+        let placed = ledger.update(session: sessionShots, files: files, pose: here, now: now)
+        if !placed.isEmpty {
+            if startHeading != nil {
+                let dir = direction == 0 ? 1 : direction
+                for p in placed {
+                    shots.append(Shot(heading: Self.wrap(p.degrees * dir), band: Band(rawValue: p.band) ?? .middle))
+                }
+                recount()
             }
-            recount()
             if hapticsOn { tick.impactOccurred(intensity: 0.55) }
         }
 
-        wantsShot = capturing && planner.update(map: map, degrees: angle, lookDown: pose.lookDown, speed: rate,
-                                                tracking: startHeading != nil && pose.lookDown < 80, now: now)
+        // No new request while one is on its way, and none where the camera already ignored two.
+        let planned = planner.update(map: map, degrees: angle, lookDown: pose.lookDown, speed: rate,
+                                     tracking: startHeading != nil && pose.lookDown < 80, now: now)
+        wantsShot = capturing && planned && !ledger.waiting && ledger.failures(at: here) < 2
 
         guard capturing else { hint = nil; return }
         guide(now: now, feedback: feedback)
     }
 
+    /// Where the phone is now, on the map.
+    private var here: ShotLedger.Pose { ShotLedger.Pose(degrees: angle, band: Band.of(lookDown).rawValue) }
+
+    /// The app (or the user's shutter tap) asked the camera for a photo from here.
+    func noteRequest(manual: Bool) {
+        ledger.requested(here, manual: manual, now: motion.deviceMotion?.timestamp ?? ProcessInfo.processInfo.systemUptime)
+    }
+
     private func guide(now: TimeInterval, feedback: String?) {
         var text: String?
         var warn = false
+
+        // A finished ring hands over to the next one by itself.
+        if fillingGaps && nearestGap(from: Self.sector(angle), band: targetBand) == nil,
+           let next = GapGuide.fillOrder(map).first.flatMap(Band.init(rawValue:)), next != targetBand {
+            lastTarget = targetBand
+            targetBand = next
+            ringDoneUntil = Date().addingTimeInterval(4)
+            if hapticsOn { notify.notificationOccurred(.success) }
+        }
 
         // Object Capture's own warnings (too close, too fast, rock out of view…) get a buzz when they appear.
         if let feedback, feedback != lastFeedback { warn = true }
@@ -202,7 +246,20 @@ final class CaptureGuide: ObservableObject {
             backwardSince = nil
         }
 
+        // The camera ignored two requests from this spot: ask for the shutter, then for a small step back.
         let band = Band.of(lookDown)
+        let emptyHere = coverage[band.rawValue][Self.sector(angle)] == 0
+        askManual = emptyHere && ledger.failures(at: here) >= 2
+        if askManual && text == nil {
+            text = ledger.lastFailureWasManual
+                ? "No photo came from here. Step about 10 cm back so the whole rock fits on the screen, then tap Photo here again"
+                : "The camera won't take this view by itself: tap Photo here"
+        }
+
+        if Date() < ringDoneUntil && text == nil {
+            text = "\(lastTarget.name) ring complete. Next: \(targetBand.advice)"
+        }
+
         let inBand = band == targetBand
         if !inBand && text == nil {
             text = band.rawValue < targetBand.rawValue
@@ -217,11 +274,15 @@ final class CaptureGuide: ObservableObject {
             let empty = coverage[targetBand.rawValue][sector] == 0
             if empty && lastEmptySector != sector && hapticsOn { bump.impactOccurred(intensity: 0.8) }
             lastEmptySector = empty ? sector : nil
-            if let next = nearestGap(from: sector, band: targetBand) {
-                text = next == 0 ? "Gap here: hold still, the photo is taken for you" : "Next gap: \(abs(next) * 15)° \(next > 0 ? "ahead" : "back")"
+            let next = nearestGap(from: sector, band: targetBand)
+            nextGap = next
+            if let next {
+                text = GapGuide.moveText(sectors: next)
             } else {
-                text = "\(targetBand.name) ring complete"
+                text = "All rings are complete on this side. Tap Finish, or flip the rock for the underside"
             }
+        } else if !fillingGaps {
+            nextGap = nil
         }
 
         if warn && hapticsOn && Date().timeIntervalSince(lastWarning) > 1.2 {
@@ -255,6 +316,7 @@ final class CaptureGuide: ObservableObject {
     /// mark the wrong spots. Returns how many blurred photos were found on this side.
     @discardableResult
     func markBlurry(global: Set<Int>, photoCount: Int) -> Int {
+        // `photoCount` and the indices count only this capture's photos (older ones in the folder are left out).
         let local = global.map { $0 - sideOffset }.filter { $0 >= 0 && $0 < shots.count }
         guard photoCount == sideOffset + shots.count else { return local.count }
         for i in shots.indices { shots[i].blurry = local.contains(i) }
@@ -305,12 +367,6 @@ final class CaptureGuide: ObservableObject {
             lines.append("12 o'clock is where you started this side, counting the way you walked. Tap \"Fill the gaps\" and the phone will buzz when you reach an orange sector.")
         }
         return lines
-    }
-
-    private func mostMissingBand() -> Band? {
-        let cov = bandCoverage
-        let candidates = [Band.middle, .high, .low].filter { cov[$0.rawValue] < 0.9 }
-        return candidates.min { cov[$0.rawValue] < cov[$1.rawValue] }
     }
 
     /// Sectors to the nearest empty sector in a band: 0 here, positive ahead, negative behind.

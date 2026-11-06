@@ -20,6 +20,11 @@ No Mac is needed for that: GitHub builds, signs and uploads in the cloud. A MacB
 - `ReleaseNotes.md`: newest section first. Its bullets are shown in the app's update banner.
 
 ## Shipping a correction
+0. First read the app's own log (owner's rule, 2026-11-06: "every new update, read the logs to correct bugs and
+   errors"). It is on the owner's Google Drive: My Drive › Crystal Bowl Scans › `_app-log` (daily
+   `crystal-bowl-YYYY-MM-DD.log`, `iOS reports/` with MetricKit crash and hang JSON) and each scan's
+   `logs/build-log.txt`. Look for ERROR and FATAL lines, "previous run ended while on screen" (a crash), pauses and
+   slow stages; fix what they show in the same release and tell the owner what the log said.
 1. Change the code. Add or update a ScanMath test when the change touches measurement maths.
 2. Add a user-facing bullet under a new top section in `ReleaseNotes.md`. Bump `MARKETING_VERSION` in
    `project.yml` for visible changes; the build number is the GitHub run number and goes up by itself.

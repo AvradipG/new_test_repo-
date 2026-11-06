@@ -75,6 +75,10 @@ final class AppModel: ObservableObject {
     @Published var folderStatus: [String: String] = [:]
     var isFolderSyncing = false
     var uploadingLog = false
+    /// Photos in the capture folder before this capture started, and the count on disk last seen.
+    var photosBefore = 0
+    var photoFiles: Int?
+    var lastRefusalLog = Date.distantPast
     var logUploadScheduled = false
     var savingToPhotos = false
     @Published var photosNote: String?
@@ -176,6 +180,9 @@ final class AppModel: ObservableObject {
         shotCount = 0
         feedbackText = nil
         requestedShots = 0
+        // Photos already in the folder (adding photos to an earlier capture) are not this capture's coverage.
+        photosBefore = ShotQuality.photos(in: images).count
+        photoFiles = nil
         lightOn = false
         lightDeclined = false
         darkSince = nil
@@ -219,17 +226,27 @@ final class AppModel: ObservableObject {
         }
         let wasCompleted = passCompleted
         passCompleted = session.userCompletedScanPass
-        shotCount = session.numberOfShotsTaken
         feedbackText = Self.describe(session.feedback)
-        guide.update(shotCount: shotCount, capturing: captureStage == .capturing && !passCompleted, feedback: feedbackText)
-        if guide.wantsShot && session.canRequestImageCapture {
-            session.requestImageCapture()
-            requestedShots += 1
+        guide.update(sessionShots: session.numberOfShotsTaken, files: photoFiles.map { max(0, $0 - photosBefore) },
+                     capturing: captureStage == .capturing && !passCompleted, feedback: feedbackText)
+        shotCount = guide.photoTotal
+        if guide.wantsShot {
+            if session.canRequestImageCapture {
+                session.requestImageCapture()
+                requestedShots += 1
+                guide.noteRequest(manual: false)
+            } else if Date().timeIntervalSince(lastRefusalLog) > 10 {
+                lastRefusalLog = Date()
+                AppLog.info("capture", "Wanted a photo on an empty spot, but the camera was not ready (canRequestImageCapture false)")
+            }
         }
         if captureStage == .capturing || captureStage == .detecting { autoLight(session.feedback) }
         if passCompleted && !wasCompleted {
             guide.passCompleted()
             markBlurryOnRing()
+            let cov = guide.bandCoverage.map { Int(($0 * 100).rounded()) }
+            AppLog.info("capture", "Pass \(passNumber) done: \(shotCount) photos (session \(session.numberOfShotsTaken), files \(photoFiles.map { String($0 - photosBefore) } ?? "?")), "
+                        + "requests \(guide.requestSummary), coverage low/middle/high \(cov[0])/\(cov[1])/\(cov[2]) %, gaps \(guide.gaps().count)", scan: currentScan)
         }
         pollCount += 1
         if pollCount % 15 == 0 && captureStage == .capturing && !passCompleted { checkNewShots() }
@@ -263,8 +280,10 @@ final class AppModel: ObservableObject {
         let known = Set(shotScores.keys)
         Task { [weak self] in
             let fresh = await Task.detached { ShotQuality.scoreNew(in: dir, known: known) }.value
+            let onDisk = await Task.detached { ShotQuality.photos(in: dir).count }.value
             guard let self else { return }
             self.scoringShots = false
+            self.photoFiles = onDisk
             guard !fresh.isEmpty else { return }
             self.shotScores.merge(fresh) { a, _ in a }
             guard self.shotScores.count >= 8 else { return }
@@ -283,17 +302,26 @@ final class AppModel: ObservableObject {
             let ordered = await Task.detached { ShotQuality.photos(in: dir).map { $0.lastPathComponent } }.value
             guard let self else { return }
             self.shotScores.merge(fresh) { a, _ in a }
-            let values = ordered.map { self.shotScores[$0] ?? .nan }
+            // Only this capture's photos (the folder may hold earlier ones when photos are added to a scan).
+            let mine = Array(ordered.dropFirst(min(self.photosBefore, ordered.count)))
+            let values = mine.map { self.shotScores[$0] ?? .nan }
             let bad = ScanMath.blurryIndices(values, relative: ShotQuality.blurRatio, maxFraction: ShotQuality.maxSetAside)
-            self.blurryShots = self.guide.markBlurry(global: Set(bad), photoCount: ordered.count)
+            self.photoFiles = ordered.count
+            self.blurryShots = self.guide.markBlurry(global: Set(bad), photoCount: mine.count)
         }
     }
 
     /// Shutter button: a photo from exactly here, whatever Object Capture thinks it already has.
     func takePhotoNow() {
-        guard let s = captureSession, s.canRequestImageCapture else { return }
+        guard let s = captureSession else { return }
+        guard s.canRequestImageCapture else {
+            AppLog.info("capture", "Shutter tapped, but the camera was not ready")
+            guide.noteRequest(manual: true) // counts as ignored, so the advice moves on to stepping back
+            return
+        }
         s.requestImageCapture()
         requestedShots += 1
+        guide.noteRequest(manual: true)
     }
 
     func toggleLight() {
