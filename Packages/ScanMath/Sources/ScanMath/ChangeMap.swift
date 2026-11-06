@@ -94,11 +94,16 @@ public enum ChangeMap {
             ss += row.r * row.r
             used += 1
         }
-        let damp = 1e-6 * (0..<6).map { ata[$0 * 6 + $0] }.reduce(0, +) / 6 + 1e-18
+        var trace = 0.0
+        for i in 0..<6 { trace += ata[i * 6 + i] }
+        let damp: Double = 1e-6 * trace / 6 + 1e-18
         for i in 0..<6 { ata[i * 6 + i] += damp }
         guard let x = LinearSolve.solve(ata, atb, n: 6) else { return nil }
-        let Rinc = Pose.rotation(vector: SIMD3(x[0], x[1], x[2]))
-        let inc = Pose(R: Rinc, t: c - Rinc * c + SIMD3(x[3], x[4], x[5]))
+        let w = SIMD3<Double>(x[0], x[1], x[2])
+        let dt = SIMD3<Double>(x[3], x[4], x[5])
+        let Rinc = Pose.rotation(vector: w)
+        let turnedCentre: SIMD3<Double> = Rinc * c
+        let inc = Pose(R: Rinc, t: c - turnedCentre + dt)
         return (inc.compose(pose), (ss / max(used, 1)).squareRoot())
     }
 
