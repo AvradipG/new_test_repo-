@@ -373,6 +373,8 @@ enum ScanPackage {
             if rel.hasSuffix(".json") { return "sample_sheet_description" }
             return "virtual_view"
         }
+        if rel.hasPrefix("model/ct-frame/") { return rel.hasSuffix(".json") ? "ct_frame_description" : "ct_frame_model_mm" }
+        if rel.hasSuffix("_lab-tools.json") { return "lab_tools" }
         if rel.hasPrefix("logs/") { return "build_log" }
         if rel == "detail/detail.json" { return "detail_photo_index" }
         if rel.hasPrefix("detail/") { return "detail_photo" }

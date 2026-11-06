@@ -69,8 +69,10 @@ struct SectionSeries: Codable, Hashable, Identifiable {
 enum CrossSectionMaker {
     /// Cuts the model across `axis` every `spacingMM` and writes one PNG per slice,
     /// a contact sheet and a CSV table into Sections/<axis>_<spacing>mm/.
-    static func make(scan: Scan, axis: Int, spacingMM: Double) throws -> SectionSeries {
-        guard let mesh = MeshTools.loadMesh(scan.modelURL) else {
+    /// `override` gives the mesh directly (the self-test's demo rock) instead of reading the scan's model file.
+    static func make(scan: Scan, axis: Int, spacingMM: Double,
+                     mesh override: (positions: [SIMD3<Float>], indices: [UInt32])? = nil) throws -> SectionSeries {
+        guard let mesh = override ?? MeshTools.loadMesh(scan.modelURL) else {
             throw NSError(domain: "CrystalBowl", code: 3, userInfo: [NSLocalizedDescriptionKey: "Couldn't read the model"])
         }
         // Axis 3 slices horizontally up the model as it stood (+Y up); depth is then height above the lowest point.

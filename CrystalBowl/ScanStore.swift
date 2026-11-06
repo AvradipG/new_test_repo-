@@ -45,6 +45,11 @@ struct Scan: Identifiable, Codable, Hashable {
     var side2PhotoCount: Int?
     /// Latest reconstruction of the pieces.
     var piecesResult: PiecesSummary?
+    /// Extra tools (3.4): weighed mass and grain density, virtual plugs, bedding planes.
+    var massG: Double?
+    var grainDensity: Double?
+    var coring: [CoringRecord]?
+    var bedding: [BeddingRecord]?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {

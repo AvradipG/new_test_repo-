@@ -209,6 +209,8 @@ struct AboutView: View {
             } footer: {
                 Text("The app writes down what it does: starts, phone locks, each build stage and how long it took, pauses, uploads, memory and heat warnings, and every error with its code. When the app crashes, iOS hands over a crash report at the next start, and it is kept too. Everything is in Files › On My iPhone › Crystal Bowl › App log, and goes to My Drive › Crystal Bowl Scans › _app-log by itself: at every start (so each new version reports in), every 15 minutes while the app is open, within a minute of any error, and with every scan upload. Each scan's own build log travels in its folder (logs/build-log.txt). No photos or passwords are written.")
             }
+
+            SelfTestSection()
         }
         .navigationTitle("About and updates")
         .navigationBarTitleDisplayMode(.inline)

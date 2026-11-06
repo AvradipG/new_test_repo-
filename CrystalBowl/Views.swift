@@ -60,6 +60,13 @@ struct RootView: View {
             // The new start (with its version line) goes to Drive straight away, then every 15 minutes on screen.
             await model.syncAllPending()
             await model.flushPhotosPending()
+            if UserDefaults.standard.integer(forKey: SelfTest.lastBuildKey) != AppInfo.build {
+                try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
+                if model.phase == .home && model.buildingID == nil && UIApplication.shared.applicationState == .active {
+                    _ = await SelfTest.runAndLog(reason: "first start of \(AppInfo.label)")
+                    await model.uploadAppLog()
+                }
+            }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 15 * 60 * 1_000_000_000)
                 if UIApplication.shared.applicationState == .active { await model.uploadAppLog() }
@@ -255,6 +262,8 @@ struct HomeView: View {
                 }
 
                 DriveSettingsSection()
+
+                ExtraToolsSettingsSection()
 
                 Section {
                     Toggle("Vibration guidance while scanning", isOn: $haptics)
@@ -917,6 +926,7 @@ struct ScanDetailView: View {
                     detailSection(scan)
                     RepeatsSection(scan: scan, repeats: model.repeats(of: scan))
                     SectionsPanel(scan: scan, viewer: $sectionViewer)
+                    ExtraToolsSection(scan: scan)
                 }
                 Section {
                     LabeledContent("Storage used", value: ByteCountFormatter.string(fromByteCount: ScanStore.size(of: scan), countStyle: .file))

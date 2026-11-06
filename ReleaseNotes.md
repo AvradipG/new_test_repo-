@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.4
+- New Extra tools in Settings, all off until you switch them on (scanning, building, measuring and slicing are unchanged): bulk density and porosity from the weighed mass, virtual coring (the longest 1″ or 1.5″ plug that fits), the model in the micro-CT frame (OBJ in mm plus the matrix), bedding or fracture dip from taps on the unrolled side, and the Sample ID read from a label
+- New self-test (About › Self-test): runs the app on a demo plug made in code and checks every answer. It also runs by itself once after each update and writes PASS or FAIL to the app log
+- Privacy manifest added for the App Store
+
 ## 3.3
 - Fixed: orange gaps now turn green when you go back to them. Photos are counted reliably on a new pass, a photo the app asks for is placed where it was asked for, and the ring you walked is finished before you are sent to another height
 - Clearer directions while filling gaps: a big arrow and "go 45° on, about 25 cm round the rock", the height to hold the phone at, and when the camera won't take a photo by itself the Photo here button turns orange and asks you to tap it (or to step back a little and tap again)
