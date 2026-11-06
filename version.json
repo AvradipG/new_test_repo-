@@ -1,0 +1,11 @@
+{
+  "version": "1.2",
+  "build": 6,
+  "commit": "5d147b4",
+  "date": "2026-11-06T22:11Z",
+  "notes": [
+    "ChatGPT works too: add a ChatGPT key next to your Claude key and choose who answers, or let one back up the other automatically",
+    "Your Claude key, ChatGPT key and Google Drive sign-in stay through every update, and come back after a reinstall or on a new iPhone (iCloud Keychain)",
+    "Settings shows which keys are saved and has a Test button for each"
+  ]
+}
