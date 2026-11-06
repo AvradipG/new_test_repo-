@@ -9,7 +9,7 @@ import ScanMath
 /// Optional lab tools (3.4). All are off until switched on in Settings › Extra tools, so the core scan, build,
 /// measure and slice flow is unchanged. Their maths is unit-tested on GitHub and run by the self-test.
 enum ExtraTool: String, CaseIterable, Identifiable {
-    case density, coring, ctFrame, bedding, labelID
+    case density, coring, ctFrame, bedding, labelID, changeMap, scaleRef
     var id: String { rawValue }
     var key: String { "tools.\(rawValue)" }
     var isOn: Bool { UserDefaults.standard.bool(forKey: key) }
@@ -21,6 +21,8 @@ enum ExtraTool: String, CaseIterable, Identifiable {
         case .ctFrame: return "Export in the micro-CT frame"
         case .bedding: return "Bedding or fracture dip"
         case .labelID: return "Sample ID from a label (QR, barcode or text)"
+        case .changeMap: return "Change map between two scans"
+        case .scaleRef: return "Phone scale reference"
         }
     }
 
@@ -31,6 +33,8 @@ enum ExtraTool: String, CaseIterable, Identifiable {
         case .ctFrame: return "Writes the model in millimetres with z up and the origin on the plug axis at the bottom, plus the matrix, for lining up with the CT."
         case .bedding: return "Tap three or more points along a layer on the unrolled side picture; the app fits the plane and gives its dip."
         case .labelID: return "Point the camera at the sample's label to fill in the Sample ID."
+        case .changeMap: return "Lines up two scans of the same rock (for example before and after a test) and colours where the surface moved."
+        case .scaleRef: return "Scan an object of known size once; the phone's correction can then be used for scans without a caliper check."
         }
     }
 }
@@ -41,6 +45,8 @@ struct ExtraToolsSettingsSection: View {
     @AppStorage("tools.ctFrame") private var ctFrame = false
     @AppStorage("tools.bedding") private var bedding = false
     @AppStorage("tools.labelID") private var labelID = false
+    @AppStorage("tools.changeMap") private var changeMap = false
+    @AppStorage("tools.scaleRef") private var scaleRef = false
 
     var body: some View {
         Section {
@@ -49,6 +55,8 @@ struct ExtraToolsSettingsSection: View {
             toggle(.ctFrame, $ctFrame)
             toggle(.bedding, $bedding)
             toggle(.labelID, $labelID)
+            toggle(.changeMap, $changeMap)
+            toggle(.scaleRef, $scaleRef)
         } header: {
             Text("Extra tools")
         } footer: {
@@ -147,14 +155,18 @@ struct ExtraToolsSection: View {
     @AppStorage("tools.ctFrame") private var ctFrame = false
     @AppStorage("tools.bedding") private var bedding = false
     @AppStorage("tools.labelID") private var labelID = false
+    @AppStorage("tools.changeMap") private var changeMap = false
+    @AppStorage("tools.scaleRef") private var scaleRef = false
 
     var body: some View {
-        if (density || coring || ctFrame || bedding || labelID) && !scan.isPieces {
+        if (density || coring || ctFrame || bedding || labelID || changeMap || scaleRef) && !scan.isPieces {
             Section {
                 if labelID { LabelIDRow(scan: scan) }
                 if density, scan.stats != nil { DensityRows(scan: scan) }
                 if coring, scan.hasModel { CoringRows(scan: scan) }
                 if ctFrame, scan.hasModel { CTFrameRow(scan: scan) }
+                if changeMap, scan.hasModel { CompareRows(scan: scan) }
+                if scaleRef, scan.stats != nil { ScaleRefRows(scan: scan) }
                 if bedding, scan.hasModel {
                     NavigationLink { BeddingView(scan: scan) } label: {
                         Label("Bedding or fracture dip (\(scan.bedding?.count ?? 0) saved)", systemImage: "line.diagonal")

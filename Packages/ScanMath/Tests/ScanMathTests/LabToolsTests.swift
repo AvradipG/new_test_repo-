@@ -80,3 +80,11 @@ final class LabToolsTests: XCTestCase {
         XCTAssertNil(BeddingFit.fit(angles: [5, 5, 5], heights: [1, 2, 3], radiusMM: radius))
     }
 }
+
+final class ScaleReferenceTests: XCTestCase {
+    func testFactor() {
+        XCTAssertEqual(ScaleReference.factor(trueMM: 25.4, scannedMM: 25.0)!, 1.016, accuracy: 1e-12)
+        XCTAssertNil(ScaleReference.factor(trueMM: 25.4, scannedMM: 50))  // wrong axis
+        XCTAssertNil(ScaleReference.factor(trueMM: 0, scannedMM: 25))
+    }
+}

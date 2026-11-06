@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UIKit
 import ScanMath
+import simd
 
 /// Runs the app's own pipeline on a demo rock (a 1.5-inch plug, 50 mm long, made in code) and checks every
 /// answer against the known size. It needs no camera, network or permission, so it runs by itself once after
@@ -106,6 +107,19 @@ enum SelfTest {
         let bed = BeddingFit.fit(angles: angles, heights: angles.map { 25 + amp * cos(($0 - 75) * .pi / 180) }, radiusMM: radiusMM)
         check("Bedding dip", bed.map { abs($0.dipDegrees - 30) < 0.01 && abs($0.highAngleDegrees - 75) < 0.01 } ?? false,
               bed.map { String(format: "dip %.2f° highest at %.1f° (expected 30° at 75°)", $0.dipDegrees, $0.highAngleDegrees) } ?? "no fit")
+
+        let swollen = DemoRock.cylinder(radius: radiusMM / 1000 + 0.0005, height: heightMM / 1000)
+        let turned = Pose.rotation(axis: SIMD3(0, 1, 0), degrees: 40) * Pose.rotation(axis: SIMD3(1, 0, 0), degrees: 25)
+        let movedSwollen = (swollen.positions.map { SIMD3<Float>(turned * SIMD3<Double>($0) + SIMD3(0.05, 0.01, -0.03)) }, swollen.indices)
+        if let ch = ChangeMap.compare(reference: mesh, compared: movedSwollen) {
+            check("Change map", abs(ch.median * 1000 - 0.5) < 0.1,
+                  String(format: "a plug 0.5 mm thicker, turned and moved: median %+.2f mm, fit ±%.3f mm", ch.median * 1000, ch.fitRMS * 1000))
+        } else {
+            check("Change map", false, "no result")
+        }
+        let sf = ScaleReference.factor(trueMM: 25.4, scannedMM: 25.0)
+        check("Phone scale reference", sf.map { abs($0 - 1.016) < 1e-9 } ?? false && ScaleReference.factor(trueMM: 25.4, scannedMM: 50) == nil,
+              sf.map { String(format: "25.4 mm object scanned as 25.0 mm → factor %.4f; a 2× mix-up is refused", $0) } ?? "no factor")
 
         // 5. Coverage guide bookkeeping.
         var ledger = ShotLedger()

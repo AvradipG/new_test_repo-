@@ -53,8 +53,15 @@ struct Scan: Identifiable, Codable, Hashable {
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {
-        guard let c = caliper, let model = modelLength(axis: c.axis) else { return 1 }
+        // Without a caliper check: the phone's scale reference when that extra tool is on and applied, else 1.
+        guard let c = caliper, let model = modelLength(axis: c.axis) else { return PhoneScale.applied }
         return model > 0 && c.measuredMM > 0 ? c.measuredMM / model : 1
+    }
+
+    /// Where the scale comes from, for reports and lab files.
+    var scaleSource: String {
+        if caliper != nil { return "caliper-corrected" }
+        return PhoneScale.applied != 1 ? "phone scale reference" : "LiDAR"
     }
 
     /// The scan's own length for a caliper axis: a, b, c, or 3 = upright height.

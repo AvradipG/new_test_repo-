@@ -296,7 +296,7 @@ extension AppModel {
                 "quick_scan": s.quick ?? false,
                 "photos_included": d.photos ?? false,
                 "close_up_photos": s.detailCount,
-                "scale": s.caliper == nil ? "LiDAR" : "caliper-corrected",
+                "scale": s.scaleSource,
             ]
             if let st = s.stats {
                 let k = s.scaleFactor

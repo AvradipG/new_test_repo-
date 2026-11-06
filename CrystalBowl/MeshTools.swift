@@ -102,7 +102,7 @@ enum MeshTools {
                                           "cylinder_diameter": u.cylinderDiameterMM ?? NSNull()] as [String: Any]
             d["micro_ct"] = ["height_mm": u.heightMM * f,
                              "cylinder_diameter_mm": (u.cylinderDiameterMM ?? u.maxDiameterMM) * f,
-                             "scale": scan.caliper == nil ? "LiDAR" : "caliper-corrected"] as [String: Any]
+                             "scale": scan.scaleSource] as [String: Any]
         }
         if let b = s.box {
             d["box_mm"] = ["length": b.lengthMM, "width": b.widthMM, "thickness": b.thicknessMM,

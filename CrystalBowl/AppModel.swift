@@ -723,7 +723,7 @@ final class AppModel: ObservableObject {
                         u.heightMM * f, u.lengthMM * f, u.widthMM * f, (u.cylinderDiameterMM ?? u.maxDiameterMM) * f)
         }
         t += String(format: "; volume %.2f cm³", s.volumeCM3 * f * f * f)
-        return t + (scan.caliper == nil ? " (LiDAR scale)" : " (caliper-corrected)")
+        return t + " (\(scan.scaleSource == "LiDAR" ? "LiDAR scale" : scan.scaleSource))"
     }
 
     func rename(_ scan: Scan, to newName: String) {

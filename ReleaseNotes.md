@@ -3,6 +3,10 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.5
+- Two more Extra tools (off until switched on in Settings): a change map between two scans of the same rock, coloured where the surface moved (picture, coloured PLY and numbers), and a phone scale reference from scanning an object of known size once
+- The self-test also checks the change map and the scale reference
+
 ## 3.4
 - New Extra tools in Settings, all off until you switch them on (scanning, building, measuring and slicing are unchanged): bulk density and porosity from the weighed mass, virtual coring (the longest 1″ or 1.5″ plug that fits), the model in the micro-CT frame (OBJ in mm plus the matrix), bedding or fracture dip from taps on the unrolled side, and the Sample ID read from a label
 - New self-test (About › Self-test): runs the app on a demo plug made in code and checks every answer. It also runs by itself once after each update and writes PASS or FAIL to the app log

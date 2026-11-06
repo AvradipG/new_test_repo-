@@ -241,3 +241,13 @@ public struct BeddingFit: Equatable, Sendable {
         }
     }
 }
+
+/// The phone's own scale correction, from scanning an object of known size once (3.5).
+public enum ScaleReference {
+    /// true / scanned length, or nil when the lengths are missing or differ by more than 20 % (a typo or the wrong axis).
+    public static func factor(trueMM: Double, scannedMM: Double) -> Double? {
+        guard trueMM > 0, scannedMM > 0 else { return nil }
+        let f = trueMM / scannedMM
+        return (0.8...1.25).contains(f) ? f : nil
+    }
+}
