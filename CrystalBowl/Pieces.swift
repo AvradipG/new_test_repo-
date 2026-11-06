@@ -461,19 +461,16 @@ extension AppModel {
             try? ScanStore.save(scan)
             reload()
             setProgress(1, "Done")
+            buildPausedNote = nil
+            AppLog.info("pieces", "Put together in \(buildMinutes): \(summary.headline)", scan: scan)
             BackgroundBuild.shared.end(success: true)
             Notifier.post(id: "pieces-\(scan.id)", title: "\(scan.name): \(summary.headline)",
                           body: scan.hasModel2 ? "Open the Pieces tab for the result and what is missing."
                               : "Side 1 is done. Turn every piece over where it lies and scan side 2, so the breaks underneath can be matched.")
             Task { await syncAllPending() }
         } catch {
-            BackgroundBuild.shared.end(success: false)
-            let interrupted = backgroundedDuringBuild || BackgroundBuild.shared.expired || UIApplication.shared.applicationState != .active
-            if interrupted && (scan.buildAttempts ?? 0) < 8 {
-                try? ScanStore.save(scan)
-                Notifier.post(id: "paused-\(scan.id)", title: "\(scan.name): paused",
-                              body: "iOS paused the work while the phone was busy. Open Crystal Bowl and it carries on.")
-                if UIApplication.shared.applicationState == .active { buildQueue.append(scan.id) }
+            if buildStopped(&scan, error) {
+                // Carries on when the app is on screen again.
             } else {
                 scan.buildRequested = nil
                 try? ScanStore.save(scan)
@@ -489,6 +486,7 @@ extension AppModel {
         if let target { s.pieceTarget = target }
         s.buildRequested = true
         s.buildAttempts = 0
+        s.pauses = 0
         try? ScanStore.save(s)
         reload()
         enqueueBuild(s.id)
@@ -739,7 +737,8 @@ struct PiecesDetailView: View {
                     Label("Working on the pieces", systemImage: "puzzlepiece.extension").font(.headline)
                     ProgressView(value: model.progress)
                     Text(model.progressNote).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                    Text("You can use other apps or lock the phone; you'll get a notification.").font(.caption).foregroundStyle(.secondary)
+                    Text(BuildDimButton.keepOpenText).font(.caption).foregroundStyle(.secondary)
+                    BuildDimButton()
                 }
             } else if scan.buildRequested == true {
                 Label("Waiting to build", systemImage: "clock")

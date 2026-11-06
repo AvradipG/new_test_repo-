@@ -54,6 +54,9 @@ enum AppInfo {
             }
             lines.append("Cross-section stacks: \(s.sections?.count ?? 0)")
         }
+        lines.append("")
+        lines.append("Last lines of the app log:")
+        lines.append(AppLog.tail(60))
         return lines.joined(separator: "\n")
     }
 
@@ -127,6 +130,7 @@ struct AboutView: View {
     @State private var problem = ""
     @State private var checking = false
     @State private var copied = false
+    @AppStorage(AppModel.uploadLogKey) private var uploadLog = true
 
     var body: some View {
         List {
@@ -175,11 +179,50 @@ struct AboutView: View {
             } header: {
                 Text("Report a problem")
             } footer: {
-                Text("The report includes the app version, iPhone model, iOS version and the latest scan's numbers, so the fix can be targeted. No photos are included.")
+                Text("The report includes the app version, iPhone model, iOS version, the latest scan's numbers and the last lines of the app log, so the fix can be targeted. No photos are included.")
+            }
+
+            Section {
+                NavigationLink { AppLogView() } label: { Label("Show the app log", systemImage: "doc.text.magnifyingglass") }
+                ShareLink(item: AppLog.todayFile) { Label("Share today's log file", systemImage: "square.and.arrow.up") }
+                Toggle("Send the app log to Google Drive", isOn: $uploadLog)
+            } header: {
+                Text("App log")
+            } footer: {
+                Text("The app writes down what it does: starts, phone locks, each build stage and how long it took, pauses, uploads, memory and heat warnings, and every error with its code. When the app crashes, iOS hands over a crash report at the next start, and it is kept too. Everything is in Files › On My iPhone › Crystal Bowl › App log, and goes to My Drive › Crystal Bowl Scans › _app-log. Each scan's own build log travels in its folder (logs/build-log.txt). No photos or passwords are written.")
             }
         }
         .navigationTitle("About and updates")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: problem) { _, _ in copied = false }
+    }
+}
+
+/// The end of the app log, newest at the bottom.
+struct AppLogView: View {
+    @State private var text = ""
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Text(text.isEmpty ? "The log is empty." : text)
+                    .font(.system(size: 11, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                Color.clear.frame(height: 1).id("end")
+            }
+            .onAppear {
+                text = AppLog.tail(500)
+                DispatchQueue.main.async { proxy.scrollTo("end", anchor: .bottom) }
+            }
+            .refreshable { text = AppLog.tail(500) }
+        }
+        .navigationTitle("App log")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { UIPasteboard.general.string = text } label: { Label("Copy", systemImage: "doc.on.doc") }
+            }
+        }
     }
 }

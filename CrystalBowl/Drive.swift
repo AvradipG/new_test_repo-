@@ -339,6 +339,7 @@ enum ScanPackage {
         if scan.hasModel2 { out.append(("model/\(scan.model2URL.lastPathComponent)", scan.model2URL)) }
         walk(scan.exportsURL, prefix: "model")
         walk(scan.sectionsURL, prefix: "sections")
+        walk(scan.folderURL.appendingPathComponent("Logs", isDirectory: true), prefix: "logs")
         if includePhotos {
             walk(scan.imagesURL, prefix: "images")
             walk(scan.images2URL, prefix: "images_side2")
@@ -372,6 +373,7 @@ enum ScanPackage {
             if rel.hasSuffix(".json") { return "sample_sheet_description" }
             return "virtual_view"
         }
+        if rel.hasPrefix("logs/") { return "build_log" }
         if rel == "detail/detail.json" { return "detail_photo_index" }
         if rel.hasPrefix("detail/") { return "detail_photo" }
         if rel.hasSuffix("dimensions.json") { return "dimensions" }
@@ -540,6 +542,14 @@ enum ScanPackage {
     volume, where it lay, its 4x4 pose into the assembled frame, neighbours, confidence; missing regions
     with size and position; what to do next), <sample>_pieces.csv, <sample>_assembled.obj (+ .mtl,
     one group per piece, metres, target axis vertical), <sample>_missing.obj and PNG pictures.
+
+    logs/build-log.txt in each scan folder: when the capture and build ran, each stage, pauses (phone
+    locked), errors with their codes, and how long the build took.
+
+    _app-log/ (next to the scan folders): the app's own diary, one crystal-bowl-<date>.log per day:
+    starts, phone locks, builds, uploads, memory and heat warnings, every error, and a note when the
+    previous run ended unexpectedly. _app-log/iOS reports/ holds crash, hang and exit reports from iOS
+    (MetricKit JSON). No photos or passwords are in either.
 
     Folder names: <yyyyMMdd-HHmmss>_<sample name>, so they sort by scan time.
     """

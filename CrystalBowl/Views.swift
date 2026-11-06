@@ -57,6 +57,9 @@ struct RootView: View {
         }
         .task { await model.checkForUpdate() }
         .onChange(of: scenePhase) { _, phase in
+            AppLog.setOnScreen(phase == .active)
+            if phase == .active { AppLog.info("app", "On screen") }
+            if phase == .background { AppLog.info("app", "Left the screen") }
             if phase == .active {
                 model.resumePendingBuilds()
                 Task { await model.upgradeScans() }
@@ -122,7 +125,7 @@ struct HomeView: View {
                     Section {
                         BuildStatusRow()
                     } footer: {
-                        Text("Building carries on while you use other apps or lock the phone; iOS shows its progress. If iOS pauses it, it continues from where it stopped when you open Crystal Bowl again.")
+                        Text("The screen stays on while a model builds. Keep Crystal Bowl open (dim the screen if you like): an iPhone lets apps use its graphics chip only while they are on screen, so locking the phone or opening another app pauses the 3D build. It carries on from its last checkpoint when you come back.")
                     }
                 }
                 if let update = model.updateAvailable {
@@ -377,10 +380,70 @@ struct BuildStatusRow: View {
                 }
                 .buttonStyle(.plain)
             }
+            if let note = model.buildPausedNote {
+                Label(note, systemImage: "pause.circle.fill").font(.caption).foregroundStyle(.orange)
+            }
+            if model.buildingID != nil { BuildDimButton() }
             ForEach(model.pendingBuilds) { scan in
                 Label("\(scan.name): waiting to build", systemImage: "clock").font(.callout).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+/// Darkens the screen while a model builds. The screen has to stay on (an iPhone stops 3D building when it
+/// locks), so this is the way to put the phone down and wait.
+struct BuildDimButton: View {
+    static let keepOpenText = "Keep Crystal Bowl open; the screen stays on. Locking the phone pauses the build (an iPhone builds 3D models only on screen), and it then carries on from its last checkpoint."
+    @EnvironmentObject var model: AppModel
+    @State private var dimmed = false
+    var body: some View {
+        Button { dimmed = true } label: {
+            Label("Dim the screen while it builds", systemImage: "moon.fill").font(.callout)
+        }
+        .buttonStyle(.borderless)
+        .fullScreenCover(isPresented: $dimmed) { BuildDimView().environmentObject(model) }
+    }
+}
+
+struct BuildDimView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var saved: CGFloat?
+
+    private var screen: UIScreen? {
+        UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen }.first
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 12) {
+                Text("\(Int(model.progress * 100))%").font(.system(size: 56, weight: .thin).monospacedDigit())
+                Text(model.progressNote).font(.footnote).multilineTextAlignment(.center)
+                Text("Building. Leave the phone like this; tap to brighten.").font(.caption)
+            }
+            .foregroundStyle(Color(white: 0.4))
+            .padding(32)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { dismiss() }
+        .statusBarHidden()
+        .persistentSystemOverlays(.hidden)
+        .onAppear {
+            saved = screen?.brightness
+            screen?.brightness = 0.02
+            AppLog.info("app", "Screen dimmed during the build")
+        }
+        .onDisappear { restore() }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { restore() } }
+        .onChange(of: model.buildingID) { _, id in if id == nil { dismiss() } }
+    }
+
+    private func restore() {
+        if let saved { screen?.brightness = saved }
+        saved = nil
     }
 }
 
@@ -749,8 +812,9 @@ struct ScanDetailView: View {
                             Label("Building the 3D model", systemImage: "cube.transparent.fill").font(.headline)
                             ProgressView(value: model.progress)
                             Text(model.progressNote).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                            Text("You can use other apps or lock the phone. The dimensions come first; you'll get a notification.")
+                            Text(BuildDimButton.keepOpenText + " The dimensions come first.")
                                 .font(.caption).foregroundStyle(.secondary)
+                            BuildDimButton()
                         }
                     } else if scan.buildRequested == true {
                         VStack(alignment: .leading, spacing: 8) {

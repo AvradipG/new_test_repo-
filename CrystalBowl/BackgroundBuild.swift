@@ -73,8 +73,9 @@ final class BackgroundBuild {
         let request = BGContinuedProcessingTaskRequest(identifier: id, title: title, subtitle: note)
         do {
             try BGTaskScheduler.shared.submit(request)
+            AppLog.info("background", "Asked iOS to keep the build going outside the app")
         } catch {
-            print("Continued processing not available: \(error)")
+            AppLog.warn("background", "iOS won't keep the build going outside the app: \(AppLog.describe(error))")
         }
     }
 
@@ -91,6 +92,7 @@ final class BackgroundBuild {
             return
         }
         task = t
+        AppLog.info("background", "iOS accepted the build as a background task")
         t.expirationHandler = {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { BackgroundBuild.shared.expire() }
@@ -105,6 +107,7 @@ final class BackgroundBuild {
 
     private func expire() {
         expired = true
+        AppLog.warn("background", "iOS took the background time back (or the build was stopped from the Lock Screen)")
         onExpire?()
         if let t = task {
             task = nil

@@ -3,6 +3,12 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.1
+- Fixed: a build no longer fails when the phone locks. An iPhone lets apps use its graphics chip only on screen, so locking now pauses the build, and it carries on from where it stopped when you come back (pauses no longer count as failed tries)
+- The screen stays on while a model builds; tap "Dim the screen while it builds" to darken it and put the phone down
+- New app log: what the app did, each build stage and how long it took, pauses, phone locks, errors with their codes, and iOS crash reports. It is in About › App log and goes to Google Drive (Crystal Bowl Scans › _app-log); each scan's build log goes in its own folder
+- "Report a problem" now includes the last lines of the log
+
 ## 3.0
 - New Pieces tab: scan broken pieces all together, turn each one over, scan again. The app finds every piece, matches the breaks, puts them back together, and shows what is missing and how big it is
 - Give the original shape (core plug diameter and length, or a block's sides) to help it; it also guides you: which piece to turn over or scan again

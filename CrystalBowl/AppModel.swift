@@ -12,7 +12,9 @@ final class AppModel: ObservableObject {
     @Published var phase: Phase = .home
     @Published var scans: [Scan] = []
     @Published var path: [Scan] = []
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet { if let m = errorMessage, m != oldValue { AppLog.error("alert", "Shown to the user: \(m)") } }
+    }
 
     // Main tabs: scanning, and AR view of finished scans
     @Published var tab: Tab = .scan
@@ -47,7 +49,15 @@ final class AppModel: ObservableObject {
 
     // Building (one scan at a time, in the background)
     @Published var repairing: Set<String> = []
-    @Published var buildingID: String?
+    @Published var buildingID: String? {
+        // The screen stays on while a model builds: an iPhone pauses the build when it locks.
+        didSet { UIApplication.shared.isIdleTimerDisabled = buildingID != nil || phase == .capturing }
+    }
+    /// Shown on screen after iOS paused a build (phone locked or another app opened).
+    @Published var buildPausedNote: String?
+    private var buildStarted = Date()
+    private var loggedStage = ""
+    private var loggedTenth = -1
     @Published var progress: Double = 0
     @Published var progressNote = ""
     @Published var readyNotice: ReadyNotice?
@@ -64,6 +74,7 @@ final class AppModel: ObservableObject {
     @Published var folderName: String?
     @Published var folderStatus: [String: String] = [:]
     var isFolderSyncing = false
+    var uploadingLog = false
 
     let guide = CaptureGuide()
 
@@ -168,6 +179,9 @@ final class AppModel: ObservableObject {
         cancelling = false
         phase = .capturing
         UIApplication.shared.isIdleTimerDisabled = true
+        let kind: String = piecesCapture ? "pieces, side \(captureSide)" : (quick ? "dimensions only" : "dimensions + detail")
+        AppLog.info("capture", "Capture started: " + kind, scan: scan)
+        AppLog.setActivity("capturing \(scan.name)")
         guide.start()
         startPolling(session)
     }
@@ -315,6 +329,7 @@ final class AppModel: ObservableObject {
     func finishCapture() { captureSession?.finish() }
 
     func cancelCapture() {
+        AppLog.info("capture", "Capture cancelled by the user after \(shotCount) photos")
         cancelling = true
         captureSession?.cancel()
         endCapture()
@@ -339,13 +354,15 @@ final class AppModel: ObservableObject {
         pollTask = nil
         captureSession = nil
         guide.stop()
-        UIApplication.shared.isIdleTimerDisabled = false
+        UIApplication.shared.isIdleTimerDisabled = buildingID != nil
+        AppLog.setActivity(buildingID == nil ? "idle" : "building")
     }
 
     private func captureFailed(_ error: Error) {
         endCapture()
         captureSide = 1
         if cancelling { return }
+        AppLog.error("capture", "Capture failed after \(shotCount) photos", error, scan: currentScan)
         errorMessage = "Capture stopped: \(error.localizedDescription). Photos taken so far are kept, and you can build a model from them in the scan list."
         if var scan = currentScan {
             scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL)
@@ -358,11 +375,13 @@ final class AppModel: ObservableObject {
     private func captureFinished() {
         endCapture()
         guard var scan = currentScan else { phase = .home; return }
+        AppLog.info("capture", "Capture finished: \(shotCount) photos (\(requestedShots) asked for by the app), \(passNumber) pass(es), side \(captureSide), blurred \(blurryShots)", scan: scan)
         if captureSide == 2 {
             scan = scans.first { $0.id == scan.id } ?? scan
             scan.side2PhotoCount = ScanStore.countPhotos(in: scan.images2URL)
             scan.buildRequested = true
             scan.buildAttempts = 0
+            scan.pauses = 0
             try? ScanStore.save(scan)
             currentScan = nil
             captureSide = 1
@@ -377,6 +396,7 @@ final class AppModel: ObservableObject {
         scan.coverage = guide.bandCoverage
         scan.buildRequested = true
         scan.buildAttempts = 0
+        scan.pauses = 0
         ShotQuality.saveScores(shotScores, for: scan)
         try? ScanStore.save(scan)
         currentScan = nil
@@ -400,6 +420,7 @@ final class AppModel: ObservableObject {
         if s.buildRequested != true {
             s.buildRequested = true
             s.buildAttempts = 0
+            s.pauses = 0
             try? ScanStore.save(s)
             reload()
         }
@@ -415,10 +436,14 @@ final class AppModel: ObservableObject {
     func enqueueBuild(_ id: String) { enqueue(id) }
 
     func appMovedToBackground() {
-        if buildingID != nil { backgroundedDuringBuild = true }
+        if buildingID != nil {
+            backgroundedDuringBuild = true
+            AppLog.warn("build", "App left the screen during the build at \(Int(progress * 100))% (\(progressNote))")
+        }
         if driveSignedIn && scans.contains(where: { $0.hasModel && $0.drive?.complete != true }) {
             AppDelegate.scheduleUploadTask()
         }
+        Task { await uploadAppLog() }
     }
 
     var pendingBuilds: [Scan] { scans.filter { $0.buildRequested == true && $0.id != buildingID } }
@@ -436,6 +461,13 @@ final class AppModel: ObservableObject {
             buildingID = id
             progress = 0
             progressNote = "Preparing…"
+            buildStarted = Date()
+            loggedStage = ""
+            loggedTenth = -1
+            let where_ = UIApplication.shared.applicationState == .active ? "on screen" : "in the background"
+            let photos = scan.photoCount ?? ScanStore.countPhotos(in: scan.imagesURL)
+            AppLog.info("build", "Build started (attempt \((scan.buildAttempts ?? 0) + 1), \(photos) photos, app \(where_), "
+                        + "heat \(AppLog.thermal()), memory \(AppLog.memoryInUseMB()) MB, free space \(AppInfo.freeSpace()))", scan: scan)
             backgroundedDuringBuild = UIApplication.shared.applicationState == .background
             BackgroundBuild.shared.onExpire = { [weak self] in self?.photoSession?.cancel() }
             BackgroundBuild.shared.begin(title: "Building \(scan.name)")
@@ -453,6 +485,45 @@ final class AppModel: ObservableObject {
         progress = fraction
         progressNote = note
         BackgroundBuild.shared.update(fraction: fraction, note: note)
+        // The log gets each new stage and every 10 %, not every tick.
+        let stage = note.components(separatedBy: "…").first ?? note
+        let tenth = Int(fraction * 10)
+        if stage != loggedStage || tenth != loggedTenth {
+            loggedStage = stage
+            loggedTenth = tenth
+            let scan = scans.first { $0.id == buildingID }
+            let state = UIApplication.shared.applicationState == .active ? "" : " (app in the background)"
+            AppLog.info("build", "\(Int(fraction * 100))% \(note)\(state)", scan: scan)
+            AppLog.setActivity("building \(scan?.name ?? "") \(Int(fraction * 100))% \(stage)")
+        }
+    }
+
+    /// Minutes since the build started, for the log.
+    var buildMinutes: String { String(format: "%.1f min", Date().timeIntervalSince(buildStarted) / 60) }
+
+    /// What to do after a build stopped with an error; shared by sample and pieces builds.
+    /// Returns true when the build is paused (to carry on later) rather than failed.
+    func buildStopped(_ scan: inout Scan, _ error: Error) -> Bool {
+        BackgroundBuild.shared.end(success: false)
+        let active = UIApplication.shared.applicationState == .active
+        let interrupted = backgroundedDuringBuild || BackgroundBuild.shared.expired || !active
+        let place = active ? "on screen" : "in the background"
+        AppLog.error("build", "Build stopped at \(Int(progress * 100))% after \(buildMinutes) (\(progressNote)); app \(place), "
+                     + "left the screen during the build: \(backgroundedDuringBuild), iOS took the background time back: \(BackgroundBuild.shared.expired), "
+                     + "phone unlocked: \(UIApplication.shared.isProtectedDataAvailable), heat \(AppLog.thermal()), memory \(AppLog.memoryInUseMB()) MB",
+                     error, scan: scan)
+        guard interrupted else { return false }
+        // A pause isn't a failed attempt: only real failures count towards giving up.
+        scan.buildAttempts = max(0, (scan.buildAttempts ?? 1) - 1)
+        scan.pauses = (scan.pauses ?? 0) + 1
+        guard (scan.pauses ?? 0) <= 30 else { return false }
+        try? ScanStore.save(scan)
+        buildPausedNote = "\(scan.name) paused at \(Int(progress * 100))% when the phone locked or another app opened. It carries on from its last checkpoint while Crystal Bowl is on screen."
+        AppLog.info("build", "Paused (pause \(scan.pauses ?? 0)); it carries on when the app is on screen again", scan: scan)
+        Notifier.post(id: "paused-\(scan.id)", title: "\(scan.name): build paused",
+                      body: "An iPhone stops 3D building when it locks. Open Crystal Bowl and it carries on from where it stopped.")
+        if active { buildQueue.append(scan.id) }
+        return true
     }
 
     private func runBuild(_ original: Scan) async {
@@ -500,21 +571,18 @@ final class AppModel: ObservableObject {
             try? ScanStore.save(scan)
             reload()
             setProgress(1, "Done")
+            buildPausedNote = nil
+            AppLog.info("build", "Build finished in \(buildMinutes), \(scan.pauses ?? 0) pause(s)", scan: scan)
             BackgroundBuild.shared.end(success: true)
             Task { await upgradeScans() } // shape fit and sample sheet for the new scan
             Notifier.post(id: "built-\(scan.id)", title: "\(scan.name): 3D model ready",
                           body: "Model, lab files and slices are saved\(driveSignedIn || folderLinked ? " and going to Google Drive" : "").")
             Task { await syncAllPending() }
         } catch {
-            BackgroundBuild.shared.end(success: false)
-            let interrupted = backgroundedDuringBuild || BackgroundBuild.shared.expired || UIApplication.shared.applicationState != .active
-            if interrupted && (scan.buildAttempts ?? 0) < 8 {
+            if buildStopped(&scan, error) {
                 // Still requested: it resumes from the checkpoint as soon as the app is in front again.
-                try? ScanStore.save(scan)
-                Notifier.post(id: "paused-\(scan.id)", title: "\(scan.name): build paused",
-                              body: "iOS paused the 3D build while the phone was busy. Open Crystal Bowl and it carries on from where it stopped.")
-                if UIApplication.shared.applicationState == .active { buildQueue.append(scan.id) }
             } else if (scan.blurrySetAside ?? 0) > 0 {
+                AppLog.info("build", "Trying again with the blurred photos put back", scan: scan)
                 // Try once more with every photo.
                 ShotQuality.restoreBlurry(scan)
                 scan.blurrySetAside = 0
@@ -540,10 +608,17 @@ final class AppModel: ObservableObject {
         config.checkpointDirectory = checkpoint
         // Guided capture saves photos in the order they were taken, which lets matching start from neighbours.
         config.sampleOrdering = .sequential
+        let resuming = ((try? FileManager.default.contentsOfDirectory(atPath: checkpoint.path))?.isEmpty == false)
+        AppLog.info("build", "\(label): photogrammetry starting\(resuming ? " from a saved checkpoint" : "")")
         let session = try PhotogrammetrySession(input: input, configuration: config)
         photoSession = session
         try session.process(requests: [.modelFile(url: output)])
         var failure: Error?
+        var invalid = 0
+        var skipped = 0
+        defer {
+            if invalid + skipped > 0 { AppLog.warn("build", "\(label): \(invalid) photo(s) unusable, \(skipped) skipped by photogrammetry") }
+        }
         // The outputs stream stays open after the last request finishes, so leave it on
         // processingComplete; waiting for the stream to end hangs at 100%.
         outputs: for try await output in session.outputs {
@@ -551,12 +626,23 @@ final class AppModel: ObservableObject {
             case .requestProgress(_, let fraction):
                 setProgress(from + fraction * (to - from), "\(label)… \(Int(fraction * 100))%")
             case .requestError(_, let error):
+                AppLog.error("build", "\(label): photogrammetry reported an error", error)
                 failure = error
             case .processingCancelled:
+                AppLog.warn("build", "\(label): photogrammetry was cancelled")
                 failure = NSError(domain: "CrystalBowl", code: 1, userInfo: [NSLocalizedDescriptionKey: "Processing was stopped"])
                 break outputs
             case .processingComplete:
+                AppLog.info("build", "\(label): photogrammetry complete")
                 break outputs
+            case .inputComplete:
+                AppLog.info("build", "\(label): photos read")
+            case .automaticDownsampling:
+                AppLog.warn("build", "\(label): photogrammetry is using smaller images (memory)")
+            case .invalidSample:
+                invalid += 1
+            case .skippedSample:
+                skipped += 1
             default:
                 break
             }

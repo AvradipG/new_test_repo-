@@ -46,6 +46,58 @@ extension AppModel {
         for scan in scans where scan.hasModel && scan.buildRequested != true {
             if needsSync(scan, photosAllowed: unmetered) { await sync(scan) }
         }
+        await uploadAppLog()
+    }
+
+    // MARK: App log
+
+    static let uploadLogKey = "applog.upload"
+    private static let logRecordsKey = "applog.driveFiles"
+    static let logCopyRecordsKey = "applog.folderFiles"
+
+    /// On by default: the app's diary and iOS crash reports go to Drive with the scans.
+    var uploadLog: Bool { UserDefaults.standard.object(forKey: Self.uploadLogKey) as? Bool ?? true }
+
+    static func loadRecords(_ key: String) -> [String: DriveFileRecord] {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return [:] }
+        return (try? JSONDecoder().decode([String: DriveFileRecord].self, from: data)) ?? [:]
+    }
+
+    static func saveRecords(_ records: [String: DriveFileRecord], _ key: String) {
+        if let data = try? JSONEncoder().encode(records) { UserDefaults.standard.set(data, forKey: key) }
+    }
+
+    /// Documents › App log goes to My Drive › Crystal Bowl Scans › _app-log; only files that changed.
+    func uploadAppLog() async {
+        await copyAppLogToFolder()
+        guard driveSignedIn, uploadLog, !uploadingLog else { return }
+        uploadingLog = true
+        defer { uploadingLog = false }
+        AppLog.flush()
+        var records = Self.loadRecords(Self.logRecordsKey)
+        let todo = AppLog.files().filter { rel, url in records[rel].map { Self.changed(url, $0) } ?? true }
+        guard !todo.isEmpty else { return }
+        let bg = UIApplication.shared.beginBackgroundTask(withName: "drive-log")
+        defer { UIApplication.shared.endBackgroundTask(bg) }
+        do {
+            let client = DriveClient()
+            let root = try await client.folder(named: ScanPackage.rootFolder, in: "root")
+            let logFolder = try await client.folder(named: "_app-log", in: root)
+            var reportsFolder: String?
+            for (rel, url) in todo {
+                var parent = logFolder
+                if rel.hasPrefix("iOS reports/") {
+                    if reportsFolder == nil { reportsFolder = try await client.folder(named: "iOS reports", in: logFolder) }
+                    parent = reportsFolder ?? logFolder
+                }
+                let before = FolderCopy.record(url) // a file that grows during the upload goes again next time
+                let id = try await uploadReplacing(client, url, name: url.lastPathComponent, parent: parent, existing: records[rel]?.id)
+                records[rel] = DriveFileRecord(id: id, size: before.size, modified: before.modified)
+                Self.saveRecords(records, Self.logRecordsKey)
+            }
+        } catch {
+            AppLog.warn("drive", "App log upload paused: \(AppLog.describe(error))")
+        }
     }
 
     func needsSync(_ scan: Scan, photosAllowed: Bool) -> Bool {

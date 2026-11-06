@@ -71,6 +71,10 @@ final class DriveBackground: NSObject, URLSessionDataDelegate, @unchecked Sendab
         let code = (task.response as? HTTPURLResponse)?.statusCode ?? 0
         let id = ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["id"] as? String
         let fileID = error == nil && (200..<300).contains(code) ? id : nil
+        if fileID == nil {
+            let why = error.map { AppLog.describe($0) } ?? "HTTP \(code) \(String(decoding: body.prefix(200), as: UTF8.self))"
+            AppLog.warn("drive", "Upload of \(item.rel) (scan \(item.scanID)) didn't finish, retried later: \(why)")
+        }
         Task { @MainActor in AppModel.current?.backgroundUploadFinished(item, fileID: fileID) }
     }
 
@@ -90,10 +94,18 @@ final class DriveBackground: NSObject, URLSessionDataDelegate, @unchecked Sendab
 @MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate {
     static let uploadTaskID = "com.avradip.crystalbowl.upload"
-    let model = AppModel()
+    let model: AppModel
+
+    override init() {
+        // The log starts first, so it also covers what the model does while it loads.
+        AppLog.startSession()
+        model = AppModel()
+        super.init()
+    }
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        AppLog.info("app", application.applicationState == .background ? "Started by iOS in the background (uploads)" : "Started")
         _ = DriveBackground.shared.session
         BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.uploadTaskID, using: .main) { task in
             MainActor.assumeIsolated { AppDelegate.runUploadTask(task) }
@@ -116,6 +128,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     private static func runUploadTask(_ task: BGTask) {
+        AppLog.info("drive", "iOS gave background time for uploads")
         let work = Task { @MainActor in
             await AppModel.current?.syncAllPending()
             task.setTaskCompleted(success: true)

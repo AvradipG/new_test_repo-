@@ -107,6 +107,7 @@ extension AppModel {
 
         switch copied {
         case .failure(let error):
+            AppLog.warn("drive", "Copy of \(scan.name) to the Drive folder paused: \(AppLog.describe(error))")
             folderStatus[scan.id] = "Copy paused: \(error.localizedDescription). It retries when you next open the app."
             return
         case .success(let done):
@@ -142,6 +143,42 @@ extension AppModel {
             folderStatus[scan.id] = "Copy paused: \(error.localizedDescription). It retries when you next open the app."
         }
         reload()
+    }
+}
+
+extension AppModel {
+    /// Without a Google sign-in, the app log is copied into the linked Drive folder instead (_app-log).
+    func copyAppLogToFolder() async {
+        guard folderLinked, !driveSignedIn, uploadLog, !uploadingLog, let root = Self.resolveFolder() else { return }
+        uploadingLog = true
+        defer { uploadingLog = false }
+        AppLog.flush()
+        var records = Self.loadRecords(Self.logCopyRecordsKey)
+        let todo = AppLog.files().filter { rel, url in records[rel].map { Self.changed(url, $0) } ?? true }
+        guard !todo.isEmpty else { return }
+        let copied: Result<[String: DriveFileRecord], Error> = await Task.detached {
+            do {
+                var done: [String: DriveFileRecord] = [:]
+                try FolderCopy.withAccess(root) {
+                    let dest = root.appendingPathComponent("_app-log", isDirectory: true)
+                    for (rel, url) in todo {
+                        let before = FolderCopy.record(url)
+                        try FolderCopy.copy(url, to: dest.appendingPathComponent(rel))
+                        done[rel] = before
+                    }
+                }
+                return .success(done)
+            } catch {
+                return .failure(error)
+            }
+        }.value
+        switch copied {
+        case .success(let done):
+            records.merge(done) { _, new in new }
+            Self.saveRecords(records, Self.logCopyRecordsKey)
+        case .failure(let error):
+            AppLog.warn("drive", "App log copy to the Drive folder paused: \(AppLog.describe(error))")
+        }
     }
 }
 

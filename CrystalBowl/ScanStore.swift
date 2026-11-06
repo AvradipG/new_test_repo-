@@ -19,6 +19,8 @@ struct Scan: Identifiable, Codable, Hashable {
     /// iOS stopped resumes from its checkpoint the next time the app runs.
     var buildRequested: Bool?
     var buildAttempts: Int?
+    /// Times iOS paused the build (phone locked, another app opened); these don't count as failed attempts.
+    var pauses: Int?
     /// Photos set aside as blurry before the model was built (they are kept in Blurry/).
     var blurrySetAside: Int?
     /// Quick scan: one ring round the rock, enough for the dimensions.
