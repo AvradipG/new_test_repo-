@@ -109,8 +109,7 @@ public final class Piece {
 
     private func buildInterior() {
         var out: [SIMD3<Double>] = []
-        let step = Swift.max(1, points.count / 500)
-        for i in stride(from: 0, to: points.count, by: step) {
+        for i in spreadIndices(points.count, want: 500) {
             for depth in [2.0, 4.0] {
                 let q = points[i] - normals[i] * spacing * depth
                 guard let n = tree.nearest(q), n.distance > spacing * depth * 0.6 else { continue }

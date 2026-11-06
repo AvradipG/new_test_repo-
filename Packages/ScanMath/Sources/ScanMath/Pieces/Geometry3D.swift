@@ -208,6 +208,14 @@ struct SplitMix64: RandomNumberGenerator {
     mutating func unit() -> Double { Double(next() >> 11) / Double(1 << 53) }
 }
 
+/// About `want` indices out of `count`, spread without following any order in the data (a plain every-n-th
+/// subset can pick only one kind of surface when the samples were listed in a regular pattern).
+func spreadIndices(_ count: Int, want: Int) -> [Int] {
+    guard count > want, want > 0 else { return Array(0..<Swift.max(0, count)) }
+    let step = UInt64(Swift.max(1, count / want))
+    return (0..<count).filter { (((UInt64($0) &* 2654435761) >> 9) % step) == 0 }
+}
+
 extension Array where Element == SIMD3<Double> {
     var centroid: SIMD3<Double> {
         guard !isEmpty else { return .zero }

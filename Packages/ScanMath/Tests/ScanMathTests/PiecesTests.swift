@@ -247,7 +247,7 @@ final class PiecesTests: XCTestCase {
         let (B0, bp, bn, _) = place(T2)
         let A = Piece(id: 1, points: ap, normals: an, spacing: 0.0008)
         let B = Piece(id: 2, points: bp, normals: bn, spacing: 0.0008)
-        let m = SideMerger.merge(A, B, floorA: floorA)
+        let m = SideMerger.merge(A, B, floorA: floorA, floorB: 0)
         XCTAssertTrue(m.accepted, "overlap \(m.overlap) conflict \(m.conflict)")
         let truth = A0.compose(B0.inverse)
         let err = Pose.displacement(m.pose, truth, points: bp)

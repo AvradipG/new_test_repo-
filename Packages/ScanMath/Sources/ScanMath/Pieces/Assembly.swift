@@ -122,7 +122,7 @@ public enum PieceAssembler {
     }
 
     static func samePose(_ p: Piece, _ a: Pose, _ b: Pose) -> Bool {
-        let probe = stride(from: 0, to: p.points.count, by: Swift.max(1, p.points.count / 100)).map { p.points[$0] }
+        let probe = spreadIndices(p.points.count, want: 100).map { p.points[$0] }
         return Pose.displacement(a, b, points: probe) < 2.5 * p.spacing
     }
 

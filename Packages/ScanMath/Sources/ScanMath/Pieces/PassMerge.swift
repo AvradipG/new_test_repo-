@@ -65,15 +65,21 @@ public enum SideMerger {
     ///   - a: the piece as first scanned (open where it touched the table)
     ///   - b: the same piece from the second scan, in that scan's frame
     ///   - floorA: table height in the first scan
-    public static func merge(_ a: Piece, _ b: Piece, floorA: Double) -> SideMerge {
+    ///   - floorB: table height in the second scan (default: the lowest point seen)
+    public static func merge(_ a: Piece, _ b: Piece, floorA: Double, floorB: Double? = nil) -> SideMerge {
         let h = Swift.max(a.spacing, b.spacing)
-        let probe = Array(stride(from: 0, to: b.points.count, by: Swift.max(1, b.points.count / 220)))
+        let probe = spreadIndices(b.points.count, want: 220)
         var starts: [(Double, Pose)] = []
-        let ca = a.centroid, cb = b.centroid
-        let thick = Swift.max(a.hi.y - a.lo.y, h)
+        // The whole piece stands between the table and its top: that middle is the same point in both scans
+        // (the centroid of what each scan saw is not: each saw a different part).
+        let fb = floorB ?? b.lo.y
+        let ca = SIMD3<Double>((a.lo.x + a.hi.x) / 2, (floorA + a.hi.y) / 2, (a.lo.z + a.hi.z) / 2)
+        let cb = SIMD3<Double>((b.lo.x + b.hi.x) / 2, (fb + b.hi.y) / 2, (b.lo.z + b.hi.z) / 2)
+        let thick = Swift.max(a.hi.y - floorA, h)
         for R in rotations() {
-            for dy in [-0.5, 0.0, 0.5] {
-                let t = ca + SIMD3(0, dy * thick, 0) - R * cb
+            for dy in [-0.15, 0.0, 0.15] {
+                let lift = SIMD3<Double>(0, dy * thick, 0)
+                let t: SIMD3<Double> = ca + lift - R * cb
                 let T = Pose(R: R, t: t)
                 let s = score(a, b, T, floorA: floorA, probe: probe, h: h, loose: true)
                 starts.append((s.overlap - 2 * s.conflict, T))
@@ -90,7 +96,7 @@ public enum SideMerger {
             if seeds.count >= 40 { break }
         }
         // Short refinement on a subset, then full refinement of the best few.
-        let subIdx = Array(stride(from: 0, to: b.points.count, by: Swift.max(1, b.points.count / 600)))
+        let subIdx = spreadIndices(b.points.count, want: 600)
         let sp = subIdx.map { b.points[$0] }, sn = subIdx.map { b.normals[$0] }
         let sw = [Double](repeating: 1, count: subIdx.count)
         var rough: [(Double, Pose)] = []

@@ -220,7 +220,7 @@ public enum PieceReconstructor {
                 for (k, c, p) in others {
                     let r = c.maxExtent / it.first.maxExtent
                     guard r > 0.55 && r < 1.8 else { continue }
-                    let m = SideMerger.merge(it.piece, p, floorA: s1.floorY)
+                    let m = SideMerger.merge(it.piece, p, floorA: s1.floorY, floorB: s2.floorY)
                     if m.accepted { tried.append((m.overlap - 2 * m.conflict, ii, k, m)) }
                 }
                 progress?(0.08 + 0.17 * Double(ii + 1) / Double(items.count), "Joining the two sides of each piece…")

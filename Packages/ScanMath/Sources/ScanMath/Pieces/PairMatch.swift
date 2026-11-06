@@ -90,7 +90,8 @@ public enum PieceMatcher {
     static func contact(_ src: Piece, _ T: Pose, _ tgt: Piece, sigma: Double, sampleStep: Int = 1) -> (area: Double, weighted: Double, rms: Double) {
         let h = Swift.max(src.spacing, tgt.spacing)
         var area = 0.0, weighted = 0.0, sq = 0.0, n = 0
-        for i in stride(from: 0, to: src.points.count, by: sampleStep) {
+        let picked = sampleStep > 1 ? spreadIndices(src.points.count, want: src.points.count / sampleStep) : Array(src.points.indices)
+        for i in picked {
             let p = T.apply(src.points[i])
             guard let nn = tgt.tree.nearest(p, maxDistance: 2 * h) else { continue }
             let m = tgt.normals[nn.index]
@@ -108,7 +109,7 @@ public enum PieceMatcher {
                 n += 1
             }
         }
-        let scale = src.areaPerPoint * Double(sampleStep)
+        let scale = src.areaPerPoint * Double(src.points.count) / Double(Swift.max(1, picked.count))
         return (area * scale, weighted * scale, n > 0 ? (sq / Double(n)).squareRoot() : .infinity)
     }
 
@@ -141,7 +142,7 @@ public enum PieceMatcher {
     }
 
     static func distinct(_ list: [PairCandidate], piece: Piece, limit: Int) -> [PairCandidate] {
-        let probe = stride(from: 0, to: piece.points.count, by: Swift.max(1, piece.points.count / 150)).map { piece.points[$0] }
+        let probe = spreadIndices(piece.points.count, want: 150).map { piece.points[$0] }
         var keep: [PairCandidate] = []
         for c in list {
             if keep.contains(where: { Pose.displacement($0.pose, c.pose, points: probe) < 2.5 * piece.spacing }) { continue }
@@ -179,7 +180,7 @@ public enum PieceMatcher {
         var order = a.points.indices.filter { a.fracture[$0] > 0.35 }
         if order.count < 60 { order = Array(a.points.indices) }
         let stepSub = Swift.max(1, order.count / params.preSamples)
-        let sub = stride(from: 0, to: order.count, by: stepSub).map { order[$0] }
+        let sub = spreadIndices(order.count, want: order.count / stepSub).map { order[$0] }
         let sp = sub.map { a.points[$0] }, sn = sub.map { a.normals[$0] }, sw = sub.map { a.fracture[$0] + 0.05 }
         var pre: [PairCandidate] = []
         for s in starts {
