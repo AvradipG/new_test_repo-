@@ -104,11 +104,7 @@ struct PaperCard: View {
             }
             HStack(spacing: 6) {
                 ForEach(tree.children(of: nil)) { s in
-                    Capsule()
-                        .fill(tree.mark(s.id) == .done ? Palette.done
-                              : tree.mark(s.id) == .inProgress ? Palette.accent.opacity(0.35 + 0.65 * tree.fraction(s.id))
-                              : Palette.track)
-                        .frame(height: 6)
+                    Capsule().fill(segmentColor(s.id, tree)).frame(height: 6)
                 }
             }
             HStack {
@@ -122,6 +118,14 @@ struct PaperCard: View {
             .foregroundStyle(.secondary)
         }
         .card()
+    }
+}
+
+private func segmentColor(_ id: String, _ tree: Tree) -> Color {
+    switch tree.mark(id) {
+    case .done: return Palette.done
+    case .inProgress: return Palette.accent.opacity(0.35 + 0.65 * tree.fraction(id))
+    case .todo: return Palette.track
     }
 }
 

@@ -32,134 +32,193 @@ struct PaperView: View {
         }
     }
 
+    // Split into small pieces: one big expression is too much for the Swift type checker.
     private func content(_ paper: Paper, _ tree: Tree) -> some View {
-        ScrollViewReader { proxy in
-            List {
-                Section {
-                    PaperHeader(paper: paper, tree: tree) { node in
-                        reveal(node, tree)
-                        withAnimation { proxy.scrollTo(node.id, anchor: .center) }
-                    } openManuscript: {
-                        manuscript = paper.manuscriptURL.flatMap(URL.init(string:))
-                    }
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                }
-                Section {
-                    ForEach(tree.rows(expanded: expanded, hideDone: hideDone)) { row in
-                        NodeRow(row: row, tree: tree, isExpanded: expanded.contains(row.id)) {
-                            markTapped(row, tree)
-                        } onTap: {
-                            if row.hasChildren { toggle(row.id) } else { detail = row.node }
-                        }
-                        .id(row.id)
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            if tree.mark(row.id) == .done {
-                                Button { store.setStatus(paperID, row.id, .todo) } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-                                    .tint(.gray)
-                            } else {
-                                Button { store.setStatus(paperID, row.id, .done) } label: { Label("Done", systemImage: "checkmark") }
-                                    .tint(Palette.done)
-                            }
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) { store.delete(paperID, row.id) } label: { Label("Delete", systemImage: "trash") }
-                            if !row.hasChildren && row.node.status != .inProgress {
-                                Button { store.setStatus(paperID, row.id, .inProgress) } label: { Label("Start", systemImage: "play.fill") }
-                                    .tint(Palette.accent)
-                            }
-                        }
-                        .contextMenu { menu(for: row, tree) }
-                    }
-                } header: {
-                    HStack {
-                        Text("Checklist")
-                        Spacer()
-                        Button(hideDone ? "Show done" : "Hide done") { withAnimation { hideDone.toggle() } }
-                            .font(.caption.weight(.semibold))
-                            .textCase(nil)
-                    }
-                }
-                Section {
-                    Button { addUnder = AddTarget(parent: nil); text = "" } label: {
-                        Label("Add a section", systemImage: "plus")
-                    }
-                }
+        let base = ScrollViewReader { proxy in list(paper, tree, proxy) }
+            .navigationTitle(paper.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { toolbarMenu(paper, tree) } }
+            .onAppear { loadExpansion(tree) }
+            .onChange(of: expanded) { _, value in
+                UserDefaults.standard.set(Array(value), forKey: "tree.expanded.\(paperID)")
             }
-            .listStyle(.insetGrouped)
-        }
-        .navigationTitle(paper.title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { expanded = Set(tree.ordered().filter { tree.hasChildren($0.id) }.map(\.id)) } label: {
-                        Label("Expand all", systemImage: "chevron.down.2")
-                    }
-                    Button { expanded = [] } label: { Label("Collapse all", systemImage: "chevron.up.2") }
-                    if paper.manuscriptURL != nil {
-                        Button { manuscript = paper.manuscriptURL.flatMap(URL.init(string:)) } label: {
-                            Label("Open manuscript", systemImage: "doc.richtext")
-                        }
-                    }
-                    Button { showPaperInfo = true } label: { Label("Title and link", systemImage: "pencil") }
-                    Button(role: .destructive) { confirmRemove = true } label: { Label("Remove from this iPhone", systemImage: "trash") }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+        return withAlerts(withDialog(withSheets(base, paper), tree), paper)
+    }
+
+    private func list(_ paper: Paper, _ tree: Tree, _ proxy: ScrollViewProxy) -> some View {
+        let rows = tree.rows(expanded: expanded, hideDone: hideDone)
+        return List {
+            Section {
+                PaperHeader(paper: paper, tree: tree) { node in
+                    reveal(node, tree)
+                    withAnimation { proxy.scrollTo(node.id, anchor: .center) }
+                } openManuscript: {
+                    manuscript = paper.manuscriptURL.flatMap { URL(string: $0) }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+            Section {
+                ForEach(rows) { row in rowView(row, tree) }
+            } header: {
+                checklistHeader
+            }
+            Section {
+                Button { addUnder = AddTarget(parent: nil); text = "" } label: {
+                    Label("Add a section", systemImage: "plus")
                 }
             }
         }
-        .onAppear { loadExpansion(tree) }
-        .onChange(of: expanded) { _, value in
-            UserDefaults.standard.set(Array(value), forKey: "tree.expanded.\(paperID)")
+        .listStyle(.insetGrouped)
+    }
+
+    private var checklistHeader: some View {
+        HStack {
+            Text("Checklist")
+            Spacer()
+            Button(hideDone ? "Show done" : "Hide done") { withAnimation { hideDone.toggle() } }
+                .font(.caption.weight(.semibold))
+                .textCase(nil)
         }
-        .sheet(item: $detail) { node in NodeSheet(paperID: paperID, nodeID: node.id) }
-        .sheet(item: $manuscript) { url in SafariView(url: url).ignoresSafeArea() }
-        .sheet(isPresented: $showPaperInfo) { PaperInfoSheet(paper: paper) }
-        .confirmationDialog(parentMenu?.title ?? "", isPresented: Binding(get: { parentMenu != nil }, set: { if !$0 { parentMenu = nil } }),
-                            titleVisibility: .visible, presenting: parentMenu) { node in
-            let k = tree.counts(node.id)
-            if k.done < k.total {
-                Button("Mark all \(k.total) done") { store.setStatus(paperID, node.id, .done) }
-                Button("Start the next item") { store.setStatus(paperID, node.id, .inProgress) }
-            }
-            if k.done > 0 || tree.mark(node.id) != .todo {
-                Button("Reset all to do", role: .destructive) { store.setStatus(paperID, node.id, .todo) }
-            }
-        } message: { node in
-            let k = tree.counts(node.id)
-            Text("\(k.done) of \(k.total) done")
+    }
+
+    private func rowView(_ row: Row, _ tree: Tree) -> some View {
+        NodeRow(row: row, tree: tree, isExpanded: expanded.contains(row.id), onMark: {
+            markTapped(row, tree)
+        }, onTap: {
+            if row.hasChildren { toggle(row.id) } else { detail = row.node }
+        })
+        .id(row.id)
+        .swipeActions(edge: .leading, allowsFullSwipe: true) { leadingSwipe(row, tree) }
+        .swipeActions(edge: .trailing) { trailingSwipe(row) }
+        .contextMenu { menu(for: row, tree) }
+    }
+
+    @ViewBuilder
+    private func leadingSwipe(_ row: Row, _ tree: Tree) -> some View {
+        if tree.mark(row.id) == .done {
+            Button { store.setStatus(paperID, row.id, .todo) } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                .tint(.gray)
+        } else {
+            Button { store.setStatus(paperID, row.id, .done) } label: { Label("Done", systemImage: "checkmark") }
+                .tint(Palette.done)
         }
-        .alert(addUnder?.parent.map { "Add to \($0.title)" } ?? "New section",
-               isPresented: Binding(get: { addUnder != nil }, set: { if !$0 { addUnder = nil } })) {
-            TextField("Title", text: $text)
-            Button("Add") {
-                let parent = addUnder?.parent?.id
-                if !text.trimmingCharacters(in: .whitespaces).isEmpty {
-                    store.add(paperID, title: text, under: parent)
-                    if let parent { expanded.insert(parent) }
+    }
+
+    @ViewBuilder
+    private func trailingSwipe(_ row: Row) -> some View {
+        Button(role: .destructive) { store.delete(paperID, row.id) } label: { Label("Delete", systemImage: "trash") }
+        if !row.hasChildren && row.node.status != .inProgress {
+            Button { store.setStatus(paperID, row.id, .inProgress) } label: { Label("Start", systemImage: "play.fill") }
+                .tint(Palette.accent)
+        }
+    }
+
+    private func toolbarMenu(_ paper: Paper, _ tree: Tree) -> some View {
+        Menu {
+            Button { expandAll(tree) } label: { Label("Expand all", systemImage: "chevron.down.2") }
+            Button { expanded = [] } label: { Label("Collapse all", systemImage: "chevron.up.2") }
+            if let link = paper.manuscriptURL {
+                Button { manuscript = URL(string: link) } label: { Label("Open manuscript", systemImage: "doc.richtext") }
+            }
+            Button { showPaperInfo = true } label: { Label("Title and link", systemImage: "pencil") }
+            Button(role: .destructive) { confirmRemove = true } label: { Label("Remove from this iPhone", systemImage: "trash") }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+    }
+
+    private func expandAll(_ tree: Tree) {
+        let parents = tree.ordered().filter { tree.hasChildren($0.id) }.map { $0.id }
+        expanded = Set(parents)
+    }
+
+    private func withSheets<V: View>(_ view: V, _ paper: Paper) -> some View {
+        view
+            .sheet(item: $detail) { node in NodeSheet(paperID: paperID, nodeID: node.id) }
+            .sheet(item: $manuscript) { url in SafariView(url: url).ignoresSafeArea() }
+            .sheet(isPresented: $showPaperInfo) { PaperInfoSheet(paper: paper) }
+    }
+
+    private var parentMenuShown: Binding<Bool> {
+        Binding(get: { parentMenu != nil }, set: { if !$0 { parentMenu = nil } })
+    }
+
+    private var addShown: Binding<Bool> {
+        Binding(get: { addUnder != nil }, set: { if !$0 { addUnder = nil } })
+    }
+
+    private var renameShown: Binding<Bool> {
+        Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
+    }
+
+    private func withDialog<V: View>(_ view: V, _ tree: Tree) -> some View {
+        let title: String = parentMenu?.title ?? ""
+        return view.confirmationDialog(title, isPresented: parentMenuShown, titleVisibility: .visible,
+                                       presenting: parentMenu) { (node: Node) in
+            parentActions(node, tree)
+        } message: { (node: Node) in
+            Text(countText(node, tree))
+        }
+    }
+
+    private func countText(_ node: Node, _ tree: Tree) -> String {
+        let k = tree.counts(node.id)
+        return "\(k.done) of \(k.total) done"
+    }
+
+    @ViewBuilder
+    private func parentActions(_ node: Node, _ tree: Tree) -> some View {
+        let k = tree.counts(node.id)
+        if k.done < k.total {
+            Button("Mark all \(k.total) done") { store.setStatus(paperID, node.id, .done) }
+            Button("Start the next item") { store.setStatus(paperID, node.id, .inProgress) }
+        }
+        if k.done > 0 || tree.mark(node.id) != .todo {
+            Button("Reset all to do", role: .destructive) { store.setStatus(paperID, node.id, .todo) }
+        }
+    }
+
+    private var addTitle: String {
+        if let parent = addUnder?.parent { return "Add to \(parent.title)" }
+        return "New section"
+    }
+
+    private func commitAdd() {
+        let parent = addUnder?.parent?.id
+        if !text.trimmingCharacters(in: .whitespaces).isEmpty {
+            store.add(paperID, title: text, under: parent)
+            if let parent { expanded.insert(parent) }
+        }
+        addUnder = nil
+    }
+
+    private func commitRename() {
+        if let n = renaming { store.rename(paperID, n.id, to: text) }
+        renaming = nil
+    }
+
+    private func withAlerts<V: View>(_ view: V, _ paper: Paper) -> some View {
+        view
+            .alert(addTitle, isPresented: addShown) {
+                TextField("Title", text: $text)
+                Button("Add") { commitAdd() }
+                Button("Cancel", role: .cancel) { addUnder = nil }
+            }
+            .alert("Rename", isPresented: renameShown) {
+                TextField("Title", text: $text)
+                Button("Save") { commitRename() }
+                Button("Cancel", role: .cancel) { renaming = nil }
+            }
+            .alert("Remove \(paper.title) from this iPhone?", isPresented: $confirmRemove) {
+                Button("Remove", role: .destructive) {
+                    store.removePaper(paperID)
+                    dismiss()
                 }
-                addUnder = nil
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Its copy in Google Drive stays, so nothing is lost. Delete that folder in Drive if you want it gone everywhere.")
             }
-            Button("Cancel", role: .cancel) { addUnder = nil }
-        }
-        .alert("Rename", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("Title", text: $text)
-            Button("Save") {
-                if let n = renaming { store.rename(paperID, n.id, to: text) }
-                renaming = nil
-            }
-            Button("Cancel", role: .cancel) { renaming = nil }
-        }
-        .alert("Remove \(paper.title) from this iPhone?", isPresented: $confirmRemove) {
-            Button("Remove", role: .destructive) {
-                store.removePaper(paperID)
-                dismiss()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Its copy in Google Drive stays, so nothing is lost. Delete that folder in Drive if you want it gone everywhere.")
-        }
     }
 
     @ViewBuilder
