@@ -1,8 +1,7 @@
 build/
 *.xcodeproj/
-TidyAtlas/Info.plist
-Packages/TidyCore/.build/
-Packages/ScanMath/.build/
+PaperQuest/Info.plist
+Packages/PaperCore/.build/
 Payload/
 *.ipa
 .DS_Store

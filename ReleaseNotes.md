@@ -3,24 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
-## 1.2
-- ChatGPT works too: add a ChatGPT key next to your Claude key and choose who answers, or let one back up the other automatically
-- Your Claude key, ChatGPT key and Google Drive sign-in stay through every update, and come back after a reinstall or on a new iPhone (iCloud Keychain)
-- Settings shows which keys are saved and has a Test button for each
-
-## 1.1
-- AR: tap "Tag & measure what I see" and labels with names, sizes and where each thing goes appear on the real things
-- Place storage spots where they really are in AR; arcs in the room show where to carry each thing
-- The room remembers its AR labels: open AR again and they come back in the same places
-- Things are measured automatically: LiDAR sizes in AR (using Crystal Bowl's measuring maths), Claude's estimate from photos
-- Floor plan: a top-down map of each room with numbered things and arrows to their homes
-- Automatic Google Drive backup: the whole inventory (JSON and spreadsheet), floor plans, LiDAR room scans and pictures, in the background too
-
 ## 1.0
-- Map your spaces: places (home, office), rooms or smaller segments, and their storage spots
-- Scan with photos or a short walkthrough video: Claude names and tags every thing, spots what's out of place and suggests where it lives
-- Scan the room shape with LiDAR: real size, walls and furniture become storage spots on the map
-- Rough 3D map: drag to turn, tap a dot, arcs show where each thing goes
-- Plans made for ADHD: pick your energy and minutes, get tiny steps grouped into carry trips
-- Focus mode: one step, a gentle timer, Done / Skip / "Too big?" to split it smaller
-- Find anything: search, or ask "where did I put my passport?"
+- Every paper is a tree: sections, subsections and each equation, figure, table and check, with Claude-style marks (dashed circle, spinning arc, green tick)
+- Tap a mark to start or finish an item; parents fill in by themselves and show a progress bar
+- Green–Christoffel is ready: 39 equations, 7 figures, 2 tables, the open review flags, text checks for every section and a Submission stage
+- XP, levels, a daily goal ring and a streak; confetti when a subsection, section or the whole paper is done
+- "Next up" shows the one thing to do now, with Start and Done buttons
+- Syncs with Google Drive › Paper Quest after every change, so your iPhone, iPad and Claude see the same progress
+- Open the manuscript (Manuscript Studio) from any paper or item, and copy the LaTeX reference of an equation, figure or table
