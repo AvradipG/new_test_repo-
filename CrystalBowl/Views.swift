@@ -265,6 +265,8 @@ struct HomeView: View {
 
                 ExtraToolsSettingsSection()
 
+                SheetOptionsSettingsSection()
+
                 Section {
                     Toggle("Vibration guidance while scanning", isOn: $haptics)
                     Toggle("Keep photos after the model is built", isOn: $keepPhotos)
@@ -847,6 +849,7 @@ struct ScanDetailView: View {
     @State private var showMeasure = false
     @State private var sectionViewer: SectionViewerTarget?
     @State private var gallery: GalleryTarget?
+    @State private var showSheetOptions = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
@@ -990,6 +993,9 @@ struct ScanDetailView: View {
             .fullScreenCover(item: $gallery) { target in
                 GalleryViewer(target: target).environmentObject(model)
             }
+            .sheet(isPresented: $showSheetOptions) {
+                SheetOptionsView(scan: scan).environmentObject(model)
+            }
             .fullScreenCover(isPresented: $showDetailCamera) {
                 DetailCaptureView(scan: scan) {
                     showDetailCamera = false
@@ -1110,6 +1116,11 @@ struct ScanDetailView: View {
                     }
                 }
                 ShareLink(items: files) { Label("Share the sample sheet (\(files.count) images)", systemImage: "square.and.arrow.up") }
+                Button { showSheetOptions = true } label: { Label("What to include (tick boxes)…", systemImage: "checklist") }
+                Button { model.remakeSheets([scan.id]) } label: {
+                    Label("Look for the mark again and remake the sheets", systemImage: "scope")
+                }
+                .disabled(model.upgrading)
             } header: {
                 Text("Sample sheet")
             } footer: {

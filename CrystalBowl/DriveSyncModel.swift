@@ -250,9 +250,27 @@ extension AppModel {
                 driveStatus[id] = nil
                 return
             }
+            let client = DriveClient()
+            // Sheets made again replace the old ones on the phone; their old copies on Drive (another angle, the
+            // older layout) go to the Drive bin so the folder only holds the current set (3.8).
+            let current = Set(files.map { $0.0 })
+            let stale = state.files.keys.filter { $0.hasPrefix("model/sheet/") && !current.contains($0) }.sorted()
+            var binned = 0
+            for rel in stale {
+                guard let fid = state.files[rel]?.id else { state.files[rel] = nil; continue }
+                do {
+                    try await client.trash(fid)
+                    binned += 1
+                    state.files[rel] = nil
+                } catch let e as DriveError where e.fileGone {
+                    state.files[rel] = nil
+                } catch {
+                    AppLog.warn("drive", "Old sheet \((rel as NSString).lastPathComponent) not moved to the Drive bin: \(error.localizedDescription)", scan: scan)
+                }
+            }
+            if binned > 0 { AppLog.info("drive", "\(binned) old sheet file(s) moved to the Drive bin", scan: scan) }
             let manifestURL = scan.folderURL.appendingPathComponent("manifest.json")
             try ScanPackage.manifest(for: scan, files: files, hashes: hashes, photosUploaded: photos).write(to: manifestURL, options: .atomic)
-            let client = DriveClient()
             let mid = try await uploadReplacing(client, manifestURL, name: "manifest.json", parent: folderID, existing: state.files["manifest.json"]?.id)
             state.files["manifest.json"] = DriveFileRecord(id: mid, size: 0, modified: Date())
             state.complete = true

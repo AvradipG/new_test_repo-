@@ -57,7 +57,10 @@ struct ShapeRecord: Codable, Hashable {
 extension AppModel {
     /// 4 (3.7): the mark is looked for again with the line-versus-label check, and the sheets are made again
     /// (no bottom view when the underside wasn't scanned). Marks set by hand are kept.
-    static let extrasVersion = 4
+    /// 5 (3.8): the mark finder looks for thin lines, red top and black bottom marks (a written label is not a
+    /// mark); sheets are laid out as separate figures, each with its own ruler and scale, as ticked in
+    /// "What to include". Every older scan is evaluated again.
+    static let extrasVersion = 5
 
     func upgradeScans() async {
         guard !upgrading else { return }
@@ -103,7 +106,15 @@ extension AppModel {
             let unrolled = Unroller.detectMark(rig: rig, scan: &scan)
             let (ref, isMark) = SampleSheet.reference(for: scan)
             let out = SampleSheet.make(rig: rig, scan: scan, reference: ref, referenceIsMark: isMark, unrolled: unrolled)
-            _ = try? SampleSheet.save(out, scan: scan)
+            do {
+                let files = try SampleSheet.save(out, scan: scan)
+                AppLog.info("sheet", "Sheets made at \(Rotation.text(ref)) (\(isMark ? "the mark" : "no mark")): \(files.count) files, "
+                            + "\(out.figures.count) figures; included: \(out.options.summary)", scan: scan)
+            } catch {
+                AppLog.error("sheet", "Sheets could not be saved", error, scan: scan)
+            }
+        } else {
+            AppLog.warn("sheet", "3D model could not be loaded: no sheets made", scan: scan)
         }
         scan.extrasVersion = Self.extrasVersion
         try? ScanStore.save(scan)
@@ -121,6 +132,21 @@ extension AppModel {
         s.extrasVersion = 2
         try? ScanStore.save(s)
         reload()
+        AppLog.info("mark", "Mark set by hand at " + Rotation.text(angle), scan: s)
+        Task { await upgradeScans() }
+    }
+
+    /// Makes the sheets again (and looks for the mark again; marks set by hand are kept), e.g. after the
+    /// "What to include" ticks changed (3.8).
+    func remakeSheets(_ ids: [String]) {
+        for id in ids {
+            guard var s = scans.first(where: { $0.id == id }) else { continue }
+            s.extrasVersion = Swift.min(s.extrasVersion ?? 0, 2)
+            try? ScanStore.save(s)
+        }
+        reload()
+        AppLog.info("sheet", "Sheets to be made again for \(ids.count) scan(s); included: \(SheetOptions.current.summary)")
+        Task { await upgradeScans() }
     }
 
     /// Forgets the mark; the automatic search runs again.
@@ -130,5 +156,7 @@ extension AppModel {
         s.extrasVersion = 2
         try? ScanStore.save(s)
         reload()
+        AppLog.info("mark", "Mark forgotten; looking for it again", scan: s)
+        Task { await upgradeScans() }
     }
 }

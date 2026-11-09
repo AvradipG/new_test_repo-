@@ -7,7 +7,8 @@ import ScanMath
 struct MarkRecord: Codable, Hashable {
     /// Protractor angle (degrees, + = counter-clockwise seen from above) that turns the mark to face the viewer.
     var angle: Double
-    /// "red_black_line", "red_line", "black_line", "red_black_pair", "red_spot" or "manual".
+    /// "red_black_line", "red_line", "black_line", "red_black_pair", "red_black_ends", "red_spot", "black_spot"
+    /// or "manual".
     var kind: String
     var confidence: Double
     /// "top", "bottom" or "unknown": where the red part is in the scan as it stood.
@@ -25,7 +26,9 @@ struct MarkRecord: Codable, Hashable {
         case "red_black_pair": return "red and black lines"
         case "red_line": return "red line"
         case "black_line": return "black line"
+        case "red_black_ends": return "red mark at the top and black mark at the bottom"
         case "red_spot": return "red mark"
+        case "black_spot": return "black mark at one end"
         default: return "set by hand"
         }
     }
@@ -34,7 +37,9 @@ struct MarkRecord: Codable, Hashable {
         if source == "manual" { return "Reference mark set by hand: it is 0°" }
         var s = String(format: "Reference mark found: %@ (confidence %.0f%%). It is 0°%@", kindText, confidence * 100,
                        isTrusted ? "" : ", but check it: the 0° view should show the line")
-        if upsideDown { s += ". The red end is at the bottom: the sample stood upside down in this scan" }
+        if upsideDown { s += kind == "black_spot" ? ". The black mark is at the top: the sample stood upside down in this scan"
+                                                : ". The red end is at the bottom: the sample stood upside down in this scan" }
+        if kind == "black_spot" && source != "manual" { s += ". Only a black mark was found: check the 0° view" }
         return s
     }
 
@@ -175,6 +180,7 @@ enum Unroller {
     /// Finds the mark and stores it on the scan, unless one was set by hand.
     static func detectMark(rig: SampleRig, scan: inout Scan) -> Result? {
         let r = unroll(rig: rig)
+        let before = scan.mark
         if scan.mark?.source != "manual" {
             if let m = r?.mark {
                 scan.mark = MarkRecord(angle: Rotation.normalized(m.angle), kind: m.kind.rawValue, confidence: m.confidence,
@@ -182,6 +188,17 @@ enum Unroller {
             } else {
                 scan.mark = nil
             }
+        }
+        // What was found goes to the app log, so a wrong pick can be traced from Drive › _app-log (3.8).
+        if before?.source == "manual" {
+            AppLog.info("mark", "Mark set by hand kept at " + Rotation.text(before!.angle), scan: scan)
+        } else if let m = r?.mark {
+            let moved = before.map { String(format: "; before %@ (%@)", Rotation.text($0.angle), $0.kind) } ?? ""
+            AppLog.info("mark", String(format: "Found %@ at %@, confidence %.2f, red end %@: %@%@", m.kind.rawValue,
+                                       Rotation.text(Rotation.normalized(m.angle)), m.confidence, m.redEnd.rawValue,
+                                       m.detail ?? "", moved), scan: scan)
+        } else {
+            AppLog.info("mark", r == nil ? "No unrolled image (shape not round enough or no texture)" : "No mark found", scan: scan)
         }
         return r
     }

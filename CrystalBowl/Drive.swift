@@ -227,6 +227,19 @@ struct DriveClient {
         return id
     }
 
+    /// Moves a file this app made to the Drive bin, where it can still be restored for 30 days (3.8).
+    func trash(_ id: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["trashed": true])
+        _ = try await send { t in
+            var r = URLRequest(url: URL(string: "https://www.googleapis.com/drive/v3/files/\(id)")!)
+            r.httpMethod = "PATCH"
+            r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
+            r.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+            r.httpBody = body
+            return r
+        }
+    }
+
     /// Uploads a file with a resumable session. Replaces the content of `existingID` when given.
     func upload(_ file: URL, name: String, parent: String, existingID: String?) async throws -> String {
         let sessionURL = try await startUpload(file, name: name, parent: parent, existingID: existingID)
@@ -378,6 +391,7 @@ enum ScanPackage {
         if rel.hasPrefix("model/sheet/") {
             if rel.contains("scientific") { return "sample_sheet_scientific" }
             if rel.contains("clean") { return "sample_sheet_clean" }
+            if rel.contains("_figure-") { return "sheet_figure_with_ruler" }
             if rel.contains("unrolled") { return "unrolled_side_image" }
             if rel.hasSuffix(".json") { return "sample_sheet_description" }
             return "virtual_view"

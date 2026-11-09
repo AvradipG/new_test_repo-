@@ -3,6 +3,15 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.8
+- The reference mark is found again, on every scan, with a new finder. 0° is the side that faced the X-ray source, marked by a thin line along the sample, or a red mark at the top and a black mark at the bottom, or only one of them. A sample number written along the sample is no longer taken for the mark (it was on one scan, which put the real line at 180°)
+- What was found is written to the app log, so a wrong pick can be traced
+- Every view of the sample sheet is also saved as its own PNG, with its ruler, scale bar, sizes and mark arrow: the four sides, top (with protractor), bottom, unrolled side and the measurements
+- New layout: titles, rulers, sizes and scale bars sit in their own space next to the picture, so nothing is hidden behind the rock any more; long lines wrap
+- Tick boxes for what to include: each view, rulers, scale bars, size lines, mark arrows, dials, protractor, titles, sample name, separate PNGs, plain views (scan page › Sample sheet › What to include, or Settings)
+- "Look for the mark again and remake the sheets" on the scan page
+- Old sheet files on Google Drive (other angles, older layouts) go to the Drive bin when new ones are uploaded
+
 ## 3.7
 - Fixed: a written label (like "4002-2") was taken for the reference line. The app now looks for a narrow line that runs along the sample, and finds the mark again on your existing scans (marks you set by hand are kept). The mark is 0°: the 3D view turns to it and the dial reads 0° there
 - Every picture of the sample sheet opens full screen on its own: the sheets, each view, the top, the bottom and the unrolled side. Pinch to zoom, swipe to the next, share or save each one

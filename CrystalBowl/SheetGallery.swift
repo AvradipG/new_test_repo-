@@ -16,8 +16,9 @@ struct GalleryTarget: Identifiable {
 }
 
 enum SheetPictures {
-    /// The sample sheet's pictures in reading order: sheets, side views 0° → +90° → 180° → −90°, top, bottom,
-    /// unrolled side.
+    /// The sample sheet's pictures in reading order: sheets; the figures (each view with ruler and scale, 3.8):
+    /// sides 0° → +90° → 180° → −90°, top, bottom, unrolled, measurements; then the plain views and the plain
+    /// unrolled image.
     static func items(_ scan: Scan) -> [GalleryItem] {
         let dir = scan.exportsURL.appendingPathComponent("sheet", isDirectory: true)
         let files = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
@@ -26,14 +27,20 @@ enum SheetPictures {
             let n = u.lastPathComponent
             if n.contains("sample-sheet-scientific") { return 0 }
             if n.contains("sample-sheet-clean") { return 1 }
-            if n.contains("_view-side") {
+            func sideRank(_ base: Double) -> Double {
                 // 0°, +90°, 180°, −90° (= 270°) in that order.
                 var a = (sideAngle(n) ?? 0).truncatingRemainder(dividingBy: 360)
                 if a < 0 { a += 360 }
-                return 2 + a / 1000
+                return base + a / 1000
             }
-            if n.contains("_view-top") { return 4 }
-            if n.contains("_view-bottom") { return 5 }
+            if n.contains("_figure-side") { return sideRank(2) }
+            if n.contains("_figure-top") { return 3 }
+            if n.contains("_figure-bottom") { return 3.1 }
+            if n.contains("_figure-unrolled") { return 3.2 }
+            if n.contains("_figure-measurements") { return 3.3 }
+            if n.contains("_view-side") { return sideRank(4) }
+            if n.contains("_view-top") { return 5 }
+            if n.contains("_view-bottom") { return 5.1 }
             if n.contains("_unrolled_") { return 6 }
             return 7
         }
@@ -42,7 +49,7 @@ enum SheetPictures {
 
     /// The view's angle from a file name such as `…_view-sidepos90_…` or `…_view-sideneg90p00_…`.
     static func sideAngle(_ name: String) -> Double? {
-        guard let r = name.range(of: "_view-side") else { return nil }
+        guard let r = name.range(of: "_view-side") ?? name.range(of: "_figure-side") else { return nil }
         let rest = name[r.upperBound...]
         let token = rest.prefix { $0 != "_" }
         var s = String(token)
@@ -55,12 +62,22 @@ enum SheetPictures {
     static func title(_ name: String, scan: Scan) -> String {
         if name.contains("sample-sheet-scientific") { return "Scientific sample sheet" }
         if name.contains("sample-sheet-clean") { return "Clean sample sheet" }
-        if name.contains("_view-top") { return "Top (seen from above)" }
-        if name.contains("_view-bottom") { return "Bottom (seen from below)" }
-        if name.contains("_unrolled_") { return "Unrolled side (360°)" }
+        if name.contains("_figure-") {
+            if name.contains("_figure-top") { return "Top, with protractor and scale" }
+            if name.contains("_figure-bottom") { return "Bottom, with scale" }
+            if name.contains("_figure-unrolled") { return "Unrolled side, with ruler" }
+            if name.contains("_figure-measurements") { return "Measurements" }
+            if let a = sideAngle(name) {
+                if a == 0 { return ((scan.mark?.isTrusted ?? false) ? "0° · mark facing you" : "0°") + ", with ruler" }
+                return String(format: "%@%.0f°, with ruler", a > 0 ? "+" : (a < 0 ? "−" : ""), abs(a))
+            }
+        }
+        if name.contains("_view-top") { return "Top, plain" }
+        if name.contains("_view-bottom") { return "Bottom, plain" }
+        if name.contains("_unrolled_") { return "Unrolled side, plain" }
         if let a = sideAngle(name) {
-            if a == 0 { return (scan.mark?.isTrusted ?? false) ? "0° · mark facing you" : "0°" }
-            return String(format: "%@%.0f° from 0°", a > 0 ? "+" : (a < 0 ? "−" : ""), abs(a))
+            if a == 0 { return ((scan.mark?.isTrusted ?? false) ? "0° · mark facing you" : "0°") + ", plain" }
+            return String(format: "%@%.0f° from 0°, plain", a > 0 ? "+" : (a < 0 ? "−" : ""), abs(a))
         }
         return name
     }

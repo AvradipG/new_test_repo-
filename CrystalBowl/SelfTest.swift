@@ -127,7 +127,43 @@ enum SelfTest {
         let afterRestart = ledger.update(session: 1, files: nil, pose: .init(degrees: 90, band: 1), now: 1)
         check("Gap filling count", afterRestart.count == 1 && ledger.counted == 21, "a new pass that restarts the camera's count still adds photos")
 
-        // 6. The app log.
+        // 6. Reference mark (3.8): a thin line, a little darker than the rock, red at the top, beside a bold sample
+        // number written along the sample. The line must win (in 3.7 a written label was taken for the mark).
+        do {
+            let w = 720, h = 300
+            var rgb = [SIMD3<Float>](repeating: SIMD3<Float>(0.62, 0.62, 0.60), count: w * h)
+            var seed: UInt64 = 7
+            for i in rgb.indices {
+                seed = seed &* 6364136223846793005 &+ 1442695040888963407
+                let n = Float(seed >> 40) / Float(1 << 24) * 0.1 - 0.05
+                rgb[i] += SIMD3<Float>(repeating: n)
+            }
+            for y in 0..<h {
+                if (40..<260).contains(y) {
+                    let r = (y - 40) % 55
+                    for x in 100..<160 where r < 44 && (x < 108 || x >= 152 || r < 8 || r >= 36) {
+                        rgb[y * w + x] = SIMD3<Float>(0.06, 0.06, 0.07)
+                    }
+                }
+                let c = 500 + y * 6 / h
+                for x in c...(c + 2) { rgb[y * w + x] = y < 30 ? SIMD3<Float>(0.78, 0.18, 0.14) : SIMD3<Float>(0.47, 0.47, 0.45) }
+            }
+            let m = MarkFinder.detect(rgb: rgb, width: w, height: h, circumferenceMM: 80)
+            let ok = m.map { abs($0.angle - 252) < 3 && $0.redEnd == .top } ?? false
+            check("Reference mark finder", ok, m.map {
+                String(format: "found %@ at %.1f° (expected the thin line at 252°, not the label at 65°), confidence %.2f",
+                       $0.kind.rawValue, $0.angle, $0.confidence)
+            } ?? "nothing found (expected the thin line at 252°)")
+        }
+
+        // 7. Sheet text is wrapped to its box instead of running off it (3.8).
+        let long = "0° = reference mark (the side that faced the X-ray source) · view angle = sample turned from 0°, + = counter-clockwise seen from above (SliceLock convention)"
+        let wrappedLines = SampleSheet.wrapped(long, size: 26, maxWidth: 900)
+        let widest = wrappedLines.map { SampleSheet.width($0, size: 26) }.max() ?? 0
+        check("Sheet text fits", wrappedLines.count > 1 && widest <= 900,
+              String(format: "%d lines, widest %.0f px of 900", wrappedLines.count, widest))
+
+        // 8. The app log.
         let marker = "self-test marker \(id)"
         AppLog.info("selftest", marker)
         AppLog.flush()

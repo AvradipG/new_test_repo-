@@ -174,16 +174,19 @@ public enum MarkFinder {
                 }
             }
         }
-        var dSample: [Double] = [], rSample: [Double] = []
+        var dSample: [Double] = [], rSample: [Double] = [], lSample: [Double] = []
         for y in useRows {
             for x in stride(from: 0, to: W, by: 3) where ok(y * W + x) {
                 dSample.append(Double(D[y * W + x]))
                 rSample.append(Double(R[y * W + x]))
+                lSample.append(Double(L[y * W + x]))
             }
         }
         guard dSample.count > 50 else { return nil }
         let t: Float = Float(Swift.max(0.045, 4 * mad(dSample)))
         let tr: Float = Float(Swift.max(0.05, 2.5 * mad(rSample)))
+        // Ink: clearly darker than this rock as a whole (a local test misses the middle of wide, solid strokes).
+        let inkLimit: Float = Float(ScanMath.median(lSample) - Swift.max(0.12, 4 * mad(lSample)))
         var hit = [Bool](repeating: false, count: W * H), dark = [Bool](repeating: false, count: W * H)
         var strong = [Bool](repeating: false, count: W * H), red = [Bool](repeating: false, count: W * H)
         for y in useRows {
@@ -191,7 +194,7 @@ public enum MarkFinder {
                 let i = y * W + x
                 guard ok(i) else { continue }
                 hit[i] = R[i] > tr
-                dark[i] = D[i] > t
+                dark[i] = L[i] < inkLimit
                 strong[i] = D[i] > 2 * t
                 red[i] = isRed(rgb[i])
             }
@@ -244,7 +247,13 @@ public enum MarkFinder {
                     last = k
                 }
             }
-            lines.append(LinePath(x: mx, cover: Double(hits) / nRows, run: Double(best) / nRows, clutter: 0, ink: 0,
+            // Centre of the line across its width (on ties the path keeps to one edge).
+            var so = 0.0, sw = 0.0
+            for y in useRows {
+                for k in -i0...i0 where hit[y * W + wrap(xs[y] + k)] { so += Double(k); sw += 1 }
+            }
+            let centreX = sw > 0 ? wrap(mx + Int((so / sw).rounded())) : mx
+            lines.append(LinePath(x: centreX, cover: Double(hits) / nRows, run: Double(best) / nRows, clutter: 0, ink: 0,
                                   redShare: hits > 0 ? Double(reds) / Double(hits) : 0))
             paths.append(xs)
         }
@@ -272,7 +281,8 @@ public enum MarkFinder {
             lines[j].ink = n > 0 ? Double(d) / Double(n) : 0
             let iso = Swift.max(0, 1 - Swift.max(lines[j].clutter / 0.035, lines[j].ink / 0.06))
             let s = (0.5 * lines[j].cover + 0.5 * lines[j].run) * iso
-            lines[j].strength = s >= 0.15 ? s : 0
+            // A drawn line runs on: a dashed pattern (the edges of written characters) is not one.
+            lines[j].strength = s >= 0.15 && lines[j].run >= 0.15 ? s : 0
         }
 
         // 2. Red marks: clusters of red pixels across about 3 mm.
@@ -308,6 +318,10 @@ public enum MarkFinder {
                 if any { rowsWithRed += 1 }
             }
             let pos = nY > 0 ? (sumY / nY - Double(y0)) / Double(Swift.max(1, y1 - y0)) : 0.5
+            if redMarks.contains(where: { apart($0.x, x) < sep }) { // the same mark seen again across the seam
+                for k in -sep...sep { rs[wrap(peak + k)] = 0 }
+                continue
+            }
             redMarks.append(EndMark(x: x, px: rs[peak], pos: pos, top: pos < 0.5, span: rowsWithRed / nRows))
             for k in -sep...sep { rs[wrap(peak + k)] = 0 }
         }
@@ -335,12 +349,14 @@ public enum MarkFinder {
                 while hi2 < W / 4 && col[wrap(c0 + hi2 + 1)] > 0 { hi2 += 1 }
                 let widthMM = Double(lo2 + hi2 + 1) / ppm
                 guard wide / Swift.max(peak, 1) <= 1.5, peak <= 8 * ppm * ppm, widthMM <= 3.5 else { continue }
+                if blackMarks.contains(where: { apart($0.x, x) < sep && $0.top == isTop }) { continue }
                 blackMarks.append(EndMark(x: x, px: peak, pos: isTop ? 0 : 1, top: isTop))
             }
         }
 
         // 4. Weigh the evidence at each candidate angle.
-        let near = Swift.max(2, Int((4 / degPerCol).rounded()))
+        // Marks belong together within 4° or 3 mm (a red dab is often drawn just beside the line).
+        let near = Swift.max(2, Int((4 / degPerCol).rounded()), Int((3 * ppm).rounded()))
         struct Pick { var total: Double; var line: LinePath?; var red: [EndMark]; var black: [EndMark]; var anchor: Int }
         var chosen: Pick?
         let anchors = lines.filter { $0.strength > 0 }.map(\.x) + redMarks.map(\.x) + blackMarks.map(\.x)
