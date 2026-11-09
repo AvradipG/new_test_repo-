@@ -119,6 +119,10 @@ final class TidyCoreTests: XCTestCase {
         XCTAssertEqual(layout.widthM, 4, accuracy: 0.01)
         XCTAssertEqual(layout.depthM, 3, accuracy: 0.01)
         XCTAssertEqual(layout.heightM, 2.5, accuracy: 0.01)
+        XCTAssertEqual(layout.originX ?? 0, 12, accuracy: 0.01, "the room's place in the shared scan is kept")
+        XCTAssertEqual(layout.originZ ?? 0, 21.5, accuracy: 0.01)
+        let old = try JSONDecoder().decode(RoomLayout.self, from: Data(#"{"walls":[],"objects":[],"widthM":3,"depthM":4,"heightM":2.5}"#.utf8))
+        XCTAssertNil(old.originX, "layouts saved before whole-place scans still load")
         let b = layout.objects[0]
         XCTAssertEqual(b.cx, 1, accuracy: 0.01)
         XCTAssertEqual(b.cz, 0.5, accuracy: 0.01)

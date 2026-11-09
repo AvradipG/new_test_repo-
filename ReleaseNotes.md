@@ -3,6 +3,13 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.3
+- Scan the whole place at once: walk room by room with LiDAR, name each room, and the app builds one map of the whole home with every room in its real position
+- Geotagged automatically: the phone's GPS and compass place the home, each room and roughly each thing on the map, with the street address
+- Each place has its own page: map with pins, the whole place in 3D and in AR, and a floor plan with a north arrow
+- The app knows where you are: "You're at Home" and that place comes first; new photos are geotagged
+- Google Drive gets each place's map file (place.geojson, opens in Google Earth), floor plan and 3D scan
+
 ## 1.2
 - ChatGPT works too: add a ChatGPT key next to your Claude key and choose who answers, or let one back up the other automatically
 - Your Claude key, ChatGPT key and Google Drive sign-in stay through every update, and come back after a reinstall or on a new iPhone (iCloud Keychain)

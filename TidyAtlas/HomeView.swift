@@ -11,6 +11,9 @@ struct HomeView: View {
     @State private var roomDraft: RoomDraft?
     @State private var focusRoom: Room?
     @State private var openRoom: Room?
+    @State private var houseScanPlace: Place?
+    @State private var houseScanNew = false
+    @State private var herePlaceID: UUID?
 
     struct PlaceDraft: Identifiable {
         let id = UUID()
@@ -64,7 +67,7 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                 }
                 if places.isEmpty { onboarding }
-                ForEach(places) { place in placeSection(place) }
+                ForEach(orderedPlaces) { place in placeSection(place) }
                 if !places.isEmpty {
                     Button { placeDraft = PlaceDraft(kind: .other) } label: {
                         Label("Add another place", systemImage: "plus")
@@ -78,6 +81,12 @@ struct HomeView: View {
         .navigationTitle("Spaces")
         .navigationDestination(for: Room.self) { RoomView(room: $0) }
         .navigationDestination(item: $openRoom) { RoomView(room: $0) }
+        .navigationDestination(for: Place.self) { PlaceView(place: $0) }
+        .fullScreenCover(item: $houseScanPlace) { HouseScanSheet(place: $0) }
+        .fullScreenCover(isPresented: $houseScanNew) { HouseScanSheet(place: nil) }
+        .task(id: places.count) {
+            herePlaceID = await organizer.placeHere(places)?.uid
+        }
         .fullScreenCover(item: $focusRoom) { FocusView(room: $0) }
         .sheet(item: $placeDraft) { draft in PlaceEditor(draft: draft) { save($0) } }
         .alert("New room or segment", isPresented: Binding(get: { roomDraft != nil }, set: { if !$0 { roomDraft = nil } })) {
@@ -98,7 +107,15 @@ struct HomeView: View {
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
-            DriveChip()
+            HStack {
+                DriveChip()
+                if let here = places.first(where: { $0.uid == herePlaceID }) {
+                    Label("You're at \(here.name)", systemImage: "location.fill")
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Palette.tint, in: Capsule())
+                }
+            }
         }
     }
 
@@ -107,9 +124,18 @@ struct HomeView: View {
             Text("Let's map your first space").font(.display(.title2))
             Text("Add a place, then rooms (or segments like \"desk corner\"). Snap a few photos or film a slow walkthrough. Claude tags everything and suggests where it lives.")
                 .foregroundStyle(.secondary)
+            if HouseScanModel.isSupported {
+                Button { houseScanNew = true } label: {
+                    Label("Scan my whole home (LiDAR + GPS)", systemImage: "viewfinder").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                Text("One walk through every room. The app maps it, finds the furniture and geotags it.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             HStack {
                 Button { addPlace("Home", .home) } label: { Label("Add Home", systemImage: "house.fill") }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
                 Button { addPlace("Office", .office) } label: { Label("Add Office", systemImage: "briefcase.fill") }
                     .buttonStyle(.bordered)
             }
@@ -121,9 +147,21 @@ struct HomeView: View {
     private func placeSection(_ place: Place) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label(place.name, systemImage: place.kind.symbol).font(.display(.title2))
+                NavigationLink(value: place) {
+                    HStack(spacing: 6) {
+                        Label(place.name, systemImage: place.kind.symbol).font(.display(.title2))
+                        if place.geo != nil { Image(systemName: "location.fill").font(.caption).foregroundStyle(Palette.teal) }
+                        Image(systemName: "chevron.right").font(.footnote.weight(.bold)).foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
                 Spacer()
                 Menu {
+                    if HouseScanModel.isSupported {
+                        Button(place.houseScannedAt == nil ? "Scan the whole place (LiDAR + GPS)" : "Scan the whole place again",
+                               systemImage: "viewfinder") { houseScanPlace = place }
+                    }
+                    NavigationLink(value: place) { Label("Map, 3D and plan", systemImage: "map") }
                     Button("Rename", systemImage: "pencil") { placeDraft = PlaceDraft(place: place, name: place.name, kind: place.kind) }
                     Button("Delete", systemImage: "trash", role: .destructive) { delete(place) }
                 } label: {
@@ -140,6 +178,14 @@ struct HomeView: View {
             }
             .buttonStyle(.bordered)
         }
+    }
+
+    /// The place you're at comes first.
+    private var orderedPlaces: [Place] {
+        guard let id = herePlaceID, let i = places.firstIndex(where: { $0.uid == id }) else { return places }
+        var p = places
+        p.insert(p.remove(at: i), at: 0)
+        return p
     }
 
     private func addPlace(_ name: String, _ kind: PlaceKind) {

@@ -41,6 +41,11 @@ public struct RoomLayout: Codable, Equatable, Sendable {
     public var widthM: Double
     public var depthM: Double
     public var heightM: Double
+    /// Where this room's local origin (floor centre) sits in the scan it came from (added for whole-place scans;
+    /// nil in layouts saved before). Rooms of one whole-place scan share that frame.
+    public var originX: Double?
+    public var originZ: Double?
+    public var floorY: Double?
 
     /// Builds a layout from raw RoomPlan walls and objects (world coordinates).
     public static func from(walls rawWalls: [WorldBox], objects rawObjects: [WorldBox]) -> RoomLayout? {
@@ -65,7 +70,10 @@ public struct RoomLayout: Codable, Equatable, Sendable {
             objects: rawObjects.map(shift),
             widthM: max(1, maxX - minX),
             depthM: max(1, maxZ - minZ),
-            heightM: Clamp.range(topY - floorY, 2, 6, fallback: 2.6)
+            heightM: Clamp.range(topY - floorY, 2, 6, fallback: 2.6),
+            originX: midX,
+            originZ: midZ,
+            floorY: floorY
         )
     }
 

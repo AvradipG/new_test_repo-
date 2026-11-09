@@ -25,6 +25,11 @@ struct RoomSnapshot: Equatable {
 
     enum State: Equatable { case toSort, outOfPlace, sorted }
 
+    struct TextMark: Equatable {
+        var text: String
+        var position: SIMD3<Float>
+    }
+
     var width: Float
     var depth: Float
     var height: Float
@@ -32,6 +37,54 @@ struct RoomSnapshot: Equatable {
     var zones: [ZoneMark]
     var items: [ItemMark]
     var selected: UUID?
+    /// Room names floating over a whole-place map.
+    var labels: [TextMark] = []
+
+    init(width: Float, depth: Float, height: Float, walls: [WorldBox], zones: [ZoneMark], items: [ItemMark],
+         selected: UUID?, labels: [TextMark]) {
+        self.width = width
+        self.depth = depth
+        self.height = height
+        self.walls = walls
+        self.zones = zones
+        self.items = items
+        self.selected = selected
+        self.labels = labels
+    }
+
+    /// Every room of a place in its real position, from the whole-place scan (rooms scanned on their own are left out).
+    @MainActor
+    static func place(_ place: Place, selected: UUID?) -> RoomSnapshot? {
+        let rooms = place.rooms.filter { $0.fromHouseScan && $0.layout?.originX != nil }
+        guard !rooms.isEmpty else { return nil }
+        var minX = Double.infinity, maxX = -Double.infinity, minZ = Double.infinity, maxZ = -Double.infinity
+        var top = 2.5
+        for r in rooms {
+            let l = r.layout!
+            minX = min(minX, l.originX! - l.widthM / 2); maxX = max(maxX, l.originX! + l.widthM / 2)
+            minZ = min(minZ, l.originZ! - l.depthM / 2); maxZ = max(maxZ, l.originZ! + l.depthM / 2)
+            top = max(top, l.heightM)
+        }
+        let cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2
+        var walls: [WorldBox] = [], zones: [ZoneMark] = [], items: [ItemMark] = [], labels: [TextMark] = []
+        for r in rooms {
+            let l = r.layout!
+            let ox = l.originX! - cx, oz = l.originZ! - cz
+            for w in l.walls {
+                var s = w
+                s.cx += ox
+                s.cz += oz
+                walls.append(s)
+            }
+            let local = RoomSnapshot(room: r, selected: selected)
+            let shift = SIMD3<Float>(Float(ox), 0, Float(oz))
+            zones += local.zones.map { var z = $0; z.center += shift; return z }
+            items += local.items.map { var i = $0; i.position += shift; i.target = i.target.map { $0 + shift }; return i }
+            labels.append(TextMark(text: "\(r.name) · \(r.toSort.count) to sort", position: SIMD3(Float(ox), Float(l.heightM) + 0.3, Float(oz))))
+        }
+        return RoomSnapshot(width: Float(max(maxX - minX, 1)), depth: Float(max(maxZ - minZ, 1)), height: Float(top),
+                            walls: walls, zones: zones, items: items, selected: selected, labels: labels)
+    }
 
     @MainActor
     init(room: Room, selected: UUID?) {
@@ -183,6 +236,11 @@ struct Room3DView: UIViewRepresentable {
                 root.addChildNode(node)
                 root.addChildNode(SceneShapes.label(z.name, at: SCNVector3(z.center.x, z.center.y + z.size.y / 2 + 0.12, z.center.z),
                                         color: z.isIdea ? teal.withAlphaComponent(0.7) : teal))
+            }
+
+            for t in s.labels {
+                root.addChildNode(SceneShapes.label(t.text, at: SCNVector3(t.position.x, t.position.y, t.position.z),
+                                                    color: .label, scale: 0.02))
             }
 
             for it in s.items {

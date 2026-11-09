@@ -1,4 +1,5 @@
 import Foundation
+import TidyCore
 import SwiftData
 import UIKit
 
@@ -38,6 +39,39 @@ enum TidyPackage {
 
     static func f8601(_ d: Date?) -> Any { d.map { ISO8601DateFormatter().string(from: $0) } ?? NSNull() }
 
+    static func geo(_ g: GeoPoint?, rough: Bool) -> Any {
+        guard let g else { return NSNull() }
+        return ["latitude": (g.latitude * 1e7).rounded() / 1e7, "longitude": (g.longitude * 1e7).rounded() / 1e7,
+                "precision": rough ? "rough (indoor GPS + compass, metres)" : "GPS fix"] as [String: Any]
+    }
+
+    static func placeFolder(_ place: Place) -> String {
+        "places/\(safe(place.name)) (\(place.uid.uuidString.prefix(6)))"
+    }
+
+    /// GeoJSON of a place: its GPS point, and a rough point for every room and thing (for Google Earth, maps, GIS).
+    @MainActor
+    static func geoJSON(_ place: Place) -> [String: Any]? {
+        guard let g = place.geo else { return nil }
+        func point(_ p: GeoPoint, _ props: [String: Any]) -> [String: Any] {
+            ["type": "Feature", "geometry": ["type": "Point", "coordinates": [p.longitude, p.latitude]], "properties": props]
+        }
+        var features: [[String: Any]] = [point(g, ["kind": "place", "name": place.name, "address": place.address ?? "",
+                                                   "accuracy_m": place.geoAccuracyM ?? NSNull()])]
+        for r in place.sortedRooms {
+            if let rg = r.geo, r.fromHouseScan {
+                features.append(point(rg, ["kind": "room", "name": r.name, "things": r.items.count, "to_sort": r.toSort.count]))
+            }
+            for it in r.items where r.fromHouseScan {
+                if let ig = r.locate(unitX: it.posX, unitZ: it.posZ) {
+                    features.append(point(ig, ["kind": "thing", "name": it.name, "room": r.name,
+                                               "spot": jsonValue(r.zone(it.zoneID)?.name), "put_away": it.isSorted]))
+                }
+            }
+        }
+        return ["type": "FeatureCollection", "name": place.name, "features": features]
+    }
+
     /// Every file of the Drive copy as (relative path, local file).
     @MainActor
     static func files(context: ModelContext, includePhotos: Bool) -> [(String, URL)] {
@@ -66,6 +100,7 @@ enum TidyPackage {
                         "now_in": zoneName(it.zoneID), "should_live_in": zoneName(it.suggestedZoneID),
                         "position_in_room": ["x": it.posX, "y": it.posY, "z": it.posZ],
                         "updated_utc": f8601(it.updatedAt),
+                        "location": room.fromHouseScan ? geo(room.locate(unitX: it.posX, unitZ: it.posZ), rough: true) : (NSNull() as Any),
                     ]
                     if let l = it.sizeLengthCM, let w = it.sizeWidthCM, let h = it.sizeHeightCM {
                         e["size_cm"] = ["length": l, "width": w, "height": h, "source": it.sizeSource ?? "estimate"]
@@ -79,6 +114,13 @@ enum TidyPackage {
                     "size_m": ["width": room.widthM, "depth": room.depthM, "height": room.heightM],
                     "size_source": room.sizeFromScan ? "LiDAR room scan" : "estimated from photos",
                     "clutter_score": room.clutterScore.map { $0 as Any } ?? NSNull(), "summary": room.summary,
+                    "location": room.fromHouseScan ? geo(room.geo, rough: true) : (NSNull() as Any),
+                    "scanned_with_whole_place": room.fromHouseScan,
+                    "photos": room.captures.sorted { $0.createdAt < $1.createdAt }.map { c in
+                        ["file": "\(folder)/photos/\(c.file)", "taken_utc": f8601(c.createdAt),
+                         "location": c.latitude.flatMap { lat in c.longitude.map { GeoPoint(latitude: lat, longitude: $0) } }
+                            .map { geo($0, rough: false) } ?? NSNull()] as [String: Any]
+                    },
                     "zones": room.zones.sorted { $0.createdAt < $1.createdAt }.map { z in
                         ["id": z.uid.uuidString, "name": z.name, "kind": z.kindRaw, "idea_not_set_up": z.isIdea,
                          "position_in_room": ["x": z.posX, "y": z.posY, "z": z.posZ],
@@ -109,7 +151,26 @@ enum TidyPackage {
                     }
                 }
             }
-            placeList.append(["name": place.name, "kind": place.kindRaw, "rooms": roomList])
+            let pf = placeFolder(place)
+            var placeDict: [String: Any] = ["name": place.name, "kind": place.kindRaw, "rooms": roomList,
+                                            "folder": pf, "address": jsonValue(place.address),
+                                            "location": geo(place.geo, rough: false),
+                                            "altitude_m": place.altitude.map { $0 as Any } ?? NSNull(),
+                                            "accuracy_m": place.geoAccuracyM.map { $0 as Any } ?? NSNull(),
+                                            "floor_level": place.floorLevel.map { $0 as Any } ?? NSNull(),
+                                            "scan_minus_z_bearing_deg": place.northBearing.map { $0 as Any } ?? NSNull(),
+                                            "whole_place_scanned_utc": f8601(place.houseScannedAt)]
+            if let gj = geoJSON(place) {
+                out.append(("\(pf)/place.geojson", write(json(gj), "\(pf)/place.geojson")))
+                placeDict["geojson"] = "\(pf)/place.geojson"
+            }
+            if let png = PlacePlan.image(for: place)?.pngData() {
+                out.append(("\(pf)/place-plan.png", write(png, "\(pf)/place-plan.png")))
+            }
+            if let f = place.houseScanFile, FileManager.default.fileExists(atPath: Storage.roomScanURL(f).path) {
+                out.append(("\(pf)/place-scan.usdz", Storage.roomScanURL(f)))
+            }
+            placeList.append(placeDict)
         }
 
         let inventory: [String: Any] = [
@@ -138,6 +199,10 @@ enum TidyPackage {
     inventory.json   the whole database: places > rooms > storage spots, things (name, tags, where it is, where it
                      should live, size in cm, status) and tidy steps. Schema tidy-atlas.inventory/1.
     inventory.csv    the same things as a spreadsheet.
+    places/<place> (<id>)/
+        place.geojson    GPS point of the place and rough points for every room and thing (Google Earth, maps, GIS)
+        place-plan.png   every room of the whole-place LiDAR scan in its real position, with a north arrow
+        place-scan.usdz  the whole place in 3D (open on a Mac or iPhone; AR on iPhone)
     rooms/<place> - <room> (<id>)/
         room.json        that room only
         floor-plan.png   top-down map: storage spots, numbered things, dashed arrows to where they go

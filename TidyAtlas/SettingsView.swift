@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var keysVersion = 0
     @AppStorage(AIService.preferenceKey) private var preference = AIPreference.claudeFirst.rawValue
     @AppStorage(AIService.openAIModelKey) private var openAIModel = ""
+    @ObservedObject private var location = LocationService.shared
     @AppStorage("nudgeOn") private var nudgeOn = false
     @AppStorage("nudgeMinutes") private var nudgeMinutes = 18 * 60
     @State private var problem = ""
@@ -45,6 +46,21 @@ struct SettingsView: View {
             }
 
             DriveSettingsSection()
+
+            Section {
+                if location.isAllowed {
+                    Label("On: photos are geotagged and the app knows which place you're at", systemImage: "location.fill")
+                        .foregroundStyle(.green)
+                } else if location.authorization == .notDetermined {
+                    Button { location.requestPermission() } label: { Label("Allow location", systemImage: "location") }
+                } else {
+                    Button { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } } label: {
+                        Label("Location is off: turn it on in iPhone Settings", systemImage: "location.slash")
+                    }
+                }
+            } header: { Text("Location (geotags)") } footer: {
+                Text("Used only while the app is open: to geotag whole-place scans and photos, and to show the place you're at first. Stays on this iPhone and in your own Drive backup.")
+            }
 
             Section {
                 Toggle("Daily nudge", isOn: $nudgeOn)

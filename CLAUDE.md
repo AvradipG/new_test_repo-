@@ -18,6 +18,13 @@ plain-language requests, each ending with a push that reaches the phone through 
   package changes there; its tests run in this workflow too).
 - AR: `ARRoomView.swift` (ARKit session, depth snapshot, labels/arcs via `SceneShapes.swift`, world map per room in
   Documents/WorldMaps; depth per photo in Documents/Depth via `DepthStore`).
+- Whole-place scan: `HouseScanner.swift` (one ARSession kept running across rooms with
+  `RoomCaptureView(frame:arSession:)` and `stop(pauseARSession: false)`, `RoomBuilder` per room,
+  `StructureBuilder` to merge; geotag = GPS fix + compass bearing of the scan's −Z axis at the start), applied by
+  `Organizer.applyHouseScan`. Rooms of one scan share a frame: `RoomLayout.originX/originZ` place them in it.
+  `Place.locate` / `Room.locate` turn scan positions into GPS with `GeoMath` (TidyCore, tested).
+  `LocationService.swift` (GPS, compass, reverse geocoding, never prompts except when a scan starts or in Settings),
+  `PlaceView.swift` (map, whole-place 3D, `PlacePlan` floor plan, AR Quick Look of the place USDZ).
 - Drive: `Drive.swift`, `DriveBackground.swift` (from Crystal Bowl), `DriveSync.swift` (`TidyPackage` export written
   to Documents/DriveMirror only when content changes; upload state in drive-state.json / drive-folder-state.json),
   `DriveViews.swift`. `FloorPlan.swift` draws the plan PNG.

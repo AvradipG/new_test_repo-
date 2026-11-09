@@ -90,6 +90,7 @@ final class Organizer: ObservableObject {
             progress = ScanProgress(label: "Claude is looking at photo \(i + 1) of \(stills.count)…", done: i, total: stills.count)
             guard let file = try? Storage.saveCapture(data) else { continue }
             let capture = Capture(file: file)
+            await geotag(capture)
             capture.room = room
             context.insert(capture)
             try? context.save()
@@ -115,6 +116,7 @@ final class Organizer: ObservableObject {
         defer { progress = nil }
         let file = try Storage.saveCapture(jpeg)
         let capture = Capture(file: file)
+        await geotag(capture)
         capture.room = room
         context.insert(capture)
         if let depth { DepthStore.save(depth, for: capture.uid) }
@@ -283,8 +285,41 @@ final class Organizer: ObservableObject {
         return placed
     }
 
+    /// A finished whole-place scan: geotag on the place, and every scanned room created (or updated, matched by
+    /// name) with its walls, size, position in the place and furniture as storage spots.
+    func applyHouseScan(_ scanned: [ScannedRoom], geotag: ScanGeotag?, modelFile: String?, to place: Place, context: ModelContext) {
+        if let g = geotag {
+            place.latitude = g.location.coordinate.latitude
+            place.longitude = g.location.coordinate.longitude
+            place.altitude = g.location.altitude
+            place.geoAccuracyM = g.location.horizontalAccuracy
+            place.floorLevel = g.location.floor?.level
+            place.northBearing = g.northBearing
+            if let a = g.address { place.address = a }
+        }
+        if let modelFile {
+            place.houseScanFile = modelFile
+            place.houseScannedAt = Date()
+        }
+        for s in scanned {
+            let room = place.rooms.first { $0.name.lowercased() == s.name.lowercased() } ?? {
+                let r = Room(name: s.name)
+                r.place = place
+                context.insert(r)
+                return r
+            }()
+            room.fromHouseScan = true
+            room.sectionLabel = s.room.sections.first.map { String(describing: $0.label) }
+            if room.roomType.isEmpty, let label = room.sectionLabel, label != "unidentified" { room.roomType = label }
+            applyRoomScan(s.room, to: room, context: context, quiet: true)
+        }
+        try? context.save()
+        Haptics.success()
+        scheduleDriveSync()
+    }
+
     /// A finished LiDAR room scan: real size, wall layout, and furniture as starting storage zones.
-    func applyRoomScan(_ captured: CapturedRoom, to room: Room, context: ModelContext) {
+    func applyRoomScan(_ captured: CapturedRoom, to room: Room, context: ModelContext, quiet: Bool = false) {
         if let layout = RoomScanSupport.layout(of: captured) {
             room.layout = layout
             room.widthM = layout.widthM
@@ -314,9 +349,26 @@ final class Organizer: ObservableObject {
         if (try? captured.export(to: url, metadataURL: nil, modelProvider: nil, exportOptions: .mesh)) != nil {
             room.usdzFile = name
         }
+        if quiet { return }
         try? context.save()
         Haptics.success()
         scheduleDriveSync()
+    }
+
+    /// GPS on a new photo (only when location is allowed; never asks).
+    private func geotag(_ capture: Capture) async {
+        guard let l = await LocationService.shared.current(timeout: 3) else { return }
+        capture.latitude = l.coordinate.latitude
+        capture.longitude = l.coordinate.longitude
+        capture.geoAccuracyM = l.horizontalAccuracy
+    }
+
+    /// The place you're at, from GPS (generous radius: indoor GPS drifts).
+    func placeHere(_ places: [Place]) async -> Place? {
+        guard let l = await LocationService.shared.current() else { return nil }
+        let here = GeoPoint(latitude: l.coordinate.latitude, longitude: l.coordinate.longitude)
+        let id = GeoMath.nearest(places.compactMap { p in p.geo.map { (p.uid, $0) } }, to: here, within: 250)
+        return places.first { $0.uid == id }
     }
 
     // MARK: Coaching

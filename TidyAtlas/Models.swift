@@ -12,6 +12,18 @@ final class Place {
     var kindRaw: String = PlaceKind.home.rawValue
     var createdAt: Date = Date()
     @Relationship(deleteRule: .cascade, inverse: \Room.place) var rooms: [Room] = []
+    // Geotag from the whole-place scan (or the first GPS fix): where the scan started, how accurate, and which
+    // compass bearing the scan's −Z axis points to, so every scan position can be turned into GPS coordinates.
+    var latitude: Double?
+    var longitude: Double?
+    var altitude: Double?
+    var geoAccuracyM: Double?
+    var floorLevel: Int?
+    var address: String?
+    var northBearing: Double?
+    /// USDZ of the whole-place LiDAR scan in Documents/RoomScans.
+    var houseScanFile: String?
+    var houseScannedAt: Date?
 
     init(name: String, kind: PlaceKind) {
         self.name = name
@@ -24,6 +36,18 @@ final class Place {
     }
 
     var sortedRooms: [Room] { rooms.sorted { $0.createdAt < $1.createdAt } }
+
+    var geo: GeoPoint? {
+        guard let latitude, let longitude else { return nil }
+        return GeoPoint(latitude: latitude, longitude: longitude)
+    }
+
+    /// GPS position of a point in the whole-place scan.
+    func locate(x: Double, z: Double) -> GeoPoint? {
+        guard let geo else { return nil }
+        guard let b = northBearing else { return geo }
+        return GeoMath.locate(x: x, z: z, origin: geo, bearingOfMinusZ: b)
+    }
 }
 
 @Model
@@ -46,6 +70,10 @@ final class Room {
     var worldMapFile: String?
     var createdAt: Date = Date()
     var place: Place?
+    /// Scanned as part of a whole-place scan: its layout's origin is in the place's shared scan frame.
+    var fromHouseScan: Bool = false
+    /// RoomPlan's own guess of the room type (bedroom, kitchen…).
+    var sectionLabel: String?
     @Relationship(deleteRule: .cascade, inverse: \Zone.room) var zones: [Zone] = []
     @Relationship(deleteRule: .cascade, inverse: \Item.room) var items: [Item] = []
     @Relationship(deleteRule: .cascade, inverse: \TidyStep.room) var steps: [TidyStep] = []
@@ -61,6 +89,17 @@ final class Room {
     }
 
     var toSort: [Item] { items.filter { !$0.isSorted } }
+
+    /// GPS position of a point given in this room's unit coordinates (rough), when the room has a geotag.
+    func locate(unitX: Double, unitZ: Double) -> GeoPoint? {
+        guard let place else { return nil }
+        if fromHouseScan, let l = layout, let ox = l.originX, let oz = l.originZ {
+            return place.locate(x: ox + (unitX - 0.5) * widthM, z: oz + (unitZ - 0.5) * depthM)
+        }
+        return place.geo
+    }
+
+    var geo: GeoPoint? { locate(unitX: 0.5, unitZ: 0.5) }
     var todoSteps: [TidyStep] { steps.filter { $0.status == .todo }.sorted { $0.sortKey < $1.sortKey } }
     func zone(_ id: UUID?) -> Zone? { id.flatMap { id in zones.first { $0.uid == id } } }
     func capture(_ id: UUID?) -> Capture? { id.flatMap { id in captures.first { $0.uid == id } } }
@@ -209,6 +248,10 @@ final class Capture {
     var error: String?
     var itemCount: Int = 0
     var createdAt: Date = Date()
+    /// Where the phone was when the photo was taken (GPS), if location is allowed.
+    var latitude: Double?
+    var longitude: Double?
+    var geoAccuracyM: Double?
     var room: Room?
 
     init(file: String) {
