@@ -254,6 +254,8 @@ final class Zone {
     var arZ: Double?
     /// The spot this one is inside (a drawer in a desk), nil at the top level.
     var parentID: UUID?
+    /// What goes here ("plates and bowls"), written by the owner or the kitchen organiser.
+    var notes: String = ""
     /// Kitchen zone (Kitchen.ZoneType raw value) for kitchen storage.
     var kitchenZone: String?
     var room: Room?

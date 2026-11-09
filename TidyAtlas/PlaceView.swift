@@ -106,6 +106,7 @@ enum PlacePlan {
 struct PlaceView: View {
     @Bindable var place: Place
     @Environment(\.modelContext) private var context
+    @EnvironmentObject private var organizer: Organizer
     @State private var view = 0
     @State private var showScan = false
     @State private var quickLook: URL?
@@ -264,36 +265,45 @@ struct PlaceView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Scan history").font(.display(.headline))
             Text("Every scan is kept. Open one in AR or put a room back the way that scan saw it.").font(.footnote).foregroundStyle(.secondary)
-            ForEach(place.scans.sorted { $0.date > $1.date }) { s in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(s.kind).font(.body.weight(.semibold))
-                        Spacer()
-                        Text(s.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Text(s.roomNames.joined(separator: ", ") + (s.joinedMap ? "" : " · placed by hand")).font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        if let f = s.usdzFile, FileManager.default.fileExists(atPath: Storage.roomScanURL(f).path) {
-                            Button("View in AR") { quickLook = Storage.roomScanURL(f) }
-                        }
-                        Menu("Restore a room") {
-                            ForEach(place.rooms.filter { s.roomFiles[$0.uid.uuidString] != nil }) { r in
-                                Button(r.displayName) {
-                                    message = organizer.restore(r, from: s, context: context)
-                                        ? "\(r.name) is back the way this scan saw it. Things, storage spots and designs stayed."
-                                        : "That scan's file is missing."
-                                }
-                            }
-                        }
-                    }
-                    .font(.footnote)
-                    .buttonStyle(.bordered)
-                }
-                .padding(10)
-                .background(Palette.paper, in: RoundedRectangle(cornerRadius: 12))
-            }
+            ForEach(place.scans.sorted { $0.date > $1.date }) { s in historyRow(s) }
         }
         .card()
+    }
+
+    private func historyRow(_ s: ScanRecord) -> some View {
+        let names = s.roomNames.joined(separator: ", ") + (s.joinedMap ? "" : " · placed by hand")
+        let model: URL? = s.usdzFile.map { Storage.roomScanURL($0) }.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        let rooms = place.rooms.filter { s.roomFiles[$0.uid.uuidString] != nil }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(s.kind).font(.body.weight(.semibold))
+                Spacer()
+                Text(s.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(names).font(.caption).foregroundStyle(.secondary)
+            HStack {
+                if let model {
+                    Button("View in AR") { quickLook = model }
+                }
+                Menu("Restore a room") {
+                    ForEach(rooms) { r in
+                        Button(r.displayName) { restore(r, from: s) }
+                    }
+                }
+            }
+            .font(.footnote)
+            .buttonStyle(.bordered)
+        }
+        .padding(10)
+        .background(Palette.paper, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func restore(_ r: Room, from s: ScanRecord) {
+        if organizer.restore(r, from: s, context: context) {
+            message = "\(r.name) is back the way this scan saw it. Things, storage spots and designs stayed."
+        } else {
+            message = "That scan's file is missing."
+        }
     }
 
     private var emptyHint: some View {
