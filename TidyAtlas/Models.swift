@@ -78,9 +78,82 @@ final class Room {
     @Relationship(deleteRule: .cascade, inverse: \Item.room) var items: [Item] = []
     @Relationship(deleteRule: .cascade, inverse: \TidyStep.room) var steps: [TidyStep] = []
     @Relationship(deleteRule: .cascade, inverse: \Capture.room) var captures: [Capture] = []
+    @Relationship(deleteRule: .cascade, inverse: \DesignVariant.room) var designs: [DesignVariant] = []
+    /// Design-studio chat (JSON of [DesignMessage]).
+    var designChatData: Data?
+    /// Compass bearing of the far wall, set by hand for rooms not scanned with the whole place.
+    var northBearingOverride: Double?
+    /// Which wall the entrance is on, for the Feng Shui bagua map.
+    var entranceRaw: String?
 
     init(name: String) {
         self.name = name
+    }
+
+    /// Compass bearing of the far wall (the room's −Z direction), when known.
+    var bearing: Double? {
+        if let o = northBearingOverride { return o }
+        if fromHouseScan, let b = place?.northBearing { return b }
+        return nil
+    }
+
+    var entrance: SpaceWisdom.Entrance {
+        get { SpaceWisdom.Entrance(rawValue: entranceRaw ?? "") ?? .near }
+        set { entranceRaw = newValue.rawValue }
+    }
+
+    var sortedDesigns: [DesignVariant] { designs.sorted { ($0.isCurrent ? 0 : 1, $0.createdAt) < ($1.isCurrent ? 0 : 1, $1.createdAt) } }
+
+    /// The room as it is: scanned furniture (LiDAR) and storage spots as separate, movable pieces.
+    func scannedPieces() -> [DesignPiece] {
+        var pieces: [DesignPiece] = []
+        var usedZones = Set<UUID>()
+        if let l = layout {
+            for o in l.objects {
+                let k = FurnitureCatalog.scannedKind(o.label)
+                // Link to the storage spot made from the same furniture, if any.
+                let zone = zones.first { z in
+                    abs((z.posX - 0.5) * widthM - o.cx) < 0.3 && abs((z.posZ - 0.5) * depthM - o.cz) < 0.3 && !usedZones.contains(z.uid)
+                }
+                if let zone { usedZones.insert(zone.uid) }
+                pieces.append(DesignPiece(kind: k.kind, name: zone?.name ?? k.name, x: o.cx, z: o.cz,
+                                          width: max(o.width, 0.1), depth: max(o.depth, 0.1), height: max(o.height, 0.05),
+                                          rotationDeg: GeoMath.normalize(-o.yaw * 180 / .pi), source: "scanned", zoneID: zone?.uid))
+            }
+        }
+        for z in zones where !usedZones.contains(z.uid) && !z.isIdea {
+            let kind: String
+            switch z.kind {
+            case .bed: kind = "bed_double"
+            case .desk: kind = "desk"
+            case .table: kind = "dining_4"
+            case .shelf: kind = "bookshelf"
+            case .closet: kind = "wardrobe"
+            case .cabinet, .drawer: kind = "dresser"
+            case .bin: kind = "cube_storage"
+            case .hook: kind = "wall_hooks"
+            default: kind = "custom"
+            }
+            let onWall = kind == "wall_hooks"
+            var p = DesignPiece(kind: kind, name: z.name, x: (z.posX - 0.5) * widthM, z: (z.posZ - 0.5) * depthM,
+                                y: onWall ? 1.6 : 0, width: max(z.sizeW, 0.2), depth: max(z.sizeD, 0.1), height: max(z.sizeH, 0.1),
+                                rotationDeg: GeoMath.normalize(-z.yaw * 180 / .pi), onWall: onWall, source: "scanned", zoneID: z.uid)
+            p = DesignGeometry.clamp(p, width: widthM, depth: depthM)
+            pieces.append(p)
+        }
+        return pieces
+    }
+
+    /// The "As it is" design, made on first use.
+    @discardableResult
+    func currentDesign(context: ModelContext) -> DesignVariant {
+        if let d = designs.first(where: \.isCurrent) { return d }
+        let d = DesignVariant(name: "As it is")
+        d.isCurrent = true
+        d.pieces = scannedPieces()
+        d.room = self
+        context.insert(d)
+        return d
     }
 
     var layout: RoomLayout? {
@@ -208,6 +281,54 @@ final class Item {
         isSorted = true
         outOfPlace = false
         updatedAt = Date()
+    }
+}
+
+/// One design of a room: a set of movable pieces (the room as it is, or an idea from the owner or the AI designer).
+@Model
+final class DesignVariant {
+    var uid: UUID = UUID()
+    var name: String = ""
+    var style: String = ""
+    var rationale: String = ""
+    var tips: [String] = []
+    var scoreOverall: Double?
+    var scoreFlow: Double?
+    var scoreCalm: Double?
+    /// The room as it really is (only one per room).
+    var isCurrent: Bool = false
+    /// JSON of [DesignPiece].
+    var piecesData: Data?
+    /// "How it will look" picture made by ChatGPT, in Documents/Designs.
+    var renderFile: String?
+    var createdAt: Date = Date()
+    var room: Room?
+
+    init(name: String) {
+        self.name = name
+    }
+
+    var pieces: [DesignPiece] {
+        get { piecesData.flatMap { try? JSONDecoder().decode([DesignPiece].self, from: $0) } ?? [] }
+        set { piecesData = try? JSONEncoder().encode(newValue) }
+    }
+}
+
+/// One message in a room's design chat.
+struct DesignMessage: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var fromUser: Bool
+    var text: String
+    var provider: String?
+    /// The design made from this answer's proposal, if any.
+    var designID: UUID?
+    var date = Date()
+}
+
+extension Room {
+    var designChat: [DesignMessage] {
+        get { designChatData.flatMap { try? JSONDecoder().decode([DesignMessage].self, from: $0) } ?? [] }
+        set { designChatData = try? JSONEncoder().encode(newValue) }
     }
 }
 

@@ -116,6 +116,16 @@ enum TidyPackage {
                     "clutter_score": room.clutterScore.map { $0 as Any } ?? NSNull(), "summary": room.summary,
                     "location": room.fromHouseScan ? geo(room.geo, rough: true) : (NSNull() as Any),
                     "scanned_with_whole_place": room.fromHouseScan,
+                    "designs": room.sortedDesigns.map { d in
+                        ["name": d.name, "style": d.style, "is_the_real_room": d.isCurrent, "rationale": d.rationale, "tips": d.tips,
+                         "score_overall": d.scoreOverall.map { $0 as Any } ?? NSNull(),
+                         "picture": d.renderFile.map { "\(folder)/designs/\($0)" as Any } ?? NSNull(),
+                         "pieces": d.pieces.map { p in
+                             ["kind": p.kind, "name": p.name, "x_m": p.x, "z_m": p.z, "y_m": p.y, "width_m": p.width, "depth_m": p.depth,
+                              "height_m": p.height, "rotation_deg": p.rotationDeg, "on_wall": p.onWall, "source": p.source] as [String: Any]
+                         }] as [String: Any]
+                    },
+                    "design_note": "Design positions are metres from the middle of the floor: x to the right, z towards the near wall; rotation clockwise seen from above.",
                     "photos": room.captures.sorted { $0.createdAt < $1.createdAt }.map { c in
                         ["file": "\(folder)/photos/\(c.file)", "taken_utc": f8601(c.createdAt),
                          "location": c.latitude.flatMap { lat in c.longitude.map { GeoPoint(latitude: lat, longitude: $0) } }
@@ -143,6 +153,11 @@ enum TidyPackage {
                 for it in items {
                     if let t = it.thumbFile, FileManager.default.fileExists(atPath: Storage.thumbURL(t).path) {
                         out.append(("\(folder)/things/\(t)", Storage.thumbURL(t)))
+                    }
+                }
+                for d in room.designs {
+                    if let f = d.renderFile, FileManager.default.fileExists(atPath: Storage.designURL(f).path) {
+                        out.append(("\(folder)/designs/\(f)", Storage.designURL(f)))
                     }
                 }
                 if includePhotos {
@@ -208,6 +223,7 @@ enum TidyPackage {
         floor-plan.png   top-down map: storage spots, numbered things, dashed arrows to where they go
         room-scan.usdz   the LiDAR room scan (open on a Mac or iPhone; AR on iPhone)
         things/          a cut-out picture of every thing
+        designs/         "how it will look" pictures of the room's designs (the designs themselves are in room.json)
         photos/          the photos Claude looked at (only when photo upload is on, on Wi-Fi)
     """
 }

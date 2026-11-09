@@ -25,6 +25,13 @@ plain-language requests, each ending with a push that reaches the phone through 
   `Place.locate` / `Room.locate` turn scan positions into GPS with `GeoMath` (TidyCore, tested).
   `LocationService.swift` (GPS, compass, reverse geocoding, never prompts except when a scan starts or in Settings),
   `PlaceView.swift` (map, whole-place 3D, `PlacePlan` floor plan, AR Quick Look of the place USDZ).
+- Design studio: `DesignStudio.swift` (designs per room = `DesignVariant` with JSON `[DesignPiece]`; draggable
+  `PlanEditor`, `PieceInspector`, `CatalogSheet`, Vastu/Feng Shui/walkway overlays), `Design3D.swift` (procedural
+  SceneKit furniture, USDZ for AR, picture prompt), `DesignChat.swift` (`Organizer.designChat`: room + designs +
+  conversation → `DesignAI.Answer`; proposals become new designs). Pure logic in TidyCore `Design.swift`
+  (`DesignPiece`, `FurnitureCatalog`, `DesignGeometry`, `SpaceWisdom`) and `DesignAI.swift`; image editing for
+  "how it will look" in `OpenAIImageWire` (ChatGPT only, model `gpt-image-1` unless set in UserDefaults
+  `ai.openai.imageModel`).
 - Drive: `Drive.swift`, `DriveBackground.swift` (from Crystal Bowl), `DriveSync.swift` (`TidyPackage` export written
   to Documents/DriveMirror only when content changes; upload state in drive-state.json / drive-folder-state.json),
   `DriveViews.swift`. `FloorPlan.swift` draws the plan PNG.

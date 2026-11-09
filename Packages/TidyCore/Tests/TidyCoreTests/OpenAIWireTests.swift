@@ -58,3 +58,17 @@ final class OpenAIWireTests: XCTestCase {
         XCTAssertFalse(ClaudeWire.worthTryingAnother(ClaudeWire.Failure.noKey))
     }
 }
+
+final class OpenAIImageWireTests: XCTestCase {
+    func testMultipartAndParse() throws {
+        let r = OpenAIImageWire.request(model: "gpt-image-1", prompt: "Calm room", jpeg: Data([0xFF, 0xD8]), boundary: "B")
+        XCTAssertEqual(r.contentType, "multipart/form-data; boundary=B")
+        let text = String(decoding: r.body, as: UTF8.self)
+        XCTAssertTrue(text.contains("name=\"prompt\"\r\n\r\nCalm room\r\n"))
+        XCTAssertTrue(text.contains("filename=\"room.jpg\""))
+        XCTAssertTrue(text.hasSuffix("--B--\r\n"))
+        let ok = #"{"data":[{"b64_json":"AQID"}]}"#
+        XCTAssertEqual(try OpenAIImageWire.image(status: 200, data: Data(ok.utf8)), Data([1, 2, 3]))
+        XCTAssertThrowsError(try OpenAIImageWire.image(status: 401, data: Data("{}".utf8)))
+    }
+}

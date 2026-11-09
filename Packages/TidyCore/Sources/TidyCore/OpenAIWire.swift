@@ -157,3 +157,44 @@ public enum OpenAIWire {
         return candidates.max { $0.1 < $1.1 }?.0
     }
 }
+
+/// OpenAI image editing ("how will it look"): the room photo plus a description, returned as a new picture.
+public enum OpenAIImageWire {
+    public static let endpoint = URL(string: "https://api.openai.com/v1/images/edits")!
+    public static let defaultModel = "gpt-image-1"
+
+    /// multipart/form-data body; returns (content type header, body).
+    public static func request(model: String, prompt: String, jpeg: Data, size: String = "1024x1024",
+                               boundary: String = "TidyAtlas-\(UUID().uuidString)") -> (contentType: String, body: Data) {
+        var body = Data()
+        func field(_ name: String, _ value: String) {
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8))
+        }
+        field("model", model)
+        field("prompt", prompt)
+        field("size", size)
+        body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"image\"; filename=\"room.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".utf8))
+        body.append(jpeg)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        return ("multipart/form-data; boundary=\(boundary)", body)
+    }
+
+    /// The picture bytes from the response.
+    public static func image(status: Int, data: Data) throws -> Data {
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        guard status == 200 else {
+            let message = ((object?["error"] as? [String: Any])?["message"] as? String) ?? "unknown error"
+            switch status {
+            case 401, 403: throw ClaudeWire.Failure.badKey
+            case 429: throw ClaudeWire.Failure.rateLimited
+            case 400 where message.lowercased().contains("safety"): throw ClaudeWire.Failure.refused
+            default: throw ClaudeWire.Failure.server(status, message)
+            }
+        }
+        guard let first = (object?["data"] as? [[String: Any]])?.first,
+              let b64 = first["b64_json"] as? String, let bytes = Data(base64Encoded: b64) else {
+            throw ClaudeWire.Failure.unreadable
+        }
+        return bytes
+    }
+}

@@ -18,7 +18,10 @@ enum RoomScanSupport {
     static func layout(of room: CapturedRoom) -> RoomLayout? {
         let walls = room.walls.map { box($0.transform, $0.dimensions, label: "wall") }
         let objects = room.objects.map { box($0.transform, $0.dimensions, label: String(describing: $0.category)) }
-        return RoomLayout.from(walls: walls, objects: objects)
+        let openings = room.doors.map { box($0.transform, $0.dimensions, label: "door") }
+            + room.windows.map { box($0.transform, $0.dimensions, label: "window") }
+            + room.openings.map { box($0.transform, $0.dimensions, label: "opening") }
+        return RoomLayout.from(walls: walls, objects: objects, openings: openings)
     }
 }
 

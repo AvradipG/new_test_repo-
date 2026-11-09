@@ -116,6 +116,7 @@ public enum Prompts {
             .replacingOccurrences(of: "ZONE_KINDS", with: list(ZoneKind.allCases.map(\.rawValue)))
             .replacingOccurrences(of: "CATEGORIES", with: list(Categories.all))
             .replacingOccurrences(of: "ACTIONS", with: list(ItemAction.allCases.map(\.rawValue)))
+            .replacingOccurrences(of: "KINDS", with: list(FurnitureCatalog.kinds))
         let object = try? JSONSerialization.jsonObject(with: Data(filled.utf8))
         return object as? [String: Any] ?? [:]
     }

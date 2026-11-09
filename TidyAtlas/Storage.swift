@@ -10,6 +10,7 @@ enum Storage {
     static let thumbs = folder("Thumbs")
     static let roomScans = folder("RoomScans")
     static let worldMaps = folder("WorldMaps")
+    static let designs = folder("Designs")
 
     private static func folder(_ name: String) -> URL {
         let url = docs.appendingPathComponent(name, isDirectory: true)
@@ -21,6 +22,7 @@ enum Storage {
     static func thumbURL(_ file: String) -> URL { thumbs.appendingPathComponent(file) }
     static func roomScanURL(_ file: String) -> URL { roomScans.appendingPathComponent(file) }
     static func worldMapURL(_ file: String) -> URL { worldMaps.appendingPathComponent(file) }
+    static func designURL(_ file: String) -> URL { designs.appendingPathComponent(file) }
 
     static func saveCapture(_ jpeg: Data) throws -> String {
         let name = UUID().uuidString + ".jpg"
@@ -54,6 +56,7 @@ enum Storage {
     static func removeFiles(of room: Room) {
         room.captures.forEach { remove(capture: $0.file); DepthStore.remove($0.uid) }
         if let f = room.worldMapFile { try? FileManager.default.removeItem(at: worldMapURL(f)) }
+        room.designs.forEach { d in if let f = d.renderFile { try? FileManager.default.removeItem(at: designURL(f)) } }
         room.items.forEach { remove(thumb: $0.thumbFile) }
         if let f = room.usdzFile { try? FileManager.default.removeItem(at: roomScanURL(f)) }
     }

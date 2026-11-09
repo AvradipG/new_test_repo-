@@ -3,6 +3,16 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.4
+- Design studio for every room: each piece of scanned furniture is separate, drag it, turn it, resize it
+- Add furniture and decor from a catalog (L-shaped sofa, beds, desks, rugs, plants, lamps) and wall pieces (art, mirrors, shelves, TV)
+- Talk to the designer (Claude or ChatGPT): themes, layouts, furniture and wall ideas; its layouts open as new designs
+- Feng Shui (bagua map, chi flow) and Vastu (compass zones from your scan's real north) shown on the plan
+- Walkway check: overlapping furniture and tight paths are marked
+- See any design in 3D and life-size in AR, and get a realistic picture of how your room will look (needs a ChatGPT key)
+- "Which design is best?": the designer ranks your ideas and explains why
+- Arranged the room for real? Tap "I've arranged the room like this" and the storage spots move with it
+
 ## 1.3
 - Scan the whole place at once: walk room by room with LiDAR, name each room, and the app builds one map of the whole home with every room in its real position
 - Geotagged automatically: the phone's GPS and compass place the home, each room and roughly each thing on the map, with the street address

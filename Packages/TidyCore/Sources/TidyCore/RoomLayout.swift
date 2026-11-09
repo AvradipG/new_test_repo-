@@ -38,6 +38,8 @@ public struct WorldBox: Codable, Equatable, Sendable {
 public struct RoomLayout: Codable, Equatable, Sendable {
     public var walls: [WorldBox]
     public var objects: [WorldBox]
+    /// Doors, windows and openings (added for the design studio; nil in layouts saved before).
+    public var openings: [WorldBox]?
     public var widthM: Double
     public var depthM: Double
     public var heightM: Double
@@ -48,7 +50,7 @@ public struct RoomLayout: Codable, Equatable, Sendable {
     public var floorY: Double?
 
     /// Builds a layout from raw RoomPlan walls and objects (world coordinates).
-    public static func from(walls rawWalls: [WorldBox], objects rawObjects: [WorldBox]) -> RoomLayout? {
+    public static func from(walls rawWalls: [WorldBox], objects rawObjects: [WorldBox], openings rawOpenings: [WorldBox] = []) -> RoomLayout? {
         let all = rawWalls + rawObjects
         guard !all.isEmpty else { return nil }
         let pts = (rawWalls.isEmpty ? rawObjects : rawWalls).flatMap(\.corners)
@@ -68,6 +70,7 @@ public struct RoomLayout: Codable, Equatable, Sendable {
         return RoomLayout(
             walls: rawWalls.map(shift),
             objects: rawObjects.map(shift),
+            openings: rawOpenings.map(shift),
             widthM: max(1, maxX - minX),
             depthM: max(1, maxZ - minZ),
             heightM: Clamp.range(topY - floorY, 2, 6, fallback: 2.6),

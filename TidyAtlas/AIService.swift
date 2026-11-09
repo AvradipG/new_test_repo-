@@ -145,6 +145,27 @@ enum AIService {
 
     static var autoPickedModel: String? { UserDefaults.standard.string(forKey: autoModelKey) }
 
+    static let imageModelKey = "ai.openai.imageModel"
+
+    /// A realistic picture of the room redesigned (ChatGPT image editing; Claude can't make images).
+    static func visualize(photo: Data, prompt: String) async throws -> Data {
+        guard let key = KeyStore.key(.chatgpt), !key.isEmpty else {
+            throw DriveError(message: "Pictures need a ChatGPT key: add one in Settings. Claude can't make images.")
+        }
+        let model = UserDefaults.standard.string(forKey: imageModelKey).flatMap { $0.isEmpty ? nil : $0 } ?? OpenAIImageWire.defaultModel
+        let jpeg = UIImage(data: photo).flatMap { ImageTools.jpeg($0, longestSide: 1536) } ?? photo
+        let r = OpenAIImageWire.request(model: model, prompt: prompt, jpeg: jpeg)
+        var request = URLRequest(url: OpenAIImageWire.endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 300
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue(r.contentType, forHTTPHeaderField: "Content-Type")
+        let task = await UIApplication.shared.beginBackgroundTask(withName: "ai-image", expirationHandler: nil)
+        defer { Task { @MainActor in UIApplication.shared.endBackgroundTask(task) } }
+        let (data, response) = try await URLSession.shared.upload(for: request, from: r.body)
+        return try OpenAIImageWire.image(status: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+    }
+
     /// Cheap call to check that a key works.
     static func test(_ provider: AIProvider) async throws -> String {
         let r = try await call(provider, AskResult.self, system: "Reply with a one-line friendly hello for a tidying app.",

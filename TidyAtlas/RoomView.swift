@@ -29,6 +29,7 @@ struct RoomView: View {
     @State private var errorText: String?
     @State private var quickLook: URL?
     @State private var showAR = false
+    @State private var showStudio = false
     @State private var mapStyle = 0
 
     var body: some View {
@@ -54,6 +55,7 @@ struct RoomView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Menu {
+                Button("Design studio", systemImage: "sofa.fill") { showStudio = true }
                 Button("Room details", systemImage: "slider.horizontal.3") { editingRoom = true }
                 if room.usdzFile != nil {
                     Button("View LiDAR scan in AR", systemImage: "arkit") { quickLook = room.usdzFile.map(Storage.roomScanURL) }
@@ -74,6 +76,7 @@ struct RoomView: View {
         }
         .fullScreenCover(isPresented: $focus) { FocusView(room: room) }
         .fullScreenCover(isPresented: $showAR) { ARRoomScreen(room: room) }
+        .navigationDestination(isPresented: $showStudio) { DesignStudioView(room: room) }
         .sheet(item: $editingItem) { ItemEditor(item: $0, room: room) }
         .sheet(item: $editingZone) { ZoneEditor(zone: $0, room: room) }
         .sheet(isPresented: $editingRoom) { RoomEditor(room: room) }
@@ -167,6 +170,10 @@ struct RoomView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Palette.teal)
                 }
+                Button { showStudio = true } label: {
+                    Label("Design studio: rearrange, decorate, Feng Shui & Vastu", systemImage: "sofa.fill").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
                 if RoomScanSupport.isAvailable {
                     Button { showRoomScan = true } label: {
                         Label(room.sizeFromScan ? "Re-scan room with LiDAR" : "Scan room shape with LiDAR", systemImage: "viewfinder")
