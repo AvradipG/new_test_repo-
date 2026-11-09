@@ -1,0 +1,23 @@
+name: Measurement maths tests only
+
+# Quick check of the ScanMath package (no app build, no TestFlight): push work in progress to cb-mathtest.
+on:
+  push:
+    branches: [cb-mathtest]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests (measurement maths)
+        run: |
+          set -o pipefail
+          swift test -c release -Xswiftc -enable-testing --package-path Packages/ScanMath 2>&1 | tee test.log
+      - name: Test report
+        if: always()
+        run: |
+          grep -E "error:|failed" test.log | head -20 | while IFS= read -r l; do echo "::error::${l:0:1200}"; done
+          grep -E "Executed" test.log | tail -2 | while IFS= read -r l; do echo "::notice::$l"; done
