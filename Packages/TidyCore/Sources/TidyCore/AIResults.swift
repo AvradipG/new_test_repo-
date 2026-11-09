@@ -77,6 +77,23 @@ public struct BreakdownResult: Codable, Equatable, Sendable {
     public var steps: [Step]
 }
 
+public struct RoomNameResult: Codable, Equatable, Sendable {
+    public var names: [String]
+    public var tags: [String]
+}
+
+public struct KitchenResult: Codable, Equatable, Sendable {
+    public struct Spot: Codable, Equatable, Sendable {
+        public var ref: String
+        public var zone: String
+        public var contents: String
+    }
+
+    public var summary: String
+    public var spots: [Spot]
+    public var shopping: [DesignAI.Buy]
+}
+
 public struct AskResult: Codable, Equatable, Sendable {
     public var answer: String
     public var itemRefs: [String]

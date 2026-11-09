@@ -234,6 +234,11 @@ struct RoomCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
                 Text(room.name).font(.display(.title3))
+                if room.needsName {
+                    Text("Name me").font(.caption.weight(.bold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.orange, in: Capsule()).foregroundStyle(.white)
+                }
                 Spacer()
                 if outOfPlace > 0 {
                     Text("\(outOfPlace) out of place")

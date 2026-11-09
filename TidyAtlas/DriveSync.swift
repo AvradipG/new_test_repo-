@@ -91,13 +91,13 @@ enum TidyPackage {
                 for s in room.steps { if let d = s.completedAt { latest = max(latest, d) } }
                 latest = max(latest, room.createdAt)
                 let captureFile: [UUID: String] = Dictionary(uniqueKeysWithValues: room.captures.map { ($0.uid, $0.file) })
-                func zoneName(_ id: UUID?) -> Any { jsonValue(room.zone(id)?.name) }
                 let itemList: [[String: Any]] = items.map { it in
                     var e: [String: Any] = [
                         "id": it.uid.uuidString, "name": it.name, "quantity": it.quantity, "category": it.category,
                         "tags": it.tags, "notes": it.notes, "status": it.isSorted ? "put_away" : "to_sort",
                         "plan": it.actionRaw, "out_of_place": it.outOfPlace, "reason": it.reason,
-                        "now_in": zoneName(it.zoneID), "should_live_in": zoneName(it.suggestedZoneID),
+                        "now_in": jsonValue(room.zonePath(it.zoneID)), "should_live_in": jsonValue(room.zonePath(it.suggestedZoneID)),
+                        "use_by": f8601(it.expiresAt),
                         "position_in_room": ["x": it.posX, "y": it.posY, "z": it.posZ],
                         "updated_utc": f8601(it.updatedAt),
                         "location": room.fromHouseScan ? geo(room.locate(unitX: it.posX, unitZ: it.posZ), rough: true) : (NSNull() as Any),
@@ -131,8 +131,23 @@ enum TidyPackage {
                          "location": c.latitude.flatMap { lat in c.longitude.map { GeoPoint(latitude: lat, longitude: $0) } }
                             .map { geo($0, rough: false) } ?? NSNull()] as [String: Any]
                     },
+                    "tags": room.tags,
+                    "needs_name": room.needsName,
+                    "is_kitchen": room.isKitchen,
+                    "map_placement": room.placement.map { p -> Any in
+                        ["x_m": p.x, "z_m": p.z, "rotation_deg": p.rotationDeg, "corrected_by_hand": room.mapX != nil] as [String: Any]
+                    } ?? NSNull(),
+                    "plans": room.plans.sorted { $0.createdAt < $1.createdAt }.map { p in
+                        ["by": p.provider, "version": p.version, "made_utc": f8601(p.createdAt), "energy": p.energy, "minutes": p.minutes,
+                         "feedback": p.feedback, "active": p.uid == room.activePlanID,
+                         "steps": room.steps.filter { $0.planID == p.uid }.sorted { $0.sortKey < $1.sortKey }.map { s in
+                             ["title": s.title, "minutes": s.minutes, "trip": s.trip, "status": s.statusRaw] as [String: Any]
+                         }] as [String: Any]
+                    },
                     "zones": room.zones.sorted { $0.createdAt < $1.createdAt }.map { z in
                         ["id": z.uid.uuidString, "name": z.name, "kind": z.kindRaw, "idea_not_set_up": z.isIdea,
+                         "path": room.zonePath(z.uid) ?? z.name, "inside": jsonValue(z.parentID?.uuidString),
+                         "kitchen_zone": jsonValue(z.kitchenZone), "what_goes_here": z.notes,
                          "position_in_room": ["x": z.posX, "y": z.posY, "z": z.posZ],
                          "size_m": ["width": z.sizeW, "height": z.sizeH, "depth": z.sizeD]] as [String: Any]
                     },
@@ -185,6 +200,22 @@ enum TidyPackage {
             if let f = place.houseScanFile, FileManager.default.fileExists(atPath: Storage.roomScanURL(f).path) {
                 out.append(("\(pf)/place-scan.usdz", Storage.roomScanURL(f)))
             }
+            // The full scan history: every scan's place model and every room's raw scan, never deleted.
+            var history: [[String: Any]] = []
+            for s in place.scans.sorted(by: { $0.date < $1.date }) {
+                let stamp = ISO8601DateFormatter().string(from: s.date).replacingOccurrences(of: ":", with: "-")
+                let folder = "\(pf)/scan-history/\(stamp) \(safe(s.kind))"
+                var entry: [String: Any] = ["kind": s.kind, "date_utc": f8601(s.date), "rooms": s.roomNames, "joined_map": s.joinedMap]
+                if let f = s.usdzFile, FileManager.default.fileExists(atPath: Storage.roomScanURL(f).path) {
+                    out.append(("\(folder)/\(f)", Storage.roomScanURL(f)))
+                    entry["place_model"] = "\(folder)/\(f)"
+                }
+                for (_, f) in s.roomFiles where FileManager.default.fileExists(atPath: Storage.roomScanURL(f).path) {
+                    out.append(("\(folder)/\(f)", Storage.roomScanURL(f)))
+                }
+                history.append(entry)
+            }
+            placeDict["scan_history"] = history
             placeList.append(placeDict)
         }
 
@@ -202,6 +233,14 @@ enum TidyPackage {
             out.insert(("inventory.csv", write(Data(csv.utf8), "inventory.csv")), at: 1)
         }
         out.insert(("README.txt", write(Data(readme.utf8), "README.txt")), at: 0)
+        let shopping = (try? context.fetch(FetchDescriptor<ShoppingItem>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
+        if !shopping.isEmpty {
+            let list = shopping.map { s in
+                ["name": s.name, "category": s.category, "price_usd": s.priceUSD.map { $0 as Any } ?? NSNull(), "why": s.why,
+                 "room": s.roomName, "suggested_by": s.provider, "bought": s.bought, "added_utc": f8601(s.createdAt)] as [String: Any]
+            }
+            out.append(("shopping-list.json", write(json(["schema": "tidy-atlas.shopping/1", "items": list]), "shopping-list.json")))
+        }
         var seen = Set<String>()
         return out.filter { seen.insert($0.0).inserted }
     }
@@ -214,7 +253,9 @@ enum TidyPackage {
     inventory.json   the whole database: places > rooms > storage spots, things (name, tags, where it is, where it
                      should live, size in cm, status) and tidy steps. Schema tidy-atlas.inventory/1.
     inventory.csv    the same things as a spreadsheet.
+    shopping-list.json  things worth buying (decor, organisers, helpful gadgets), who suggested them, bought or not
     places/<place> (<id>)/
+        scan-history/    every scan ever made: the place model and each room's raw RoomPlan scan (JSON), kept for good
         place.geojson    GPS point of the place and rough points for every room and thing (Google Earth, maps, GIS)
         place-plan.png   every room of the whole-place LiDAR scan in its real position, with a north arrow
         place-scan.usdz  the whole place in 3D (open on a Mac or iPhone; AR on iPhone)

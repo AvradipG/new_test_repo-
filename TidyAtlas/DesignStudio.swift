@@ -26,6 +26,7 @@ struct DesignStudioView: View {
     @State private var rendering = false
     @State private var renameText = ""
     @State private var renaming: DesignVariant?
+    @State private var improveTarget: DesignVariant?
 
     private var design: DesignVariant? { room.designs.first { $0.uid == designID } }
 
@@ -53,8 +54,8 @@ struct DesignStudioView: View {
             }
         }
         .sheet(isPresented: $showCatalog) { CatalogSheet { add($0) } }
-        .sheet(isPresented: $showChat) {
-            DesignChatView(room: room, base: design) { id in
+        .sheet(isPresented: $showChat, onDismiss: { improveTarget = nil }) {
+            DesignChatView(room: room, base: design, improving: improveTarget) { id in
                 designID = id
                 load()
                 showChat = false
@@ -87,7 +88,9 @@ struct DesignStudioView: View {
                     Button { designID = d.uid } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(d.name).font(.footnote.weight(.bold))
-                            Text(d.isCurrent ? "the real room" : (d.scoreOverall.map { String(format: "score %.1f", $0) } ?? d.style))
+                            Text(d.isCurrent ? "the real room"
+                                 : ([d.provider.map { "\($0) v\(d.version)" }, d.scoreOverall.map { String(format: "%.1f/10", $0) }]
+                                    .compactMap { $0 }.joined(separator: " · ")).ifEmpty(d.style))
                                 .font(.caption2)
                         }
                         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -98,6 +101,7 @@ struct DesignStudioView: View {
                     .contextMenu {
                         Button("Rename", systemImage: "pencil") { renameText = d.name; renaming = d }
                         Button("Duplicate", systemImage: "plus.square.on.square") { duplicate(d) }
+                        Button("Improve with AI", systemImage: "sparkles") { designID = d.uid; improveTarget = d; showChat = true }
                         if !d.isCurrent {
                             Button("I've arranged the room like this", systemImage: "checkmark.seal") { makeReal(d) }
                             Button("Delete", systemImage: "trash", role: .destructive) { delete(d) }
@@ -122,6 +126,11 @@ struct DesignStudioView: View {
                 Text(String(format: "Flow %.0f · Calm %.0f · Overall %.1f / 10", f, c, o)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             ForEach(d.tips, id: \.self) { Text("• " + $0).font(.caption) }
+            Button {
+                improveTarget = d
+                showChat = true
+            } label: { Label("Improve this design", systemImage: "arrow.up.forward.circle") }
+                .buttonStyle(.bordered)
         }
         .card(Palette.tint)
     }
@@ -335,6 +344,10 @@ struct DesignStudioView: View {
         message = "Done. Storage spots moved with the furniture, so the map and plans follow your new layout."
         organizer.scheduleDriveSync()
     }
+}
+
+extension String {
+    func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
 }
 
 // MARK: - Plan editor

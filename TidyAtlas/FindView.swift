@@ -17,7 +17,7 @@ struct FindView: View {
             if let category, it.category != category { return false }
             guard !words.isEmpty else { return true }
             let hay = ([it.name, it.category, it.notes, it.room?.name ?? "", it.room?.place?.name ?? "",
-                        it.room?.zone(it.zoneID)?.name ?? ""] + it.tags).joined(separator: " ").lowercased()
+                        it.room?.zonePath(it.zoneID) ?? ""] + it.tags + (it.room?.tags ?? [])).joined(separator: " ").lowercased()
             return words.allSatisfy { hay.contains($0) }
         }
     }
@@ -109,7 +109,7 @@ struct ItemRow: View {
             ItemThumb(file: item.thumbFile, category: item.category, size: 48)
             VStack(alignment: .leading, spacing: 2) {
                 Text((item.quantity > 1 ? "\(item.quantity)× " : "") + item.name).font(.body.weight(.semibold))
-                Text([item.room?.place?.name, item.room?.name, item.room?.zone(item.zoneID)?.name ?? "loose"]
+                Text([item.room?.place?.name, item.room?.name, item.room?.zonePath(item.zoneID) ?? "loose"]
                     .compactMap { $0 }.joined(separator: " › "))
                     .font(.caption).foregroundStyle(.secondary)
                 if let size = item.sizeText { Text(size).font(.caption2.monospacedDigit()).foregroundStyle(.secondary) }

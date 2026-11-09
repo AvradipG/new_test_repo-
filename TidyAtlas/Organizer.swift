@@ -65,7 +65,7 @@ final class Organizer: ObservableObject {
     // MARK: Scanning
 
     /// Photos and videos → stills → Claude, one photo at a time, merged into the room.
-    func scan(_ media: [PickedMedia], into room: Room, context: ModelContext) async -> ScanOutcome {
+    func scan(_ media: [PickedMedia], into room: Room, inside: Zone? = nil, context: ModelContext) async -> ScanOutcome {
         var outcome = ScanOutcome()
         UIApplication.shared.isIdleTimerDisabled = true
         defer {
@@ -95,7 +95,7 @@ final class Organizer: ObservableObject {
             context.insert(capture)
             try? context.save()
             do {
-                let plan = try await analyze(capture, in: room, context: context)
+                let plan = try await analyze(capture, in: room, inside: inside, context: context)
                 outcome.added += plan.insertCount
                 outcome.updated += plan.updateCount
             } catch {
@@ -129,7 +129,7 @@ final class Organizer: ObservableObject {
 
     /// Runs (or re-runs) Claude on one stored photo and merges the answer into the room.
     @discardableResult
-    func analyze(_ capture: Capture, in room: Room, context: ModelContext) async throws -> MergePlan {
+    func analyze(_ capture: Capture, in room: Room, inside: Zone? = nil, context: ModelContext) async throws -> MergePlan {
         capture.status = .analyzing
         capture.error = nil
         try? context.save()
@@ -144,7 +144,7 @@ final class Organizer: ObservableObject {
                 let ref = "z\(n + 1)"
                 zoneRefs[ref] = z.uid
                 zoneRefByID[z.uid] = ref
-                zonesCtx.append(["ref": ref, "name": z.name, "kind": z.kindRaw, "pos_x": z.posX, "pos_z": z.posZ])
+                zonesCtx.append(["ref": ref, "name": room.zonePath(z.uid) ?? z.name, "kind": z.kindRaw, "pos_x": z.posX, "pos_z": z.posZ])
             }
             var itemRefs: [String: UUID] = [:]
             var itemsCtx: [[String: Any]] = []
@@ -154,12 +154,16 @@ final class Organizer: ObservableObject {
                 itemsCtx.append(["ref": ref, "name": it.name, "category": it.category,
                                  "zone": jsonValue(it.zoneID.flatMap { zoneRefByID[$0] })])
             }
-            let ctx: [String: Any] = [
+            var ctx: [String: Any] = [
                 "room": ["name": room.name, "type": room.roomType.isEmpty ? "unknown" : room.roomType,
                          "width_m": room.widthM, "depth_m": room.depthM],
                 "known_zones": zonesCtx,
                 "known_items": itemsCtx,
             ]
+            if let inside, let ref = zoneRefByID[inside.uid] {
+                ctx["photo_shows_inside_of"] = ["ref": ref, "path": room.zonePath(inside.uid) ?? inside.name,
+                                                "note": "Things in this photo are inside this spot: use it as their current_zone_ref unless they are clearly elsewhere. Don't add this spot again as a new zone."]
+            }
             let ctxText = String(data: try JSONSerialization.data(withJSONObject: ctx), encoding: .utf8) ?? "{}"
 
             let analysis = try await AIService.call(
@@ -171,7 +175,7 @@ final class Organizer: ObservableObject {
             )
             let plan = MergePlanner.plan(analysis, knownItems: itemRefs, knownZones: zoneRefs)
             if plan.ops.isEmpty && plan.newZones.isEmpty { throw OrganizerError.nothingFound }
-            let placed = apply(plan, capture: capture, room: room, firstPhoto: firstPhoto, context: context)
+            let placed = apply(plan, capture: capture, room: room, firstPhoto: firstPhoto, inside: inside, context: context)
             measure(placed, depth: DepthStore.load(for: capture.uid))
             capture.status = .analyzed
             capture.itemCount = plan.ops.count
@@ -206,13 +210,15 @@ final class Organizer: ObservableObject {
     }
 
     @discardableResult
-    private func apply(_ plan: MergePlan, capture: Capture, room: Room, firstPhoto: Bool, context: ModelContext)
+    private func apply(_ plan: MergePlan, capture: Capture, room: Room, firstPhoto: Bool, inside: Zone? = nil, context: ModelContext)
         -> [(Item, PhotoBox, MergedItem)] {
         var placed: [(Item, PhotoBox, MergedItem)] = []
         if room.roomType.isEmpty { room.roomType = plan.roomType }
-        room.clutterScore = plan.clutterScore
-        room.summary = plan.summary
-        if firstPhoto && !room.sizeFromScan {
+        if inside == nil {
+            room.clutterScore = plan.clutterScore
+            room.summary = plan.summary
+        }
+        if firstPhoto && inside == nil && !room.sizeFromScan {
             room.widthM = plan.widthM
             room.depthM = plan.depthM
             room.heightM = plan.heightM
@@ -228,6 +234,7 @@ final class Organizer: ObservableObject {
             zone.sizeH = z.sizeH
             zone.sizeD = z.sizeD
             zone.isIdea = z.isIdea
+            zone.parentID = inside?.uid
             zone.room = room
             context.insert(zone)
             newZoneIDs[z.ref] = zone.uid
@@ -273,7 +280,7 @@ final class Organizer: ObservableObject {
                 item.action = m.action
                 item.reason = m.reason
                 item.isSorted = m.startsSorted
-                item.zoneID = resolve(m.currentZone)
+                item.zoneID = resolve(m.currentZone) ?? inside?.uid
                 item.suggestedZoneID = resolve(m.suggestedZone)
                 item.captureID = capture.uid
                 item.thumbFile = Storage.saveThumbnail(from: capture.file, box: m.bbox)
@@ -287,7 +294,9 @@ final class Organizer: ObservableObject {
 
     /// A finished whole-place scan: geotag on the place, and every scanned room created (or updated, matched by
     /// name) with its walls, size, position in the place and furniture as storage spots.
-    func applyHouseScan(_ scanned: [ScannedRoom], geotag: ScanGeotag?, modelFile: String?, to place: Place, context: ModelContext) {
+    func applyHouseScan(_ scanned: [ScannedRoom], geotag: ScanGeotag?, modelFile: String?, worldMapFile: String? = nil,
+                        joinedMap: Bool = true, kind: String = "Whole place", rescan: Room? = nil,
+                        to place: Place, context: ModelContext) {
         if let g = geotag {
             place.latitude = g.location.coordinate.latitude
             place.longitude = g.location.coordinate.longitude
@@ -301,25 +310,57 @@ final class Organizer: ObservableObject {
             place.houseScanFile = modelFile
             place.houseScannedAt = Date()
         }
-        for s in scanned {
-            let room = place.rooms.first { $0.name.lowercased() == s.name.lowercased() } ?? {
-                let r = Room(name: s.name)
-                r.place = place
-                context.insert(r)
-                return r
-            }()
+        if let worldMapFile { place.worldMapFile = worldMapFile }
+        let record = ScanRecord(kind: kind)
+        record.usdzFile = modelFile
+        record.joinedMap = joinedMap
+        record.place = place
+        context.insert(record)
+        var files: [String: String] = [:]
+        for (n, s) in scanned.enumerated() {
+            let room: Room
+            if let rescan, n == 0 {
+                room = rescan
+            } else if !s.needsName, let existing = place.rooms.first(where: { !$0.needsName && $0.name.lowercased() == s.name.lowercased() }) {
+                room = existing
+            } else {
+                room = Room(name: s.name)
+                room.place = place
+                context.insert(room)
+            }
+            let previous = room.placement
             room.fromHouseScan = true
             room.sectionLabel = s.room.sections.first.map { String(describing: $0.label) }
             if room.roomType.isEmpty, let label = room.sectionLabel, label != "unidentified" { room.roomType = label }
+            if s.needsName { room.needsName = true }
             applyRoomScan(s.room, to: room, context: context, quiet: true)
+            if joinedMap {
+                // The scan shares the place's map: its own position is right.
+                room.mapX = nil
+                room.mapZ = nil
+                room.mapRotationDeg = 0
+            } else if let previous {
+                // Couldn't find the old map: keep the room where it was; the owner can drag it on the map.
+                room.mapX = previous.x
+                room.mapZ = previous.z
+                room.mapRotationDeg = previous.rotationDeg
+            } else {
+                let others = place.mappedRooms.filter { $0.0.uid != room.uid }.map { $0.1.corners(width: $0.0.widthM, depth: $0.0.depthM) }
+                let spot = RoomPlacement.nextFree(after: others, width: room.widthM)
+                room.mapX = spot.x
+                room.mapZ = spot.z
+            }
+            if let f = room.capturedRoomFile { files[room.uid.uuidString] = f }
+            record.roomNames.append(room.name)
         }
+        record.roomFiles = files
         try? context.save()
         Haptics.success()
         scheduleDriveSync()
     }
 
     /// A finished LiDAR room scan: real size, wall layout, and furniture as starting storage zones.
-    func applyRoomScan(_ captured: CapturedRoom, to room: Room, context: ModelContext, quiet: Bool = false) {
+    func applyRoomScan(_ captured: CapturedRoom, to room: Room, context: ModelContext, quiet: Bool = false, keepRaw: Bool = true) {
         if let layout = RoomScanSupport.layout(of: captured) {
             room.layout = layout
             room.widthM = layout.widthM
@@ -343,9 +384,14 @@ final class Organizer: ObservableObject {
                 context.insert(zone)
             }
         }
-        let name = room.uid.uuidString + ".usdz"
+        let stamp = String(Int(Date().timeIntervalSince1970))
+        // Every raw scan is kept (never overwritten), so earlier scans can be restored and re-read by new features.
+        if keepRaw, let data = try? JSONEncoder().encode(captured) {
+            let raw = "\(room.uid.uuidString)-\(stamp).capturedroom.json"
+            if (try? data.write(to: Storage.roomScanURL(raw), options: .atomic)) != nil { room.capturedRoomFile = raw }
+        }
+        let name = "\(room.uid.uuidString)-\(stamp).usdz"
         let url = Storage.roomScanURL(name)
-        try? FileManager.default.removeItem(at: url)
         if (try? captured.export(to: url, metadataURL: nil, modelProvider: nil, exportOptions: .mesh)) != nil {
             room.usdzFile = name
         }
@@ -374,46 +420,80 @@ final class Organizer: ObservableObject {
     // MARK: Coaching
 
     /// Claude turns the room's unsorted things into tiny steps that fit the energy and time available.
-    func makePlan(for room: Room, energy: Energy, minutes: Int, context: ModelContext) async throws -> String {
+    /// Claude or ChatGPT (or the Settings order) turns the room's unsorted things into tiny steps. Every plan is
+    /// saved with who made it; earlier plans stay and can be switched back to or improved.
+    func makePlan(for room: Room, energy: Energy, minutes: Int, provider: AIProvider? = nil, context: ModelContext) async throws -> String {
+        try await plan(room: room, energy: energy, minutes: minutes, provider: provider, improving: nil, feedback: "", context: context)
+    }
+
+    /// A new version of an earlier plan, changed the way the owner asked.
+    func improvePlan(_ old: TidyPlan, feedback: String, provider: AIProvider? = nil, context: ModelContext) async throws -> String {
+        guard let room = old.room else { throw OrganizerError.nothingToPlan }
+        return try await plan(room: room, energy: Energy(rawValue: old.energy) ?? .medium, minutes: old.minutes,
+                              provider: provider, improving: old, feedback: feedback, context: context)
+    }
+
+    private func plan(room: Room, energy: Energy, minutes: Int, provider: AIProvider?, improving old: TidyPlan?,
+                      feedback: String, context: ModelContext) async throws -> String {
         let toSort = Array(room.toSort.prefix(200))
         guard !toSort.isEmpty else { throw OrganizerError.nothingToPlan }
         busy = true
         defer { busy = false }
         var refs: [String: UUID] = [:]
+        var refByID: [UUID: String] = [:]
         let items: [[String: Any]] = toSort.enumerated().map { n, it in
             let ref = "i\(n + 1)"
             refs[ref] = it.uid
+            refByID[it.uid] = ref
             return [
                 "ref": ref, "name": it.name, "qty": it.quantity,
-                "now_in": room.zone(it.zoneID)?.name ?? "loose / floor",
-                "goes_to": jsonValue(room.zone(it.suggestedZoneID)?.name),
+                "now_in": room.zonePath(it.zoneID) ?? "loose / floor",
+                "goes_to": jsonValue(room.zonePath(it.suggestedZoneID)),
                 "action": it.actionRaw, "out_of_place": it.outOfPlace, "note": it.reason,
             ]
         }
-        let ctx: [String: Any] = [
+        var ctx: [String: Any] = [
             "room": room.name, "energy": energy.rawValue, "minutes_available": minutes,
-            "zones": room.zones.map { ["name": $0.name, "kind": $0.kindRaw, "needs_setting_up": $0.isIdea] },
+            "zones": room.zones.map { ["name": room.zonePath($0.uid) ?? $0.name, "kind": $0.kindRaw, "needs_setting_up": $0.isIdea] },
             "items": items,
         ]
+        if let old {
+            let oldSteps = room.steps.filter { $0.planID == old.uid }.sorted { $0.sortKey < $1.sortKey }
+            ctx["earlier_plan"] = oldSteps.map { s -> [String: Any] in
+                ["title": s.title, "detail": s.detail, "minutes": s.minutes, "trip": s.trip, "status": s.statusRaw,
+                 "item_ref": jsonValue(s.itemID.flatMap { refByID[$0] })]
+            }
+            ctx["owner_feedback"] = feedback.isEmpty ? "Make it better and easier to start." : feedback
+        }
         let text = String(data: try JSONSerialization.data(withJSONObject: ctx), encoding: .utf8) ?? "{}"
-        let plan = try await AIService.call(PlanResult.self, system: Prompts.planSystem,
-                                                content: [.text(text)], schema: Prompts.planSchema,
-                                                effort: .medium)
-        guard !plan.steps.isEmpty else { throw ClaudeWire.Failure.unreadable }
-        for s in room.steps where s.status == .todo { context.delete(s) }
-        for (n, s) in plan.steps.prefix(40).enumerated() {
+        let result = try await AIService.call(PlanResult.self, system: old == nil ? Prompts.planSystem : Prompts.improvePlanSystem,
+                                              content: [.text(text)], schema: Prompts.planSchema, effort: .medium, only: provider)
+        guard !result.steps.isEmpty else { throw ClaudeWire.Failure.unreadable }
+        let record = TidyPlan(provider: AIService.lastProvider?.label ?? provider?.label ?? "AI")
+        record.energy = energy.rawValue
+        record.minutes = minutes
+        record.pepTalk = result.pepTalk
+        record.feedback = feedback
+        record.parentID = old?.uid
+        record.version = old.map { o in (room.plans.filter { $0.provider == record.provider }.map(\.version).max() ?? o.version) + 1 }
+            ?? ((room.plans.filter { $0.provider == record.provider }.map(\.version).max() ?? 0) + 1)
+        record.room = room
+        context.insert(record)
+        for (n, s) in result.steps.prefix(40).enumerated() {
             let step = TidyStep(title: Clamp.text(s.title, 120))
             step.detail = Clamp.text(s.detail, 300)
             step.minutes = Int(Clamp.range(Double(s.minutes), 1, 15, fallback: 2))
             step.trip = max(1, s.trip)
             step.sortKey = Double(n + 1)
             step.itemID = s.itemRef.flatMap { refs[$0] }
+            step.planID = record.uid
             step.room = room
             context.insert(step)
         }
+        room.activePlanID = record.uid
         try? context.save()
         scheduleDriveSync()
-        return plan.pepTalk
+        return result.pepTalk
     }
 
     func complete(_ step: TidyStep, in room: Room, context: ModelContext) {
@@ -448,6 +528,7 @@ final class Organizer: ObservableObject {
             sub.trip = step.trip
             sub.sortKey = step.sortKey + (next - step.sortKey) * Double(n) / Double(subs.count)
             sub.itemID = n == subs.count - 1 ? step.itemID : nil
+            sub.planID = step.planID
             sub.room = room
             context.insert(sub)
         }

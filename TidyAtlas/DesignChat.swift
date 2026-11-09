@@ -4,7 +4,8 @@ import TidyCore
 
 extension Organizer {
     /// One message to the AI designer about a room. A proposal in the answer becomes a new design of the room.
-    func designChat(_ text: String, room: Room, base: DesignVariant?, includePhoto: Bool, context: ModelContext) async throws {
+    func designChat(_ text: String, room: Room, base: DesignVariant?, includePhoto: Bool, provider: AIProvider? = nil,
+                    improving: Bool = false, context: ModelContext) async throws {
         var chat = room.designChat
         chat.append(DesignMessage(fromUser: true, text: text))
         room.designChat = chat
@@ -31,6 +32,9 @@ extension Organizer {
             "conversation_so_far": history,
             "owner_says": text,
         ]
+        if improving {
+            payload["task"] = "Improve the design being worked on (\(baseDesign.name)): keep what works, fix what the owner says, and return a full proposal."
+        }
         if let place = room.place { payload["home"] = ["name": place.name, "address": jsonValue(place.address)] }
         if !room.items.isEmpty {
             let counts = Dictionary(grouping: room.items, by: \.category).mapValues(\.count)
@@ -45,7 +49,7 @@ extension Organizer {
         content.append(.text(json))
 
         let answer = try await AIService.call(DesignAI.Answer.self, system: DesignAI.system, content: content,
-                                              schema: DesignAI.schema, effort: .medium)
+                                              schema: DesignAI.schema, effort: .medium, only: provider)
         var reply = answer.reply
         if !answer.ranking.isEmpty {
             reply += "\n\n" + answer.ranking.enumerated().map { n, r in
@@ -63,9 +67,19 @@ extension Organizer {
             d.scoreFlow = p.scores.flow
             d.scoreCalm = p.scores.calm
             d.pieces = DesignAI.apply(p, to: pieces, width: room.widthM, depth: room.depthM)
+            d.provider = AIService.lastProvider?.label
+            if improving {
+                d.parentID = baseDesign.uid
+                d.version = baseDesign.version + 1
+                if p.title.isEmpty { d.name = "\(baseDesign.name) v\(d.version)" }
+            }
             d.room = room
             context.insert(d)
             message.designID = d.uid
+        }
+        if let buys = answer.shopping, !buys.isEmpty {
+            saveShopping(buys, room: room, context: context)
+            message.text += "\n\n🛒 Added \(buys.count) idea\(buys.count == 1 ? "" : "s") to your shopping list."
         }
         chat = room.designChat
         chat.append(message)
@@ -78,7 +92,10 @@ extension Organizer {
 struct DesignChatView: View {
     let room: Room
     let base: DesignVariant?
+    /// Set when the owner tapped "Improve this design".
+    var improving: DesignVariant? = nil
     var onOpenDesign: (UUID) -> Void
+    @State private var provider = "auto"
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var organizer: Organizer
@@ -121,6 +138,11 @@ struct DesignChatView: View {
                 }
                 Divider()
                 VStack(spacing: 8) {
+                    if let i = improving {
+                        Label("Improving “\(i.name)”\(i.provider.map { " (made by \($0))" } ?? ""): say what to change", systemImage: "arrow.up.forward.circle")
+                            .font(.caption.weight(.semibold)).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    AIProviderPicker(selection: $provider)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack {
                             ForEach(starters, id: \.self) { s in
@@ -180,7 +202,10 @@ struct DesignChatView: View {
         guard KeyStore.hasKey else { errorText = ClaudeWire.Failure.noKey.errorDescription; return }
         text = ""
         Task {
-            do { try await organizer.designChat(t, room: room, base: base, includePhoto: includePhoto, context: context) }
+            do {
+                try await organizer.designChat(t, room: room, base: improving ?? base, includePhoto: includePhoto,
+                                               provider: AIProviderPicker.provider(provider), improving: improving != nil, context: context)
+            }
             catch { errorText = error.localizedDescription }
         }
     }

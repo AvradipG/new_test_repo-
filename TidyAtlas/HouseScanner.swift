@@ -9,6 +9,8 @@ struct ScannedRoom: Identifiable {
     let id = UUID()
     var name: String
     var room: CapturedRoom
+    /// "Name later" was tapped.
+    var needsName = false
 }
 
 /// Geotag taken when the whole-place scan starts.
@@ -23,7 +25,7 @@ struct ScanGeotag {
 /// frame; Apple's RoomBuilder finishes each room and StructureBuilder merges them into one model of the place.
 @MainActor
 final class HouseScanModel: ObservableObject {
-    enum Phase: Equatable { case intro, scanning, processing, naming, finishing, failed(String) }
+    enum Phase: Equatable { case intro, relocalizing, scanning, processing, naming, finishing, failed(String) }
 
     let arSession = ARSession()
     lazy var captureView: RoomCaptureView = {
@@ -37,7 +39,14 @@ final class HouseScanModel: ObservableObject {
     @Published var pendingRoom: CapturedRoom?
     @Published var suggestedName = ""
     @Published var geotag: ScanGeotag?
+    /// The scan found the place's saved map, so new rooms land in the right spot.
+    @Published var joinedMap = false
     private let location = LocationService.shared
+    /// Saved map of the place when adding rooms to an earlier scan.
+    var savedMap: ARWorldMap?
+    var wantsGeotag = true
+    /// Adding to an earlier scan (rooms added or rescanned) rather than starting a new map.
+    var extending = false
 
     init() {
         coordinator.onData = { [weak self] data in
@@ -49,13 +58,42 @@ final class HouseScanModel: ObservableObject {
 
     func begin() {
         location.startTracking()
+        guard let map = savedMap else {
+            joinedMap = !extending // a fresh scan defines the map; an extension without a saved map can't join it
+            startRoom()
+            return
+        }
+        // Adding to an earlier scan: find the old map first, so new rooms share its frame.
+        phase = .relocalizing
+        let config = ARWorldTrackingConfiguration()
+        config.initialWorldMap = map
+        arSession.run(config, options: [.resetTracking, .removeExistingAnchors])
+        Task { @MainActor in
+            var sawRelocalizing = false
+            for _ in 0..<90 {
+                guard phase == .relocalizing else { return }
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let state = arSession.currentFrame?.camera.trackingState else { continue }
+                if case .limited(.relocalizing) = state { sawRelocalizing = true }
+                if case .normal = state, sawRelocalizing || arSession.currentFrame?.anchors.isEmpty == false {
+                    joinedMap = true
+                    startRoom()
+                    return
+                }
+            }
+        }
+    }
+
+    /// Couldn't find the old map: scan anyway; the rooms are placed by hand on the map afterwards.
+    func skipRelocalization() {
+        joinedMap = false
         startRoom()
     }
 
     func startRoom() {
         phase = .scanning
         captureView.captureSession.run(configuration: RoomCaptureSession.Configuration())
-        if geotag == nil {
+        if geotag == nil && wantsGeotag {
             Task { @MainActor in
                 // Wait for the camera to be tracking and for a first GPS fix.
                 for _ in 0..<30 where geotag == nil {
@@ -116,22 +154,39 @@ final class HouseScanModel: ObservableObject {
         pendingRoom = nil
     }
 
+    /// Keep the room without a name for now; it shows up as "Name me" later.
+    func keepRoomUnnamed(number: Int) {
+        guard let room = pendingRoom else { return }
+        rooms.append(ScannedRoom(name: "Unnamed room \(number)", room: room, needsName: true))
+        pendingRoom = nil
+    }
+
     func discardRoom() {
         pendingRoom = nil
         startRoom()
     }
 
-    /// Merges the rooms into one model of the place. Returns the USDZ file name (in Documents/RoomScans), if any.
-    func finish(fileStem: String) async -> String? {
+    /// Saves the AR map of everything seen so far (for adding rooms later). Returns the file name.
+    func saveWorldMap(fileStem: String) async -> String? {
+        let map: ARWorldMap? = await withCheckedContinuation { cont in
+            arSession.getCurrentWorldMap { map, _ in cont.resume(returning: map) }
+        }
+        guard let map, let data = try? NSKeyedArchiver.archivedData(withRootObject: map, requiringSecureCoding: true) else { return nil }
+        let name = "\(fileStem)-place-\(Int(Date().timeIntervalSince1970)).arworldmap"
+        return (try? data.write(to: Storage.worldMapURL(name), options: .atomic)) != nil ? name : nil
+    }
+
+    /// Merges the rooms (plus earlier rooms that share the map) into one model of the place. Returns the USDZ file
+    /// name (in Documents/RoomScans), if any. Earlier models are kept.
+    func finish(fileStem: String, earlierRooms: [CapturedRoom] = []) async -> String? {
         phase = .finishing
-        arSession.pause()
         location.stopTracking()
-        guard !rooms.isEmpty else { return nil }
-        let name = fileStem + "-place.usdz"
+        guard !rooms.isEmpty else { arSession.pause(); return nil }
+        let name = "\(fileStem)-place-\(Int(Date().timeIntervalSince1970)).usdz"
         let url = Storage.roomScanURL(name)
-        try? FileManager.default.removeItem(at: url)
+        defer { arSession.pause() }
         do {
-            let structure = try await StructureBuilder(options: [.beautifyObjects]).capturedStructure(from: rooms.map(\.room))
+            let structure = try await StructureBuilder(options: [.beautifyObjects]).capturedStructure(from: earlierRooms + rooms.map(\.room))
             try structure.export(to: url)
             return name
         } catch {
@@ -175,6 +230,10 @@ struct HouseCaptureRepresentable: UIViewRepresentable {
 /// The whole-place scan screen.
 struct HouseScanSheet: View {
     let place: Place?
+    /// Add rooms to the place's earlier scan (instead of starting a new one).
+    var addToMap = false
+    /// Scan this one room again.
+    var rescan: Room? = nil
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var organizer: Organizer
@@ -197,7 +256,14 @@ struct HouseScanSheet: View {
             }
             .padding()
         }
-        .onAppear { placeName = place?.name ?? "Home" }
+        .onAppear {
+            placeName = place?.name ?? "Home"
+            if addToMap || rescan != nil, let f = place?.worldMapFile {
+                scan.savedMap = ARRoomController.loadWorldMap(Storage.worldMapURL(f))
+            }
+            scan.wantsGeotag = place?.geo == nil
+            scan.extending = addToMap || rescan != nil
+        }
         .onDisappear { scan.cancel() }
     }
 
@@ -232,6 +298,38 @@ struct HouseScanSheet: View {
 
     @ViewBuilder private var bottomPanel: some View {
         switch scan.phase {
+        case .relocalizing:
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Finding your earlier scan…", systemImage: "location.viewfinder").font(.headline)
+                Text("Point the phone at a room you scanned before and move slowly, so the new scan joins the old map in the right spot.")
+                    .font(.callout)
+                Button("Can't find it: scan anyway, I'll place it on the map") { scan.skipRelocalization() }
+                    .buttonStyle(.bordered)
+            }
+            .card()
+
+        case .intro where rescan != nil || addToMap:
+            VStack(alignment: .leading, spacing: 14) {
+                Text(rescan.map { "Rescan \($0.name)" } ?? "Add rooms to \(placeName)").font(.display(.largeTitle))
+                Text(rescan != nil
+                     ? "Scan this room again to fix a scan that missed walls or furniture. The old scan stays in the history, and everything in the room stays."
+                     : "Scan rooms you missed. The app first finds your earlier scan so the new rooms join the same map. If it can't, you place them on the map yourself.")
+                    .foregroundStyle(.secondary)
+                if place?.worldMapFile == nil {
+                    Label("This place has no saved map yet (scanned with an older version). You'll place the new rooms on the map by hand.",
+                          systemImage: "info.circle").font(.footnote)
+                }
+                Button {
+                    scan.begin()
+                } label: {
+                    Label("Start scanning", systemImage: "viewfinder").frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!HouseScanModel.isSupported)
+            }
+            .card()
+
         case .intro:
             VStack(alignment: .leading, spacing: 14) {
                 Text("Scan the whole place").font(.display(.largeTitle))
@@ -276,6 +374,21 @@ struct HouseScanSheet: View {
             Label("Putting this room together…", systemImage: "cube.transparent")
                 .font(.headline).padding().background(.ultraThinMaterial, in: Capsule())
 
+        case .naming where rescan != nil:
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Use this scan for \(rescan?.name ?? "the room")?").font(.display(.title3))
+                HStack {
+                    Button("Scan again", role: .destructive) { scan.discardRoom() }
+                    Spacer()
+                    Button("Use this scan") {
+                        scan.keepRoom(named: rescan?.name ?? "Room")
+                        Task { await finish() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .card()
+
         case .naming:
             VStack(alignment: .leading, spacing: 10) {
                 Text("What's this room called?").font(.display(.title3))
@@ -290,6 +403,12 @@ struct HouseScanSheet: View {
                 HStack {
                     Button("Scan again", role: .destructive) { roomName = ""; scan.discardRoom() }
                     Spacer()
+                    Button("Name later") {
+                        scan.keepRoomUnnamed(number: (place?.rooms.filter(\.needsName).count ?? 0) + scan.rooms.filter(\.needsName).count + 1)
+                        roomName = ""
+                        scan.startRoom()
+                    }
+                    .buttonStyle(.bordered)
                     Button("Finish") {
                         scan.keepRoom(named: roomName)
                         roomName = ""
@@ -326,8 +445,17 @@ struct HouseScanSheet: View {
             context.insert(p)
             return p
         }()
-        let file = await scan.finish(fileStem: target.uid.uuidString)
-        organizer.applyHouseScan(scan.rooms, geotag: scan.geotag, modelFile: file, to: target, context: context)
+        let stem = target.uid.uuidString
+        let mapFile = await scan.saveWorldMap(fileStem: stem)
+        // Rooms already on the shared map go into the new place model too.
+        let earlier: [CapturedRoom] = scan.joinedMap && (addToMap || rescan != nil)
+            ? target.rooms.filter { $0.fromHouseScan && $0.mapX == nil && $0.uid != rescan?.uid }.compactMap { Organizer.loadCaptured($0.capturedRoomFile) }
+            : []
+        let file = await scan.finish(fileStem: stem, earlierRooms: earlier)
+        let kind = rescan != nil ? "Rescanned room" : (addToMap ? "Added rooms" : "Whole place")
+        organizer.applyHouseScan(scan.rooms, geotag: scan.geotag, modelFile: file ?? target.houseScanFile,
+                                 worldMapFile: scan.joinedMap ? mapFile : (target.worldMapFile ?? mapFile),
+                                 joinedMap: scan.joinedMap, kind: kind, rescan: rescan, to: target, context: context)
         dismiss()
     }
 }

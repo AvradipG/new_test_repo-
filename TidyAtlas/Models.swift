@@ -24,6 +24,9 @@ final class Place {
     /// USDZ of the whole-place LiDAR scan in Documents/RoomScans.
     var houseScanFile: String?
     var houseScannedAt: Date?
+    /// ARKit world map of the place (Documents/WorldMaps), so later scans join the same map.
+    var worldMapFile: String?
+    @Relationship(deleteRule: .cascade, inverse: \ScanRecord.place) var scans: [ScanRecord] = []
 
     init(name: String, kind: PlaceKind) {
         self.name = name
@@ -41,6 +44,9 @@ final class Place {
         guard let latitude, let longitude else { return nil }
         return GeoPoint(latitude: latitude, longitude: longitude)
     }
+
+    /// Rooms that have a place on the map, and their footprints in the place frame.
+    var mappedRooms: [(Room, RoomPlacement)] { sortedRooms.compactMap { r in r.placement.map { (r, $0) } } }
 
     /// GPS position of a point in the whole-place scan.
     func locate(x: Double, z: Double) -> GeoPoint? {
@@ -85,6 +91,20 @@ final class Room {
     var northBearingOverride: Double?
     /// Which wall the entrance is on, for the Feng Shui bagua map.
     var entranceRaw: String?
+    /// Hand correction of where the room sits on the place map (overrides the scan's own position).
+    var mapX: Double?
+    var mapZ: Double?
+    var mapRotationDeg: Double = 0
+    /// Scanned but not named yet ("Name later").
+    var needsName: Bool = false
+    var tags: [String] = []
+    /// Latest raw RoomPlan scan of this room (JSON, Documents/RoomScans), kept so new app features can re-read it.
+    var capturedRoomFile: String?
+    /// nil = decide from the room's name and type.
+    var isKitchenOverride: Bool?
+    /// The tidy plan whose steps are shown (plans from Claude and ChatGPT are all kept).
+    var activePlanID: UUID?
+    @Relationship(deleteRule: .cascade, inverse: \TidyPlan.room) var plans: [TidyPlan] = []
 
     init(name: String) {
         self.name = name
@@ -93,9 +113,39 @@ final class Room {
     /// Compass bearing of the far wall (the room's −Z direction), when known.
     var bearing: Double? {
         if let o = northBearingOverride { return o }
-        if fromHouseScan, let b = place?.northBearing { return b }
+        if placement != nil, let b = place?.northBearing { return GeoMath.normalize(b + mapRotationDeg) }
         return nil
     }
+
+    /// Where the room is on its place's map: a hand correction, or its position in the whole-place scan.
+    var placement: RoomPlacement? {
+        if let x = mapX, let z = mapZ { return RoomPlacement(x: x, z: z, rotationDeg: mapRotationDeg) }
+        if fromHouseScan, let l = layout, let x = l.originX, let z = l.originZ { return RoomPlacement(x: x, z: z, rotationDeg: mapRotationDeg) }
+        return nil
+    }
+
+    var isKitchen: Bool {
+        if let o = isKitchenOverride { return o }
+        return [name, roomType, sectionLabel ?? ""].contains { $0.lowercased().contains("kitchen") }
+    }
+
+    var displayName: String { needsName ? "\(name) (name me)" : name }
+
+    /// Storage spots as a tree.
+    var storageNodes: [StorageTree.Node] { zones.map { StorageTree.Node(id: $0.uid, parent: $0.parentID, name: $0.name) } }
+
+    /// "Desk › Top drawer › Tray".
+    func zonePath(_ id: UUID?) -> String? {
+        guard let id, zones.contains(where: { $0.uid == id }) else { return nil }
+        return StorageTree.path(of: id, in: storageNodes)
+    }
+
+    func children(of zone: Zone?) -> [Zone] {
+        let ids = Set(StorageTree.children(of: zone?.uid, in: storageNodes).map(\.id))
+        return zones.filter { ids.contains($0.uid) }.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    var activePlan: TidyPlan? { plans.first { $0.uid == activePlanID } }
 
     var entrance: SpaceWisdom.Entrance {
         get { SpaceWisdom.Entrance(rawValue: entranceRaw ?? "") ?? .near }
@@ -121,7 +171,8 @@ final class Room {
                                           rotationDeg: GeoMath.normalize(-o.yaw * 180 / .pi), source: "scanned", zoneID: zone?.uid))
             }
         }
-        for z in zones where !usedZones.contains(z.uid) && !z.isIdea {
+        // Only top-level spots are furniture; drawers and trays inside them move with them.
+        for z in zones where !usedZones.contains(z.uid) && !z.isIdea && z.parentID == nil {
             let kind: String
             switch z.kind {
             case .bed: kind = "bed_double"
@@ -166,14 +217,18 @@ final class Room {
     /// GPS position of a point given in this room's unit coordinates (rough), when the room has a geotag.
     func locate(unitX: Double, unitZ: Double) -> GeoPoint? {
         guard let place else { return nil }
-        if fromHouseScan, let l = layout, let ox = l.originX, let oz = l.originZ {
-            return place.locate(x: ox + (unitX - 0.5) * widthM, z: oz + (unitZ - 0.5) * depthM)
+        if let p = placement {
+            let q = p.toPlace(x: (unitX - 0.5) * widthM, z: (unitZ - 0.5) * depthM)
+            return place.locate(x: q.x, z: q.z)
         }
         return place.geo
     }
 
     var geo: GeoPoint? { locate(unitX: 0.5, unitZ: 0.5) }
-    var todoSteps: [TidyStep] { steps.filter { $0.status == .todo }.sorted { $0.sortKey < $1.sortKey } }
+    /// Steps of the active plan (steps made before plans were saved have no plan).
+    var todoSteps: [TidyStep] {
+        steps.filter { $0.status == .todo && $0.planID == activePlanID }.sorted { $0.sortKey < $1.sortKey }
+    }
     func zone(_ id: UUID?) -> Zone? { id.flatMap { id in zones.first { $0.uid == id } } }
     func capture(_ id: UUID?) -> Capture? { id.flatMap { id in captures.first { $0.uid == id } } }
 }
@@ -197,6 +252,10 @@ final class Zone {
     var arX: Double?
     var arY: Double?
     var arZ: Double?
+    /// The spot this one is inside (a drawer in a desk), nil at the top level.
+    var parentID: UUID?
+    /// Kitchen zone (Kitchen.ZoneType raw value) for kitchen storage.
+    var kitchenZone: String?
     var room: Room?
 
     init(name: String, kind: ZoneKind) {
@@ -246,6 +305,8 @@ final class Item {
     var sizeWidthCM: Double?
     var sizeHeightCM: Double?
     var sizeSource: String?
+    /// Use-by date for food.
+    var expiresAt: Date?
     /// Position in the room's AR world map (metres), when seen in AR with LiDAR.
     var arX: Double?
     var arY: Double?
@@ -302,6 +363,11 @@ final class DesignVariant {
     /// "How it will look" picture made by ChatGPT, in Documents/Designs.
     var renderFile: String?
     var createdAt: Date = Date()
+    /// "Claude", "ChatGPT" or nil (made by hand).
+    var provider: String?
+    /// The design this one improves on.
+    var parentID: UUID?
+    var version: Int = 1
     var room: Room?
 
     init(name: String) {
@@ -332,6 +398,78 @@ extension Room {
     }
 }
 
+/// One saved tidy plan. Plans from Claude and ChatGPT are kept separately and can be improved into new versions.
+@Model
+final class TidyPlan {
+    var uid: UUID = UUID()
+    var provider: String = ""
+    var energy: String = ""
+    var minutes: Int = 15
+    var pepTalk: String = ""
+    /// What the owner asked to change, for improved versions.
+    var feedback: String = ""
+    var version: Int = 1
+    var parentID: UUID?
+    var createdAt: Date = Date()
+    var room: Room?
+
+    init(provider: String) {
+        self.provider = provider
+    }
+
+    var label: String { "\(provider) v\(version) · \(createdAt.formatted(date: .abbreviated, time: .shortened))" }
+}
+
+/// One scan of a place, kept for good: the place model, every room's raw scan, and what it changed.
+@Model
+final class ScanRecord {
+    var uid: UUID = UUID()
+    /// "Whole place", "Added rooms", "Rescanned room" or "Single room".
+    var kind: String = ""
+    var date: Date = Date()
+    var roomNames: [String] = []
+    /// Raw RoomPlan scans (Documents/RoomScans) by room id, JSON of [String: String].
+    var roomFilesData: Data?
+    /// The place model as it was after this scan.
+    var usdzFile: String?
+    /// The scan found its way back into the saved map (false: rooms were placed by hand).
+    var joinedMap: Bool = false
+    var place: Place?
+
+    init(kind: String) {
+        self.kind = kind
+    }
+
+    var roomFiles: [String: String] {
+        get { roomFilesData.flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:] }
+        set { roomFilesData = try? JSONEncoder().encode(newValue) }
+    }
+}
+
+/// Something worth buying, suggested by the designer or the kitchen organiser.
+@Model
+final class ShoppingItem {
+    var uid: UUID = UUID()
+    var name: String = ""
+    var category: String = ""
+    var priceUSD: Double?
+    var why: String = ""
+    var provider: String = ""
+    var roomName: String = ""
+    var bought: Bool = false
+    var createdAt: Date = Date()
+
+    init(name: String) {
+        self.name = name
+    }
+
+    var searchURL: URL? {
+        var c = URLComponents(string: "https://www.google.com/search")
+        c?.queryItems = [URLQueryItem(name: "tbm", value: "shop"), URLQueryItem(name: "q", value: name)]
+        return c?.url
+    }
+}
+
 enum StepStatus: String { case todo, done, skipped }
 
 @Model
@@ -346,6 +484,7 @@ final class TidyStep {
     var completedAt: Date?
     var itemID: UUID?
     var createdAt: Date = Date()
+    var planID: UUID?
     var room: Room?
 
     init(title: String) {

@@ -75,8 +75,16 @@ enum AIService {
     @MainActor static var lastProvider: AIProvider?
 
     static func call<T: Decodable>(_ type: T.Type, system: String, content: [AIContent], schema: String,
-                                   effort: ClaudeWire.Effort, maxTokens: Int = 16000) async throws -> T {
-        let order = preference.order(hasClaude: KeyStore.hasKey(.claude), hasChatGPT: KeyStore.hasKey(.chatgpt))
+                                   effort: ClaudeWire.Effort, maxTokens: Int = 16000, only: AIProvider? = nil) async throws -> T {
+        let order: [AIProvider]
+        if let only {
+            guard KeyStore.hasKey(only) else {
+                throw DriveError(message: "Add a \(only.label) key in Settings to use \(only.label) for this.")
+            }
+            order = [only]
+        } else {
+            order = preference.order(hasClaude: KeyStore.hasKey(.claude), hasChatGPT: KeyStore.hasKey(.chatgpt))
+        }
         guard !order.isEmpty else { throw ClaudeWire.Failure.noKey }
         var lastError: Error = ClaudeWire.Failure.noKey
         for (n, provider) in order.enumerated() {

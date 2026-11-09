@@ -81,3 +81,55 @@ final class DesignTests: XCTestCase {
         XCTAssertNotNil(try? JSONSerialization.data(withJSONObject: ctx))
     }
 }
+
+final class PlaceMapTests: XCTestCase {
+    func testPlacementRoundTrip() {
+        let p = RoomPlacement(x: 5, z: -2, rotationDeg: 90)
+        let q = p.toPlace(x: 1, z: 0)
+        XCTAssertEqual(q.x, 5, accuracy: 1e-9, "turned 90° clockwise, the room's +x points to the place's +z")
+        XCTAssertEqual(q.z, -1, accuracy: 1e-9)
+        let back = p.toRoom(x: q.x, z: q.z)
+        XCTAssertEqual(back.x, 1, accuracy: 1e-9)
+        XCTAssertEqual(back.z, 0, accuracy: 1e-9)
+        let next = RoomPlacement.nextFree(after: [p.corners(width: 4, depth: 3)], width: 2)
+        XCTAssertEqual(next.x, 5 + 1.5 + 0.5 + 1, accuracy: 1e-9, "a new room goes right of the others")
+    }
+
+    func testStorageTree() {
+        let desk = UUID(), drawer = UUID(), tray = UUID(), shelf = UUID()
+        let nodes = [StorageTree.Node(id: desk, parent: nil, name: "Desk"),
+                     StorageTree.Node(id: drawer, parent: desk, name: "Top drawer"),
+                     StorageTree.Node(id: tray, parent: drawer, name: "Tray"),
+                     StorageTree.Node(id: shelf, parent: nil, name: "Shelf")]
+        XCTAssertEqual(StorageTree.path(of: tray, in: nodes), "Desk › Top drawer › Tray")
+        XCTAssertEqual(StorageTree.children(of: nil, in: nodes).map(\.name), ["Desk", "Shelf"])
+        XCTAssertEqual(StorageTree.subtree(of: desk, in: nodes), [desk, drawer, tray])
+        XCTAssertFalse(StorageTree.canMove(desk, under: tray, in: nodes), "a desk can't go inside its own tray")
+        XCTAssertTrue(StorageTree.canMove(tray, under: shelf, in: nodes))
+        XCTAssertEqual(StorageTree.depth(of: tray, in: nodes), 2)
+        let loop = [StorageTree.Node(id: desk, parent: drawer, name: "A"), StorageTree.Node(id: drawer, parent: desk, name: "B")]
+        XCTAssertEqual(StorageTree.path(of: desk, in: loop), "B › A", "a loop in old data doesn't hang")
+    }
+
+    func testKitchen() {
+        let good = Kitchen.triangle(fridge: (0, 0), sink: (2, 0), stove: (2, 2))
+        XCTAssertEqual(good.total, 2 + 2 + 2.83, accuracy: 0.01)
+        XCTAssertTrue(good.isGood)
+        XCTAssertFalse(Kitchen.triangle(fridge: (0, 0), sink: (0.8, 0), stove: (2, 1)).isGood)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let soon = Kitchen.useSoon([("milk", now.addingTimeInterval(86_400)), ("rice", now.addingTimeInterval(86_400 * 300)),
+                                    ("yogurt", now.addingTimeInterval(-3600))], now: now)
+        XCTAssertEqual(soon.map(\.0), ["yogurt", "milk"])
+    }
+
+    func testCatalogAndSchemas() {
+        XCTAssertNotNil(FurnitureCatalog.item("visual_timer"))
+        XCTAssertNotNil(FurnitureCatalog.item("wall_picture"))
+        XCTAssertEqual(Set(FurnitureCatalog.items.map(\.kind)).count, FurnitureCatalog.items.count, "kinds are unique")
+        for s in [Prompts.roomNameSchema, Prompts.kitchenSchema, DesignAI.schema] {
+            XCTAssertFalse(Prompts.schemaObject(s).isEmpty)
+        }
+        let old = #"{"reply":"Hi","proposal":null,"ranking":[]}"#
+        XCTAssertNil(try AIResults.decoder.decode(DesignAI.Answer.self, from: Data(old.utf8)).shopping)
+    }
+}

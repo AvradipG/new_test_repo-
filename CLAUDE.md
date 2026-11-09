@@ -32,6 +32,18 @@ plain-language requests, each ending with a push that reaches the phone through 
   (`DesignPiece`, `FurnitureCatalog`, `DesignGeometry`, `SpaceWisdom`) and `DesignAI.swift`; image editing for
   "how it will look" in `OpenAIImageWire` (ChatGPT only, model `gpt-image-1` unless set in UserDefaults
   `ai.openai.imageModel`).
+- Corrections and history (1.5): `Room.placement` (scan origin, or hand correction `mapX/mapZ/mapRotationDeg`) via
+  TidyCore `RoomPlacement`; `PlaceMapEditor.swift` (drag/turn rooms, put rooms on the map, `RoomNameSheet`). Each
+  scan is a `ScanRecord` (place USDZ + every room's raw `CapturedRoom` JSON, never deleted); adding/rescanning rooms
+  relocalizes to `Place.worldMapFile` in `HouseScanModel.begin()` (falls back to hand placement);
+  `OrganizerPlaces.swift` (restore, re-read saved scans, rebuild place model, room-name suggestions, kitchen
+  organiser, shopping list). Raw scans are saved by `applyRoomScan(keepRaw:)`.
+- Plans and designs per AI: `TidyPlan` records (provider, version, parent, feedback; steps carry `planID`;
+  `Room.activePlanID` picks the shown plan), `DesignVariant.provider/parentID/version`; `AIService.call(only:)` pins
+  a provider; `AIProviderPicker` in the UI.
+- Nested storage: `Zone.parentID` (TidyCore `StorageTree` for paths, children, loop-safe moves), `StorageTreeView.swift`,
+  "Photo inside this spot" = `Organizer.scan(inside:)`. Kitchen: `KitchenView.swift`, `Zone.kitchenZone`,
+  `Item.expiresAt`, TidyCore `Kitchen`. Shopping: `ShoppingItem`, `ShoppingView` (tab).
 - Drive: `Drive.swift`, `DriveBackground.swift` (from Crystal Bowl), `DriveSync.swift` (`TidyPackage` export written
   to Documents/DriveMirror only when content changes; upload state in drive-state.json / drive-folder-state.json),
   `DriveViews.swift`. `FloorPlan.swift` draws the plan PNG.

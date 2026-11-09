@@ -23,6 +23,8 @@ public enum PlaceKind: String, CaseIterable, Codable, Sendable {
 
 public enum ZoneKind: String, CaseIterable, Codable, Sendable {
     case shelf, drawer, closet, cabinet, bin, desk, table, floor, wall, hook, bed, other
+    // Added in 1.5 for nested storage and kitchens (stored as text, so older data is unaffected).
+    case tray, box, pantry, fridge, freezer, rack
 
     public var label: String { rawValue.capitalized }
 }

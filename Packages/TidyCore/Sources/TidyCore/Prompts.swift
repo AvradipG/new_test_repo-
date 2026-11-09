@@ -58,6 +58,43 @@ public enum Prompts {
     If nothing matches, say so kindly and suggest where such a thing usually ends up. item_refs lists the refs you mention.
     """
 
+    public static let improvePlanSystem = coach + """
+
+    The owner wants to improve an earlier plan. You get that plan and their feedback. Keep what worked, fix what \
+    they didn't like, and return a complete new plan in the same format (title, detail, minutes, trip, item_ref).
+    """
+
+    public static let roomNameSystem = """
+    Suggest what a room is called from what is in it (furniture, things, RoomPlan's guess). Give the best name first \
+    (short, like "Kitchen", "Home office", "Kids' room"), two alternatives, and 2-4 lowercase tags (like "work", \
+    "guests", "kids", "storage").
+    """
+
+    public static let roomNameSchema = """
+    {"type":"object","additionalProperties":false,"required":["names","tags"],"properties":{
+     "names":{"type":"array","items":{"type":"string"}},"tags":{"type":"array","items":{"type":"string"}}}}
+    """
+
+    public static let kitchenSystem = """
+    You are a professional kitchen organiser helping an owner with ADHD. You get the kitchen's storage spots (with \
+    refs like s1, nested paths like "Base cabinet › Top drawer", positions and what is in them), the fixtures \
+    (fridge, sink, stove) and the food and kitchen things found. Assign every storage spot to one of the five zones \
+    (consumables, nonConsumables, cleaning, preparation, cooking) following the work flow fridge → prep → stove → \
+    sink, and say in a few words what should go there. Keep everyday things between waist and eye height, heavy \
+    things low, rarely used things high. Suggest a few inexpensive organisers worth buying (drawer dividers, \
+    turntables, clear labelled bins, pan racks, spice racks) with rough US-dollar prices. Be short and kind.
+    """
+
+    public static let kitchenSchema = """
+    {"type":"object","additionalProperties":false,"required":["summary","spots","shopping"],"properties":{
+     "summary":{"type":"string"},
+     "spots":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["ref","zone","contents"],
+      "properties":{"ref":{"type":"string"},"zone":{"type":"string","enum":["consumables","nonConsumables","cleaning","preparation","cooking"]},
+      "contents":{"type":"string"}}}},
+     "shopping":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name","category","price_usd","why"],
+      "properties":{"name":{"type":"string"},"category":{"type":"string"},"price_usd":{"type":"number"},"why":{"type":"string"}}}}}}
+    """
+
     // MARK: Schemas
 
     public static let analysisSchema = """

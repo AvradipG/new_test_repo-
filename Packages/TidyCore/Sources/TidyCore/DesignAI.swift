@@ -19,12 +19,17 @@ public enum DesignAI {
     pieces (by ref), additions (catalog kind, or "custom" with a name and size), and removals. Keep at least 60-90 cm \
     walkways, never block doors or windows, keep pieces fully inside the room, and don't move fixed things (sink, \
     toilet, bathtub, fireplace, stairs, stove). Give scores 0-10 for flow, light, calm, function and overall. \
+    Think beyond furniture: wall decoration and pictures, lighting, plants, organisers, and helpful electronics that \
+    make daily life easier with ADHD (visual timers, key finders, charging station, smart plugs, label maker, robot \
+    vacuum). Put things worth buying in "shopping" with a rough price in US dollars and why it helps (empty if none). \
     When asked which design is better, fill "ranking" (best first) using the design refs given (d1, d2…). \
     Otherwise proposal is null and ranking is empty.
     """ + "\n\n" + SpaceWisdom.principles
 
     public static let schema = """
-    {"type":"object","additionalProperties":false,"required":["reply","proposal","ranking"],"properties":{
+    {"type":"object","additionalProperties":false,"required":["reply","proposal","ranking","shopping"],"properties":{
+     "shopping":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["name","category","price_usd","why"],
+      "properties":{"name":{"type":"string"},"category":{"type":"string"},"price_usd":{"type":"number"},"why":{"type":"string"}}}},
      "reply":{"type":"string"},
      "proposal":{"anyOf":[{"type":"null"},{"type":"object","additionalProperties":false,
       "required":["title","style","rationale","moves","additions","removals","tips","scores"],"properties":{
@@ -56,6 +61,15 @@ public enum DesignAI {
         public var reply: String
         public var proposal: Proposal?
         public var ranking: [Rank]
+        /// Things worth buying (added in 1.5; optional so older answers decode).
+        public var shopping: [Buy]?
+    }
+
+    public struct Buy: Codable, Equatable, Sendable {
+        public var name: String
+        public var category: String
+        public var priceUsd: Double
+        public var why: String
     }
 
     public struct Proposal: Codable, Equatable, Sendable {

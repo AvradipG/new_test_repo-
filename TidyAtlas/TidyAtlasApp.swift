@@ -31,6 +31,8 @@ struct RootView: View {
                 .tabItem { Label("Spaces", systemImage: "map") }
             NavigationStack { FindView() }
                 .tabItem { Label("Find", systemImage: "magnifyingglass") }
+            NavigationStack { ShoppingView() }
+                .tabItem { Label("Shopping", systemImage: "cart") }
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }

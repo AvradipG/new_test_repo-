@@ -3,6 +3,17 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.5
+- Fix the map any time: drag and turn rooms, rename them, and put rooms on the map that were scanned on their own or only photographed
+- Add rooms you missed, or rescan a room that didn't come out well: the app finds your earlier scan so the new one joins the same map
+- Every scan is kept in a history: view old scans in AR, put a room back the way an earlier scan saw it, re-read old scans with new features
+- Name rooms later: tap "Name later" while scanning; unnamed rooms get a "Name me" badge and name suggestions
+- Plans and designs remember who made them (Claude or ChatGPT); all versions are kept and "Improve" makes a better one
+- Nested storage: desk › drawer › tray as deep as you like, and "Photo inside this spot" puts what it finds right there
+- Kitchen planner: work triangle, the five kitchen zones, use-by dates and "use soon", and an AI kitchen organiser
+- Beyond furniture: wall pictures and decor, organisers and helpful gadgets (visual timers, key finders, charging station…)
+- New Shopping tab: everything the designer and kitchen organiser suggest buying, with rough prices
+
 ## 1.4
 - Design studio for every room: each piece of scanned furniture is separate, drag it, turn it, resize it
 - Add furniture and decor from a catalog (L-shaped sofa, beds, desks, rugs, plants, lamps) and wall pieces (art, mirrors, shelves, TV)

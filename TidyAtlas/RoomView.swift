@@ -30,6 +30,11 @@ struct RoomView: View {
     @State private var quickLook: URL?
     @State private var showAR = false
     @State private var showStudio = false
+    @State private var showKitchen = false
+    @State private var showNaming = false
+    @State private var insideZone: Zone?
+    @State private var planProvider = "auto"
+    @State private var improveText = ""
     @State private var mapStyle = 0
 
     var body: some View {
@@ -57,6 +62,8 @@ struct RoomView: View {
             Menu {
                 Button("Design studio", systemImage: "sofa.fill") { showStudio = true }
                 Button("Room details", systemImage: "slider.horizontal.3") { editingRoom = true }
+                Button("Name & tags", systemImage: "tag") { showNaming = true }
+                Button("Kitchen planner", systemImage: "fork.knife") { showKitchen = true }
                 if room.usdzFile != nil {
                     Button("View LiDAR scan in AR", systemImage: "arkit") { quickLook = room.usdzFile.map(Storage.roomScanURL) }
                 }
@@ -77,6 +84,11 @@ struct RoomView: View {
         .fullScreenCover(isPresented: $focus) { FocusView(room: room) }
         .fullScreenCover(isPresented: $showAR) { ARRoomScreen(room: room) }
         .navigationDestination(isPresented: $showStudio) { DesignStudioView(room: room) }
+        .navigationDestination(isPresented: $showKitchen) { KitchenView(room: room) }
+        .sheet(isPresented: $showNaming) { RoomNameSheet(room: room) }
+        .sheet(item: $insideZone) { z in
+            CameraPicker { media in run([media], inside: z) }.ignoresSafeArea()
+        }
         .sheet(item: $editingItem) { ItemEditor(item: $0, room: room) }
         .sheet(item: $editingZone) { ZoneEditor(zone: $0, room: room) }
         .sheet(isPresented: $editingRoom) { RoomEditor(room: room) }
@@ -122,6 +134,19 @@ struct RoomView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let place = room.place { Text(place.name).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary) }
             Text(room.name).font(.display(.largeTitle))
+            if room.needsName {
+                Button { showNaming = true } label: {
+                    Label("This room has no name yet. Name it", systemImage: "tag.fill").font(.callout.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent).tint(.orange)
+            }
+            if !room.tags.isEmpty { Text(room.tags.map { "#" + $0 }.joined(separator: " ")).font(.caption).foregroundStyle(Palette.teal) }
+            if room.isKitchen {
+                Button { showKitchen = true } label: {
+                    Label("Kitchen planner: zones, work triangle, use soon", systemImage: "fork.knife").font(.callout.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
             if !room.summary.isEmpty { Text(room.summary).foregroundStyle(.secondary) }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack {
@@ -185,11 +210,11 @@ struct RoomView: View {
         .card(Palette.tint)
     }
 
-    private func run(_ media: [PickedMedia]) {
+    private func run(_ media: [PickedMedia], inside: Zone? = nil) {
         guard !media.isEmpty else { return }
         guard KeyStore.hasKey else { errorText = ClaudeWire.Failure.noKey.errorDescription; return }
         Task {
-            let r = await organizer.scan(media, into: room, context: context)
+            let r = await organizer.scan(media, into: room, inside: inside, context: context)
             if r.failed > 0 && r.failed == r.photos {
                 errorText = r.lastError ?? "Claude couldn't read those photos."
             } else {
@@ -235,43 +260,7 @@ struct RoomView: View {
                 ItemPanel(item: item, room: room, onEdit: { editingItem = item }, onClose: { selected = nil })
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Storage spots").font(.display(.headline))
-                if room.zones.isEmpty {
-                    Text("None yet. Scan a photo or the room, or add your shelves, drawers and bins.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                ForEach(room.zones.sorted { $0.createdAt < $1.createdAt }) { z in
-                    let incoming = room.toSort.filter { $0.suggestedZoneID == z.uid }.count
-                    Button { editingZone = z } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(z.name).font(.body.weight(.semibold))
-                                Text(z.kind.label + (z.isIdea ? " · idea, not set up yet" : ""))
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if incoming > 0 {
-                                Text("\(incoming) incoming").font(.caption.weight(.bold))
-                                    .padding(.horizontal, 8).padding(.vertical, 3)
-                                    .background(Palette.teal, in: Capsule()).foregroundStyle(.white)
-                            }
-                        }
-                        .padding(12)
-                        .background(Palette.paper, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    .buttonStyle(.plain)
-                }
-                Button {
-                    let z = Zone(name: "New spot", kind: .shelf)
-                    z.posZ = 0.1
-                    z.room = room
-                    context.insert(z)
-                    editingZone = z
-                } label: { Label("Add storage spot", systemImage: "plus") }
-                    .buttonStyle(.bordered)
-            }
-            .card()
+            StorageTreeView(room: room, onEdit: { editingZone = $0 }, onPhotoInside: { insideZone = $0 })
         }
     }
 
@@ -309,7 +298,7 @@ struct RoomView: View {
                                     Text((item.quantity > 1 ? "\(item.quantity)× " : "") + item.name).font(.body.weight(.semibold))
                                     if item.outOfPlace && !item.isSorted { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption) }
                                 }
-                                Text(item.action.label + (room.zone(item.suggestedZoneID).map { " → \($0.name)" } ?? ""))
+                                Text(item.action.label + (room.zonePath(item.suggestedZoneID).map { " → \($0)" } ?? ""))
                                     .font(.caption).foregroundStyle(.secondary)
                                 if let size = item.sizeText {
                                     Text(size).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
@@ -352,17 +341,20 @@ struct RoomView: View {
                     ForEach([5, 15, 30, 60], id: \.self) { Text("\($0) min").tag($0) }
                 }
                 .pickerStyle(.segmented)
+                Text("Who plans").font(.caption).foregroundStyle(.secondary)
+                AIProviderPicker(selection: $planProvider)
                 Button {
                     Task {
                         do {
-                            let pep = try await organizer.makePlan(for: room, energy: energy, minutes: minutes, context: context)
+                            let pep = try await organizer.makePlan(for: room, energy: energy, minutes: minutes,
+                                                                   provider: AIProviderPicker.provider(planProvider), context: context)
                             withAnimation { toast = pep }
                         } catch { errorText = error.localizedDescription }
                     }
                 } label: {
                     HStack {
-                        if organizer.busy { ProgressView() } else { Image(systemName: room.todoSteps.isEmpty ? "wand.and.stars" : "arrow.clockwise") }
-                        Text(organizer.busy ? "Claude is planning…" : room.todoSteps.isEmpty ? "Make my plan" : "Re-plan")
+                        if organizer.busy { ProgressView() } else { Image(systemName: room.plans.isEmpty ? "wand.and.stars" : "plus") }
+                        Text(organizer.busy ? "Planning…" : room.plans.isEmpty ? "Make my plan" : "Make a new plan")
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -372,6 +364,54 @@ struct RoomView: View {
                 if room.toSort.isEmpty { Text("Scan the room first so there's something to plan.").font(.footnote).foregroundStyle(.secondary) }
             }
             .card()
+
+            if !room.plans.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Saved plans").font(.display(.headline))
+                    Text("Every plan is kept, by who made it. Switch between them or improve one.").font(.caption).foregroundStyle(.secondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(room.plans.sorted { $0.createdAt > $1.createdAt }) { p in
+                                let active = p.uid == room.activePlanID
+                                let left = room.steps.filter { $0.planID == p.uid && $0.status == .todo }.count
+                                Button {
+                                    room.activePlanID = p.uid
+                                    try? context.save()
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(p.provider) v\(p.version)").font(.footnote.weight(.bold))
+                                        Text("\(p.createdAt.formatted(date: .abbreviated, time: .omitted)) · \(left) left").font(.caption2)
+                                    }
+                                    .padding(.horizontal, 10).padding(.vertical, 7)
+                                    .background(active ? Palette.teal : Palette.paper, in: RoundedRectangle(cornerRadius: 10))
+                                    .foregroundStyle(active ? Color.white : Color.primary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    if let p = room.activePlan {
+                        if !p.feedback.isEmpty { Text("Asked: “\(p.feedback)”").font(.caption).foregroundStyle(.secondary) }
+                        HStack {
+                            TextField("Improve it: \"start with the desk\", \"shorter steps\"…", text: $improveText, axis: .vertical)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Improve") {
+                                let fb = improveText
+                                improveText = ""
+                                Task {
+                                    do {
+                                        let pep = try await organizer.improvePlan(p, feedback: fb, provider: AIProviderPicker.provider(planProvider), context: context)
+                                        withAnimation { toast = pep }
+                                    } catch { errorText = error.localizedDescription }
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(organizer.busy)
+                        }
+                    }
+                }
+                .card()
+            }
 
             if !room.todoSteps.isEmpty {
                 Button { focus = true } label: {
@@ -475,8 +515,8 @@ struct ItemPanel: View {
                 Button(action: onClose) { Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary) }
             }
             Grid(alignment: .leading, verticalSpacing: 4) {
-                GridRow { Text("Now").foregroundStyle(.secondary); Text(room.zone(item.zoneID)?.name ?? "Loose / on a surface") }
-                GridRow { Text("Goes to").foregroundStyle(.secondary); Text(room.zone(item.suggestedZoneID)?.name ?? (item.action == .keep ? "Stays where it is" : "Another room / not decided")) }
+                GridRow { Text("Now").foregroundStyle(.secondary); Text(room.zonePath(item.zoneID) ?? "Loose / on a surface") }
+                GridRow { Text("Goes to").foregroundStyle(.secondary); Text(room.zonePath(item.suggestedZoneID) ?? (item.action == .keep ? "Stays where it is" : "Another room / not decided")) }
                 GridRow { Text("Plan").foregroundStyle(.secondary); Text(item.action.label) }
                 if let size = item.sizeText { GridRow { Text("Size").foregroundStyle(.secondary); Text(size).monospacedDigit() } }
             }
@@ -527,11 +567,17 @@ struct ItemEditor: View {
                 Section("Where") {
                     Picker("Now in", selection: $item.zoneID) {
                         Text("Loose / on a surface").tag(UUID?.none)
-                        ForEach(room.zones) { Text($0.name).tag(Optional($0.uid)) }
+                        ForEach(room.zones) { Text(room.zonePath($0.uid) ?? $0.name).tag(Optional($0.uid)) }
                     }
                     Picker("Should live in", selection: $item.suggestedZoneID) {
                         Text("Another room / not decided").tag(UUID?.none)
-                        ForEach(room.zones) { Text($0.name).tag(Optional($0.uid)) }
+                        ForEach(room.zones) { Text(room.zonePath($0.uid) ?? $0.name).tag(Optional($0.uid)) }
+                    }
+                    Toggle("Has a use-by date", isOn: Binding(get: { item.expiresAt != nil },
+                                                              set: { item.expiresAt = $0 ? (item.expiresAt ?? Date().addingTimeInterval(7 * 86_400)) : nil }))
+                    if item.expiresAt != nil {
+                        DatePicker("Use by", selection: Binding(get: { item.expiresAt ?? Date() }, set: { item.expiresAt = $0 }),
+                                   displayedComponents: .date)
                     }
                     Picker("Plan", selection: Binding(get: { item.action }, set: { item.action = $0 })) {
                         ForEach(ItemAction.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -583,6 +629,19 @@ struct ZoneEditor: View {
                     if zone.isIdea {
                         Button("I've set this up", systemImage: "checkmark.circle") { zone.isIdea = false }
                     }
+                    Picker("Inside", selection: $zone.parentID) {
+                        Text("Nothing (top level)").tag(UUID?.none)
+                        ForEach(room.zones.filter { StorageTree.canMove(zone.uid, under: $0.uid, in: room.storageNodes) && $0.uid != zone.uid }) { z in
+                            Text(room.zonePath(z.uid) ?? z.name).tag(Optional(z.uid))
+                        }
+                    }
+                    if room.isKitchen {
+                        Picker("Kitchen zone", selection: $zone.kitchenZone) {
+                            Text("Not set").tag(String?.none)
+                            ForEach(Kitchen.ZoneType.allCases, id: \.self) { Text($0.label).tag(Optional($0.rawValue)) }
+                        }
+                    }
+                    TextField("What goes here", text: $zone.notes, axis: .vertical)
                 }
                 Section {
                     LabeledContent("Left ↔ right") { Slider(value: $zone.posX, in: 0...1) }
@@ -591,9 +650,11 @@ struct ZoneEditor: View {
                 } header: { Text("Rough place in the room") } footer: { Text("Rough is perfect. It just helps you picture where things go.") }
                 Section {
                     Button("Delete spot", role: .destructive) {
+                        // What was inside moves up one level instead of being lost.
+                        for child in room.zones where child.parentID == zone.uid { child.parentID = zone.parentID }
                         for it in room.items {
-                            if it.zoneID == zone.uid { it.zoneID = nil }
-                            if it.suggestedZoneID == zone.uid { it.suggestedZoneID = nil }
+                            if it.zoneID == zone.uid { it.zoneID = zone.parentID }
+                            if it.suggestedZoneID == zone.uid { it.suggestedZoneID = zone.parentID }
                         }
                         context.delete(zone)
                         try? context.save()
@@ -619,6 +680,7 @@ struct RoomEditor: View {
         NavigationStack {
             Form {
                 TextField("Name", text: $room.name)
+                Toggle("This is a kitchen", isOn: Binding(get: { room.isKitchen }, set: { room.isKitchenOverride = $0 }))
                 Section {
                     LabeledContent(String(format: "Width %.1f m", room.widthM)) { Slider(value: $room.widthM, in: 1...15, step: 0.1) }
                     LabeledContent(String(format: "Depth %.1f m", room.depthM)) { Slider(value: $room.depthM, in: 1...15, step: 0.1) }

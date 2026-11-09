@@ -94,7 +94,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     static let uploadTaskID = "com.avradip.tidyatlas.upload"
     let container: ModelContainer = {
         do {
-            return try ModelContainer(for: Place.self, Room.self, Zone.self, Item.self, TidyStep.self, Capture.self, DesignVariant.self)
+            return try ModelContainer(for: Place.self, Room.self, Zone.self, Item.self, TidyStep.self, Capture.self, DesignVariant.self, TidyPlan.self,
+                                      ScanRecord.self, ShoppingItem.self)
         } catch {
             fatalError("Couldn't open the database: \(error)")
         }

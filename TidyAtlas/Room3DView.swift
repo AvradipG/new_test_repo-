@@ -52,35 +52,47 @@ struct RoomSnapshot: Equatable {
         self.labels = labels
     }
 
-    /// Every room of a place in its real position, from the whole-place scan (rooms scanned on their own are left out).
+    /// Every room of a place in its position on the place map (scan position or hand correction).
     @MainActor
     static func place(_ place: Place, selected: UUID?) -> RoomSnapshot? {
-        let rooms = place.rooms.filter { $0.fromHouseScan && $0.layout?.originX != nil }
-        guard !rooms.isEmpty else { return nil }
-        var minX = Double.infinity, maxX = -Double.infinity, minZ = Double.infinity, maxZ = -Double.infinity
-        var top = 2.5
-        for r in rooms {
-            let l = r.layout!
-            minX = min(minX, l.originX! - l.widthM / 2); maxX = max(maxX, l.originX! + l.widthM / 2)
-            minZ = min(minZ, l.originZ! - l.depthM / 2); maxZ = max(maxZ, l.originZ! + l.depthM / 2)
-            top = max(top, l.heightM)
-        }
+        let mapped = place.mappedRooms
+        guard !mapped.isEmpty else { return nil }
+        let pts = mapped.flatMap { $0.1.corners(width: $0.0.widthM, depth: $0.0.depthM) }
+        let minX = pts.map(\.0).min()!, maxX = pts.map(\.0).max()!
+        let minZ = pts.map(\.1).min()!, maxZ = pts.map(\.1).max()!
         let cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2
         var walls: [WorldBox] = [], zones: [ZoneMark] = [], items: [ItemMark] = [], labels: [TextMark] = []
-        for r in rooms {
-            let l = r.layout!
-            let ox = l.originX! - cx, oz = l.originZ! - cz
-            for w in l.walls {
+        var top = 2.5
+        for (r, pl) in mapped {
+            top = max(top, r.heightM)
+            let theta = Float(pl.rotationDeg * .pi / 180)
+            func toPlace(_ v: SIMD3<Float>) -> SIMD3<Float> {
+                let q = pl.toPlace(x: Double(v.x), z: Double(v.z))
+                return SIMD3(Float(q.x - cx), v.y, Float(q.z - cz))
+            }
+            for w in r.layout?.walls ?? [] {
                 var s = w
-                s.cx += ox
-                s.cz += oz
+                let q = pl.toPlace(x: w.cx, z: w.cz)
+                s.cx = q.x - cx
+                s.cz = q.z - cz
+                s.yaw = w.yaw - Double(theta)
                 walls.append(s)
             }
+            if r.layout?.walls.isEmpty ?? true {
+                // Photo-only rooms: a simple outline from their size.
+                let c = pl.corners(width: r.widthM, depth: r.depthM)
+                for i in 0..<4 {
+                    let a = c[i], b = c[(i + 1) % 4]
+                    let len = ((b.0 - a.0) * (b.0 - a.0) + (b.1 - a.1) * (b.1 - a.1)).squareRoot()
+                    walls.append(WorldBox(cx: (a.0 + b.0) / 2 - cx, cy: r.heightM / 2, cz: (a.1 + b.1) / 2 - cz, width: len,
+                                          height: r.heightM, depth: 0, yaw: atan2(-(b.1 - a.1), b.0 - a.0), label: "wall"))
+                }
+            }
             let local = RoomSnapshot(room: r, selected: selected)
-            let shift = SIMD3<Float>(Float(ox), 0, Float(oz))
-            zones += local.zones.map { var z = $0; z.center += shift; return z }
-            items += local.items.map { var i = $0; i.position += shift; i.target = i.target.map { $0 + shift }; return i }
-            labels.append(TextMark(text: "\(r.name) · \(r.toSort.count) to sort", position: SIMD3(Float(ox), Float(l.heightM) + 0.3, Float(oz))))
+            zones += local.zones.map { var z = $0; z.center = toPlace(z.center); z.yaw -= theta; return z }
+            items += local.items.map { var i = $0; i.position = toPlace(i.position); i.target = i.target.map(toPlace); return i }
+            let mid = toPlace(SIMD3(0, Float(r.heightM) + 0.3, 0))
+            labels.append(TextMark(text: "\(r.displayName) · \(r.toSort.count) to sort", position: mid))
         }
         return RoomSnapshot(width: Float(max(maxX - minX, 1)), depth: Float(max(maxZ - minZ, 1)), height: Float(top),
                             walls: walls, zones: zones, items: items, selected: selected, labels: labels)
