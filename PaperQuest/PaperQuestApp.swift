@@ -23,12 +23,19 @@ struct PaperQuestApp: App {
 }
 
 struct RootView: View {
+    @EnvironmentObject private var store: Store
+
     var body: some View {
-        TabView {
+        TabView(selection: $store.tab) {
             NavigationStack { HomeView() }
                 .tabItem { Label("Quests", systemImage: "checklist") }
+                .tag(AppTab.quests)
+            NavigationStack { ManuscriptView() }
+                .tabItem { Label("Manuscript", systemImage: "doc.richtext") }
+                .tag(AppTab.manuscript)
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gearshape") }
+                .tag(AppTab.settings)
         }
         .overlay { CelebrationOverlay() }
     }

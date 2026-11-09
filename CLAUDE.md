@@ -27,6 +27,21 @@ plain-language requests, each ending with a push that reaches the phone through 
 - `project.yml`: XcodeGen spec (bundle ID `com.avradip.paperquest`); the Xcode project is generated in CI.
 - `ReleaseNotes.md`: newest section first; its bullets show in the app's update banner.
 
+## Manuscript Studio inside the app (1.1)
+- The Manuscript tab hosts the live web app (https://manuscript-studio-181489801873.web.app/write/) in a WKWebView, so
+  every web feature works unchanged and web releases appear automatically. Source of the web app: Drive file
+  `MANUSCRIPT_APP_SOURCE_CURRENT.json` (id 181vYwZqc0kbTxIxeJCcJPsY4dBo4V0OK). Never modify or redeploy the web app from here.
+- Sign-in: Google (GoogleAuth, ID token) → Firebase `accounts:signInWithIdp` → refresh token in Keychain (`firebase.refresh`).
+  The web app is signed in by seeding its IndexedDB `firebaseLocalStorageDb` record (`StudioWeb.seedScript`). If Firebase
+  rejects the token (INVALID_IDP_RESPONSE), the owner must safelist this app's Google client ID in Firebase Auth › Google.
+- Data (`Studio.swift`): Firestore REST, named database `manuscript-studio`. Saves follow the rules exactly: one commit of
+  manuscripts/main (revision + 1, mutationId, updatedBy = uid) + versions/{mutationId} + events/{mutationId} (actor
+  "human", plus `assistant`). Comments: annotations/{id} + comment.created event; replies/status via updateMask.
+- AI (`AIService.swift`, PaperCore `AIWire`/`Assistant`): Claude `claude-opus-5-5`, effort high, streamed, manuscript block
+  cached, `fallbacks: "default"`; ChatGPT Responses API, model typed in Settings else "astra" from the account's model
+  list, reasoning high. Answers follow `AssistantPrompt.schema`; nothing is written until the owner taps Apply, and edits
+  are exact unique replacements (`ManuscriptHTML`). Keys: Keychain service `com.avradip.paperquest.keys`.
+
 ## Drive layout (what Claude reads and writes through the connector)
 My Drive › Paper Quest › `<title> (<paper id>)` › `progress.json` (schema `paper-quest.progress/1`),
 `progress.md` (checklist with ids, counts, XP, streak, next up), `claude-inbox/` (Claude's change files).

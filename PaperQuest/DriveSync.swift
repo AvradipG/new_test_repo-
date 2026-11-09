@@ -53,8 +53,8 @@ extension Store {
     func refreshDriveAccount() {
         driveSignedIn = GoogleAuth.shared.isSignedIn
         driveEmail = GoogleAuth.shared.email
-        // One route at a time: once signed in, the folder link stops.
-        if driveSignedIn && UserDefaults.standard.data(forKey: Self.folderBookmarkKey) != nil { unlinkFolder() }
+        // Google sign-in is also the Manuscript Studio sign-in, so it no longer replaces a linked Drive folder:
+        // with a folder linked, sync goes through the folder (Claude's inbox works there).
         refreshFolderLink()
         lastDriveSync = UserDefaults.standard.object(forKey: Self.lastSyncKey) as? Date
     }
@@ -97,7 +97,7 @@ extension Store {
         isSyncing = true
         let bg = UIApplication.shared.beginBackgroundTask(withName: "paper-quest-sync")
         do {
-            if folderLinked && !driveSignedIn { try await syncFolder() } else { try await syncSignedIn() }
+            if folderLinked { try await syncFolder() } else { try await syncSignedIn() }
             lastDriveSync = Date()
             UserDefaults.standard.set(lastDriveSync, forKey: Self.lastSyncKey)
             driveStatus = nil

@@ -19,6 +19,10 @@ struct SettingsView: View {
                 Text("Every finished item is +\(Points.leaf) XP; a whole subsection +\(Points.bonus(depth: 1)), a section +\(Points.bonus(depth: 0)). Tick at least one item a day to keep the streak.")
             }
 
+            AISettingsSection()
+
+            StudioSettingsSection()
+
             DriveSettingsSection()
 
             Section {
@@ -185,5 +189,113 @@ struct DriveChip: View {
             .font(.footnote.weight(.semibold))
         }
         .sheet(isPresented: $showSetup) { DriveSetupSheet() }
+    }
+}
+
+/// Claude and ChatGPT: keys (Keychain), which one answers, and the ChatGPT model.
+struct AISettingsSection: View {
+    @AppStorage(AIService.providerKey) private var provider = AIProvider.claude.rawValue
+    @AppStorage(AIService.backupKey) private var backup = true
+    @AppStorage(AIService.openAIModelKey) private var openAIModel = ""
+    @State private var claudeKey = ""
+    @State private var chatKey = ""
+    @State private var hasClaude = KeyStore.hasKey(.claude)
+    @State private var hasChat = KeyStore.hasKey(.chatgpt)
+    @State private var testing: AIProvider?
+    @State private var result: String?
+
+    var body: some View {
+        Section {
+            Picker("Answers first", selection: $provider) {
+                Text("Claude").tag(AIProvider.claude.rawValue)
+                Text("ChatGPT").tag(AIProvider.chatgpt.rawValue)
+            }
+            Toggle("Other one as backup", isOn: $backup)
+            keyRow(.claude, text: $claudeKey, has: $hasClaude, placeholder: "sk-ant-…")
+            keyRow(.chatgpt, text: $chatKey, has: $hasChat, placeholder: "sk-…")
+            TextField("ChatGPT model (blank = Astra if your account has it)", text: $openAIModel)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.footnote.monospaced())
+            if openAIModel.isEmpty, let auto = AIService.autoPickedModel {
+                LabeledContent("ChatGPT model in use", value: auto).font(.footnote)
+            }
+            if let result { Text(result).font(.footnote).foregroundStyle(.secondary) }
+        } header: {
+            Text("Claude and ChatGPT")
+        } footer: {
+            Text("Claude: Opus 5.5, effort High. ChatGPT: Astra (or the model typed above), reasoning High. Keys stay in this iPhone's Keychain (and iCloud Keychain), are kept through every update and are only sent to Anthropic or OpenAI when you ask something.")
+        }
+    }
+
+    private func keyRow(_ p: AIProvider, text: Binding<String>, has: Binding<Bool>, placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("\(p.label) key").font(.subheadline.weight(.semibold))
+                Spacer()
+                if has.wrappedValue {
+                    Label("Saved", systemImage: "checkmark.seal.fill").font(.caption).foregroundStyle(Palette.done)
+                }
+            }
+            HStack {
+                SecureField(has.wrappedValue ? "Replace the saved key" : placeholder, text: text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Save") {
+                    KeyStore.save(text.wrappedValue, for: p)
+                    text.wrappedValue = ""
+                    has.wrappedValue = KeyStore.hasKey(p)
+                }
+                .disabled(text.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if has.wrappedValue {
+                HStack {
+                    Button {
+                        testing = p
+                        result = nil
+                        Task {
+                            do { result = "\(p.label): " + (try await AIService.test(p)) }
+                            catch { result = "\(p.label): \(error.localizedDescription)" }
+                            testing = nil
+                        }
+                    } label: {
+                        if testing == p { ProgressView() } else { Text("Test") }
+                    }
+                    .disabled(testing != nil)
+                    Spacer()
+                    Button("Remove", role: .destructive) {
+                        KeyStore.save("", for: p)
+                        has.wrappedValue = false
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.footnote)
+            }
+        }
+    }
+}
+
+struct StudioSettingsSection: View {
+    @ObservedObject private var session = StudioSession.shared
+
+    var body: some View {
+        Section {
+            if session.signedIn {
+                LabeledContent("Signed in as", value: session.email ?? "Google account")
+                Button("Sign out of Manuscript Studio", role: .destructive) { session.signOut() }
+            } else {
+                Button {
+                    Task { await session.signIn() }
+                } label: {
+                    if session.busy { ProgressView() } else { Label("Sign in with Google", systemImage: "person.badge.key") }
+                }
+            }
+            if let s = session.status { Text(s).font(.footnote).foregroundStyle(.secondary) }
+            if session.needsSafelist { SafelistHelp() }
+        } header: {
+            Text("Manuscript Studio")
+        } footer: {
+            Text("The same Google account as the web app at manuscript-studio-181489801873.web.app. Edits from Claude or ChatGPT are saved as new revisions there, with full history.")
+        }
     }
 }

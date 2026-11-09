@@ -3,6 +3,14 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.1
+- New Manuscript tab: your Manuscript Studio papers with everything from the web app (writer, equations, highlights, comments with pictures and replies, history, references, files, PDF ink, templates, tabs and split views, Word/PDF export)
+- Sign in once with Google; the web app opens already signed in
+- Ask Claude (Opus 5.5, High) or ChatGPT (Astra, High) about the paper, by typing or with the keyboard mic
+- They can propose edits, equation fixes, comments, highlights, replies, resolving comments and checklist ticks; you see every change first and tap Apply
+- Applied changes become a new revision in Manuscript Studio, with full version history
+- Add your Claude and ChatGPT keys in Settings (kept safely through updates)
+
 ## 1.0
 - Every paper is a tree: sections, subsections and each equation, figure, table and check, with Claude-style marks (dashed circle, spinning arc, green tick)
 - Tap a mark to start or finish an item; parents fill in by themselves and show a progress bar

@@ -3,6 +3,8 @@ import PaperCore
 import SwiftUI
 import UIKit
 
+enum AppTab: Hashable { case quests, manuscript, settings }
+
 /// What the screen shows after a tick: a small "+10 XP" toast, or confetti for a cleared subsection, section or paper.
 struct CelebrationEvent: Identifiable, Equatable {
     let id = UUID()
@@ -30,6 +32,9 @@ final class Store: ObservableObject {
     @Published var folderName: String?
     @Published var inboxReport: String?
     @Published var latestRemote: RemoteVersion?
+    @Published var tab: AppTab = .quests
+    /// A paper to show in the Manuscript tab (set from a tracker; the tab opens it and clears this).
+    @Published var manuscriptRequest: String?
 
     var syncTask: Task<Void, Never>?
     var syncAgain = false
@@ -154,6 +159,25 @@ final class Store: ObservableObject {
         scheduleSync()
     }
 
+    /// Shows a paper in the Manuscript tab. False when Manuscript Studio isn't signed in (use Safari then).
+    func openManuscript(_ paperID: String) -> Bool {
+        guard StudioSession.shared.signedIn else { return false }
+        tab = .manuscript
+        manuscriptRequest = paperID
+        return true
+    }
+
+    /// A tracker for a Manuscript Studio paper, sharing its id so Claude/ChatGPT can update both.
+    func trackStudioPaper(id: String, title: String) {
+        guard paper(id) == nil else { return }
+        if id == Templates.greenChristoffelID {
+            restoreGreenChristoffel()
+            return
+        }
+        save(Templates.article(title: title, id: id, manuscriptURL: FirebaseWebConfig.manuscriptURL(paper: id).absoluteString))
+        scheduleSync()
+    }
+
     func restoreGreenChristoffel() {
         var r = removed
         r.remove(Templates.greenChristoffelID)
@@ -169,6 +193,17 @@ final class Store: ObservableObject {
         var r = removed
         r.insert(paperID)
         UserDefaults.standard.set(Array(r), forKey: Self.removedKey)
+    }
+
+    /// Applies Claude/ChatGPT tracker ops (same format as a claude-inbox file) and returns what happened.
+    @discardableResult
+    func applyInbox(_ paperID: String, _ file: InboxFile) -> [String] {
+        var report: [String] = []
+        change(paperID) { p in
+            report = Inbox.apply(file, to: &p)
+            return nil
+        }
+        return report
     }
 
     /// Takes in a copy from Drive (another device, or Claude's inbox) and keeps whichever edits are newer.

@@ -53,7 +53,7 @@ struct PaperView: View {
                     reveal(node, tree)
                     withAnimation { proxy.scrollTo(node.id, anchor: .center) }
                 } openManuscript: {
-                    manuscript = paper.manuscriptURL.flatMap { URL(string: $0) }
+                    openManuscript(paper)
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -118,14 +118,21 @@ struct PaperView: View {
         Menu {
             Button { expandAll(tree) } label: { Label("Expand all", systemImage: "chevron.down.2") }
             Button { expanded = [] } label: { Label("Collapse all", systemImage: "chevron.up.2") }
-            if let link = paper.manuscriptURL {
-                Button { manuscript = URL(string: link) } label: { Label("Open manuscript", systemImage: "doc.richtext") }
+            if paper.manuscriptURL != nil {
+                Button { openManuscript(paper) } label: { Label("Open manuscript", systemImage: "doc.richtext") }
             }
             Button { showPaperInfo = true } label: { Label("Title and link", systemImage: "pencil") }
             Button(role: .destructive) { confirmRemove = true } label: { Label("Remove from this iPhone", systemImage: "trash") }
         } label: {
             Image(systemName: "ellipsis.circle")
         }
+    }
+
+    /// In the Manuscript tab when signed in to Manuscript Studio (and the paper lives there), else in Safari.
+    private func openManuscript(_ paper: Paper) {
+        let inStudio = paper.manuscriptURL?.contains("manuscript-studio-181489801873") ?? false
+        if inStudio && store.openManuscript(paper.id) { return }
+        manuscript = paper.manuscriptURL.flatMap { URL(string: $0) }
     }
 
     private func expandAll(_ tree: Tree) {

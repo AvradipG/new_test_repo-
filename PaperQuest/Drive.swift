@@ -61,6 +61,8 @@ final class GoogleAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
 
     private var accessToken: String?
     private var expiry = Date.distantPast
+    /// Google ID token (openid scope), used to sign in to Manuscript Studio's Firebase project.
+    private var googleIDToken: String?
     private var session: ASWebAuthenticationSession?
 
     /// Client ID baked in at build time, or pasted in the app if the build has none.
@@ -127,6 +129,7 @@ final class GoogleAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
         Keychain.set(nil, for: Self.emailKey)
         UserDefaults.standard.removeObject(forKey: Self.emailKey)
         accessToken = nil
+        googleIDToken = nil
     }
 
     func token() async throws -> String {
@@ -140,7 +143,21 @@ final class GoogleAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
 
     func invalidate() { accessToken = nil }
 
+    /// A fresh Google ID token (refreshes when the cached one is close to expiry).
+    func idToken() async throws -> String {
+        if googleIDToken == nil || expiry <= Date().addingTimeInterval(120) {
+            accessToken = nil
+            _ = try await token()
+        }
+        guard let t = googleIDToken else { throw DriveError(message: "Google didn't return an ID token. Sign in again.") }
+        return t
+    }
+
+    /// Current access token, for Firebase sign-in when Google's ID token isn't accepted.
+    func currentAccessToken() async throws -> String { try await token() }
+
     private func store(_ json: [String: Any]) {
+        if let id = json["id_token"] as? String { googleIDToken = id }
         accessToken = json["access_token"] as? String
         expiry = Date().addingTimeInterval((json["expires_in"] as? Double) ?? 3000)
     }

@@ -70,7 +70,15 @@ struct NodeSheet: View {
                         }
                     }
                     if let link = paper.manuscriptURL, let url = URL(string: link) {
-                        Button { manuscript = url } label: { Label("Open the manuscript", systemImage: "doc.richtext") }
+                        Button {
+                            if link.contains("manuscript-studio-181489801873") && StudioSession.shared.signedIn {
+                                persist(node)
+                                dismiss()
+                                _ = store.openManuscript(paper.id)
+                            } else {
+                                manuscript = url
+                            }
+                        } label: { Label("Open the manuscript", systemImage: "doc.richtext") }
                     }
                 }
             }
