@@ -323,6 +323,32 @@ struct StudioStore {
         return revision
     }
 
+    /// A new paper, written like the web app's "New paper": the project (owner = this account), then the
+    /// manuscript at revision 0 with a first version entry. Returns the paper id.
+    func createPaper(id: String, name: String, description: String, text: String, format: String, sourceName: String) async throws {
+        guard let uid = session.uid else { throw StudioError(message: "Sign in to Manuscript Studio first.") }
+        guard text.utf8.count <= 800_000 else {
+            throw StudioError(message: "This file is larger than Manuscript Studio's limit for one paper (about 800 KB of text).")
+        }
+        let (_, root) = try await base()
+        let project: [String: Any] = ["id": id, "name": String(name.prefix(250)), "description": String(description.prefix(500)),
+                                      "ownerUid": uid, "memberUids": [uid], "editorUids": [uid]]
+        try await commit([
+            ["update": ["name": "\(root)/manuscriptProjects/\(id)", "fields": FirestoreValue.fields(project)],
+             "currentDocument": ["exists": false], "updateTransforms": Self.serverTime(["createdAt"])],
+        ])
+        let manuscript: [String: Any] = ["title": String(name.prefix(250)), "text": text, "format": format, "revision": 0, "updatedBy": uid]
+        var version = manuscript
+        version["label"] = "Imported from \(sourceName)"
+        version["createdBy"] = uid
+        try await commit([
+            ["update": ["name": "\(root)/manuscriptProjects/\(id)/manuscripts/main", "fields": FirestoreValue.fields(manuscript)],
+             "currentDocument": ["exists": false], "updateTransforms": Self.serverTime(["createdAt", "updatedAt"])],
+            ["update": ["name": "\(root)/manuscriptProjects/\(id)/versions/\(UUID().uuidString.lowercased())", "fields": FirestoreValue.fields(version)],
+             "currentDocument": ["exists": false], "updateTransforms": Self.serverTime(["createdAt"])],
+        ])
+    }
+
     /// A comment as the web app writes it (annotation + comment.created event in one batch).
     func addComment(_ pid: String, id: String, note: String, quote: String, anchored: Bool, author: String) async throws {
         guard let uid = session.uid else { throw StudioError(message: "Sign in to Manuscript Studio first.") }

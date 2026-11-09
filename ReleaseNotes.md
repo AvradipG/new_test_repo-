@@ -10,6 +10,7 @@ so write them for the person using the app.
 - They can propose edits, equation fixes, comments, highlights, replies, resolving comments and checklist ticks; you see every change first and tap Apply
 - Applied changes become a new revision in Manuscript Studio, with full version history
 - Add your Claude and ChatGPT keys in Settings (kept safely through updates)
+- Add a paper (＋ in the Manuscript tab) from a LaTeX, Markdown, HTML, text or Word file: it becomes its own paper in Manuscript Studio, with a checklist built from its sections
 
 ## 1.0
 - Every paper is a tree: sections, subsections and each equation, figure, table and check, with Claude-style marks (dashed circle, spinning arc, green tick)

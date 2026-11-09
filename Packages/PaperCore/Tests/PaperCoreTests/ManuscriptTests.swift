@@ -179,3 +179,55 @@ final class AIWireTests: XCTestCase {
         XCTAssertNil(OpenAIWire.pickModel(fromModelsList: Data("{}".utf8)))
     }
 }
+
+final class PaperImportTests: XCTestCase {
+    let tex = #"""
+    \documentclass{article}
+    \title{Complex Wave Propagation in Anisotropic Viscoelastic Solids: \\ A Geometric-Algebra Perspective in GA(3,0)\thanks{Draft}}
+    \begin{document}\maketitle
+    \section{Introduction}
+    Text.
+    \section{Geometric algebra of \emph{Euclidean} space}
+    \subsection{The geometric product}
+    \begin{equation} ab = a\cdot b + a\wedge b \end{equation}
+    \begin{align} x &= 1 \end{align}
+    \section*{Acknowledgements}
+    \end{document}
+    """#
+
+    func testFormatsAndIDs() {
+        XCTAssertEqual(PaperImport.format(forExtension: "TEX"), "latex")
+        XCTAssertEqual(PaperImport.format(forExtension: "md"), "markdown")
+        XCTAssertEqual(PaperImport.format(forExtension: "html"), "html")
+        XCTAssertNil(PaperImport.format(forExtension: "docx"))
+        XCTAssertEqual(PaperImport.projectID(title: "Complex Wave Propagation: A Geometric-Algebra Perspective in GA(3,0)", suffix: "A1b2c3d4"),
+                       "complex-wave-propagation-a-geometric-algebra-perspective-in-a1b2c3")
+        XCTAssertEqual(PaperImport.projectID(title: "Červený & Pšenčík", suffix: ""), "cerveny-psencik")
+        XCTAssertEqual(PaperImport.projectID(title: "!!!", suffix: "x"), "paper-x")
+    }
+
+    func testLatexTitleHeadingsAndEquations() {
+        XCTAssertEqual(PaperImport.title(latex: tex), "Complex Wave Propagation in Anisotropic Viscoelastic Solids: A Geometric-Algebra Perspective in GA(3,0)")
+        XCTAssertEqual(PaperImport.headings(latex: tex).map(\.text), ["Introduction", "Geometric algebra of Euclidean space", "The geometric product", "Acknowledgements"])
+        XCTAssertEqual(PaperImport.headings(latex: tex).map(\.level), [1, 1, 2, 1])
+        XCTAssertEqual(PaperImport.equationCount(latex: tex), 2)
+    }
+
+    func testHTMLAndMarkdownHeadings() {
+        let html = "<h1>My Paper</h1><p>x</p><h2>1. Intro</h2><h3>1.1 Aim</h3><h2>2. Theory</h2>"
+        XCTAssertEqual(PaperImport.title(html: html), "My Paper")
+        XCTAssertEqual(PaperImport.headings(html: html), [.init(level: 1, text: "1. Intro"), .init(level: 2, text: "1.1 Aim"), .init(level: 1, text: "2. Theory")])
+        XCTAssertEqual(PaperImport.title(markdown: "# T\n## A\n### B"), "T")
+        XCTAssertEqual(PaperImport.headings(markdown: "# T\n## A\n### B").map(\.level), [1, 2])
+    }
+
+    func testTrackerFromHeadings() {
+        let p = PaperImport.tracker(id: "ga", title: "GA", headings: PaperImport.headings(latex: tex), equations: 2, manuscriptURL: nil)
+        let tree = Tree(p)
+        XCTAssertEqual(tree.children(of: nil).map(\.title), ["Introduction", "Geometric algebra of Euclidean space", "Acknowledgements", "Equations", "Submission"])
+        XCTAssertEqual(tree.children(of: "ga/s2").map(\.title), ["Text", "The geometric product"])
+        XCTAssertEqual(Set(p.nodes.map(\.id)).count, p.nodes.count)
+        XCTAssertEqual(PaperImport.tracker(id: "x", title: "X", headings: [], equations: 0, manuscriptURL: nil).nodes.count,
+                       Templates.article(title: "X", id: "x").nodes.count)
+    }
+}

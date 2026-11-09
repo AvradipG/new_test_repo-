@@ -178,6 +178,13 @@ final class Store: ObservableObject {
         scheduleSync()
     }
 
+    /// Adds a ready-made tracker (e.g. one built from an imported paper's headings).
+    func addTracker(_ paper: Paper) {
+        guard self.paper(paper.id) == nil else { return }
+        save(paper)
+        scheduleSync()
+    }
+
     func restoreGreenChristoffel() {
         var r = removed
         r.remove(Templates.greenChristoffelID)

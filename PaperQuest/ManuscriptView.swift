@@ -201,6 +201,7 @@ struct ManuscriptView: View {
     @State private var showAssistant = false
     @State private var showQuest = false
     @State private var safari: URL?
+    @State private var showImport = false
 
     var body: some View {
         Group {
@@ -237,6 +238,18 @@ struct ManuscriptView: View {
                     } label: {
                         Image(systemName: "doc.on.doc")
                     }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showImport = true } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Add a paper")
+                }
+            }
+        }
+        .sheet(isPresented: $showImport) {
+            ImportSheet { id in
+                Task {
+                    if let list = try? await StudioStore().papers() { papers = list }
+                    openPaper(id)
                 }
             }
         }
