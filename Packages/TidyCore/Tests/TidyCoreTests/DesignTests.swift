@@ -112,9 +112,10 @@ final class PlaceMapTests: XCTestCase {
     }
 
     func testKitchen() {
-        let good = Kitchen.triangle(fridge: (0, 0), sink: (2, 0), stove: (2, 2))
-        XCTAssertEqual(good.total, 2 + 2 + 2.83, accuracy: 0.01)
-        XCTAssertTrue(good.isGood)
+        let good = Kitchen.triangle(fridge: (0, 0), sink: (2, 0), stove: (1.5, 1.8))
+        XCTAssertEqual(good.total, 2 + 1.87 + 2.34, accuracy: 0.02)
+        XCTAssertTrue(good.isGood, good.verdict)
+        XCTAssertFalse(Kitchen.triangle(fridge: (0, 0), sink: (2, 0), stove: (2, 2)).isGood, "a 2.83 m side is too far")
         XCTAssertFalse(Kitchen.triangle(fridge: (0, 0), sink: (0.8, 0), stove: (2, 1)).isGood)
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let soon = Kitchen.useSoon([("milk", now.addingTimeInterval(86_400)), ("rice", now.addingTimeInterval(86_400 * 300)),
