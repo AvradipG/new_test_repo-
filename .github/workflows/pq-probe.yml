@@ -24,7 +24,7 @@ jobs:
           echo "== Google auth page for the app's iOS client"
           CID=60541649934-sfas6f95kuv4jsr323f81bc99imtp60e.apps.googleusercontent.com
           RS=com.googleusercontent.apps.60541649934-sfas6f95kuv4jsr323f81bc99imtp60e
-          curl -s -L -o g.html -w "HTTP %{http_code} final %{url_effective}\n" "https://accounts.google.com/o/oauth2/v2/auth?client_id=$CID&redirect_uri=$RS:/oauth2redirect&response_type=code&scope=openid%20email%20https://www.googleapis.com/auth/drive.file&code_challenge=abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrs&code_challenge_method=S256" | sed -E 's/(client_id|code_challenge)=[^&]*/\1=…/g'
-          grep -oiE "(invalid_client|redirect_uri_mismatch|invalid_request|access_denied|disallowed_useragent|Error 4[0-9][0-9][^<]{0,80}|This app is blocked|has not completed the Google verification|Access blocked[^<]{0,80})" g.html | sort -u | head
+          curl -s -L -o g.html -w "HTTP %{http_code} final %{url_effective}\n" "https://accounts.google.com/o/oauth2/v2/auth?client_id=$CID&redirect_uri=$RS:/oauth2redirect&response_type=code&scope=openid%20email%20https://www.googleapis.com/auth/drive.file&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256" | sed -E 's/(client_id|code_challenge)=[^&]*/\1=…/g'
+          echo "page title: $(grep -o "<title>[^<]*" g.html | head -1)"; grep -oiE "(invalid_client|redirect_uri_mismatch|invalid_request|access_denied|disallowed_useragent|Error 4[0-9][0-9][^<]{0,80}|This app is blocked|has not completed the Google verification|Access blocked[^<]{0,80})" g.html | sort -u | head
           echo "== Manuscript workspace"
           curl -s -o w.html -w "HTTP %{http_code}\n" "$SITE/write/?paper=green-christoffel-writing"; grep -o '<title>[^<]*' w.html
