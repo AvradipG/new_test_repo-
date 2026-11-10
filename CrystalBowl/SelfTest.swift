@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 import ScanMath
 import simd
+import PDFKit
 
 /// Runs the app's own pipeline on a demo rock (a 1.5-inch plug, 50 mm long, made in code) and checks every
 /// answer against the known size. It needs no camera, network or permission, so it runs by itself once after
@@ -163,7 +164,35 @@ enum SelfTest {
         check("Sheet text fits", wrappedLines.count > 1 && widest <= 900,
               String(format: "%d lines, widest %.0f px of 900", wrappedLines.count, widest))
 
-        // 8. The app log.
+        // 8. Scanning mat (3.10): every PDF in the app, at true size; and the scale-photo caption.
+        var matOK = true
+        var matText: [String] = []
+        for paper in ScanningMat.Paper.allCases {
+            for tone in ScanningMat.Tone.allCases {
+                guard let u = ScanningMat.url(paper, tone), let doc = PDFDocument(url: u), let page = doc.page(at: 0) else {
+                    matOK = false
+                    matText.append("\(paper.rawValue) \(tone.rawValue) missing")
+                    continue
+                }
+                let b = page.bounds(for: .mediaBox)
+                let w = Double(b.width) * 25.4 / 72, h = Double(b.height) * 25.4 / 72
+                let want: (Double, Double) = paper == .a4 ? (210, 297) : (215.9, 279.4)
+                if abs(w - want.0) > 0.2 || abs(h - want.1) > 0.2 { matOK = false }
+                matText.append(String(format: "%@ %@ %.1f × %.1f mm", paper.rawValue, tone.rawValue, w, h))
+            }
+        }
+        check("Scanning mat PDFs (1:1)", matOK, matText.joined(separator: ", "))
+        let fmt1 = UIGraphicsImageRendererFormat()
+        fmt1.scale = 1
+        let plain = UIGraphicsImageRenderer(size: CGSize(width: 400, height: 300), format: fmt1).image { c in
+            UIColor.gray.setFill()
+            c.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+        }
+        let stamped = ScalePhotos.stamp(plain, "self-test caption")
+        check("Scale photo caption", stamped.size.width == 400 && stamped.size.height > 300,
+              String(format: "%.0f × %.0f px, caption strip below the photo", stamped.size.width, stamped.size.height))
+
+        // 9. The app log.
         let marker = "self-test marker \(id)"
         AppLog.info("selftest", marker)
         AppLog.flush()

@@ -407,13 +407,25 @@ final class AppModel: ObservableObject {
         reload()
     }
 
+    /// A few of this capture's photos, kept as scale photos (3.10), off the main thread.
+    private func keepScalePhotos(_ scan: Scan, side: Int) {
+        let dir = side == 2 ? scan.images2URL : scan.imagesURL
+        let scores = shotScores
+        Task.detached(priority: .utility) {
+            let files = ScalePhotos.make(scan: scan, from: dir, side: side, scores: scores)
+            AppLog.info("capture", "Kept \(files.count) scale photo(s) of side \(side) in model/scale-photos", scan: scan)
+        }
+    }
+
     private func captureFinished() {
         endCapture()
         guard var scan = currentScan else { phase = .home; return }
         AppLog.info("capture", "Capture finished: \(shotCount) photos (\(requestedShots) asked for by the app), \(passNumber) pass(es), side \(captureSide), blurred \(blurryShots)", scan: scan)
+        keepScalePhotos(scan, side: captureSide)
         if captureSide == 2 {
             scan = scans.first { $0.id == scan.id } ?? scan
             scan.side2PhotoCount = ScanStore.countPhotos(in: scan.images2URL)
+            scan.piecesSplit = 2
             scan.buildRequested = true
             scan.buildAttempts = 0
             scan.pauses = 0
@@ -430,6 +442,7 @@ final class AppModel: ObservableObject {
         scan.passes = passNumber
         scan.coverage = guide.bandCoverage
         if flippedThisCapture { scan.underside = true } else if scan.underside == nil { scan.underside = false }
+        if scan.isPieces { scan.piecesSplit = 2 }
         scan.buildRequested = true
         scan.buildAttempts = 0
         scan.pauses = 0

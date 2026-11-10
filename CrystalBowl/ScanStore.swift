@@ -41,6 +41,8 @@ struct Scan: Identifiable, Codable, Hashable {
     var kind: String?
     /// What the pieces were before they broke, as the user gave it.
     var pieceTarget: TargetShape?
+    /// Which piece finder the pieces were last put together with (2 = 3.10 floor fix). Older sets are put together again.
+    var piecesSplit: Int?
     /// Photos of the second side (every piece turned over).
     var side2PhotoCount: Int?
     /// Latest reconstruction of the pieces.

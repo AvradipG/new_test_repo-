@@ -289,6 +289,69 @@ final class PiecesTests: XCTestCase {
         XCTAssertEqual(s.floorY, 0, accuracy: 0.002)
     }
 
+    /// A thin piece as Object Capture gives it on a table it leaves out: a finely meshed flat top, side walls,
+    /// no bottom and no floor.
+    func openSlab(_ lo: SIMD3<Double>, _ hi: SIMD3<Double>, n: Int, into P: inout [SIMD3<Double>], _ T: inout [SIMD3<Int>]) {
+        let base = P.count
+        for i in 0...n { for k in 0...n {
+            P.append(SIMD3(lo.x + (hi.x - lo.x) * Double(i) / Double(n), hi.y, lo.z + (hi.z - lo.z) * Double(k) / Double(n)))
+        } }
+        func top(_ i: Int, _ k: Int) -> Int { base + i * (n + 1) + k }
+        for i in 0..<n { for k in 0..<n {
+            T.append(SIMD3(top(i, k), top(i, k + 1), top(i + 1, k + 1)))
+            T.append(SIMD3(top(i, k), top(i + 1, k + 1), top(i + 1, k)))
+        } }
+        // Walls round the rim, down to the bottom.
+        var rim: [Int] = []
+        for i in 0...n { rim.append(top(i, 0)) }
+        for k in 1...n { rim.append(top(n, k)) }
+        for i in stride(from: n - 1, through: 0, by: -1) { rim.append(top(i, n)) }
+        for k in stride(from: n - 1, through: 1, by: -1) { rim.append(top(0, k)) }
+        let bottom0 = P.count
+        for r in rim { P.append(SIMD3(P[r].x, lo.y, P[r].z)) }
+        for j in rim.indices {
+            let j2 = (j + 1) % rim.count
+            T.append(SIMD3(rim[j], bottom0 + j, bottom0 + j2))
+            T.append(SIMD3(rim[j], bottom0 + j2, rim[j2]))
+        }
+    }
+
+    /// 3.10: thin flat pieces with no floor in the mesh kept their tops (they were cut to rings of side wall).
+    func testThinPiecesWithoutAFloorKeepTheirTops() {
+        var P: [SIMD3<Double>] = [], T: [SIMD3<Int>] = []
+        openSlab(SIMD3(-0.02, 0, -0.017), SIMD3(0.0184, 0.0036, 0.017), n: 30, into: &P, &T)
+        openSlab(SIMD3(0.03, 0, 0.02), SIMD3(0.0437, 0.0034, 0.027), n: 12, into: &P, &T)
+        let s = SceneSplitter.split(positions: P, triangles: T, matchSize: 0.006, minSize: 0.0015)
+        XCTAssertFalse(s.floorFound)
+        XCTAssertEqual(s.pieces.count, 2)
+        let big = try! XCTUnwrap(s.pieces.first)
+        let topArea = 0.0384 * 0.034
+        XCTAssertGreaterThan(big.area, topArea * 0.98, "the flat top must stay")
+        XCTAssertEqual(big.hi.y - big.lo.y, 0.0036, accuracy: 0.0002)
+    }
+
+    /// 3.10, the real case: a coarse patch of table (few large triangles) and finely meshed piece tops. The
+    /// table is the floor, not the tops.
+    func testCoarseTableUnderFinelyMeshedPiecesIsTheFloor() {
+        var P: [SIMD3<Double>] = [], T: [SIMD3<Int>] = []
+        let n = 6, size = 0.12
+        for i in 0...n { for k in 0...n { P.append(SIMD3(Double(i) / Double(n) * size - 0.06, 0, Double(k) / Double(n) * size - 0.06)) } }
+        for i in 0..<n { for k in 0..<n {
+            let a = i * (n + 1) + k
+            T.append(SIMD3(a, a + 1, a + n + 2))
+            T.append(SIMD3(a, a + n + 2, a + n + 1))
+        } }
+        openSlab(SIMD3(-0.02, 0, -0.017), SIMD3(0.0184, 0.016, 0.017), n: 40, into: &P, &T)
+        openSlab(SIMD3(0.03, 0, 0.02), SIMD3(0.049, 0.015, 0.029), n: 20, into: &P, &T)
+        let s = SceneSplitter.split(positions: P, triangles: T, matchSize: 0.006, minSize: 0.0015)
+        XCTAssertTrue(s.floorFound)
+        XCTAssertEqual(s.floorY, 0, accuracy: 0.001)
+        XCTAssertEqual(s.pieces.count, 2)
+        let big = try! XCTUnwrap(s.pieces.first)
+        XCTAssertGreaterThan(big.area, 0.0384 * 0.034 * 0.98, "the flat top must stay")
+        XCTAssertEqual(big.hi.y - big.lo.y, 0.016, accuracy: 0.0005)
+    }
+
     func testReportNamesTheMissingPiece() {
         // End to end on point pieces: three pieces, the middle one lost.
         let a = slab(y0: 0, y1: 0.06, lowerBreak: nil, upperBreak: 0.02, phaseHigh: 0.3)

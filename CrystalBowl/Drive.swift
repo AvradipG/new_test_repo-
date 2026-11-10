@@ -388,6 +388,7 @@ enum ScanPackage {
             if rel.hasSuffix("_missing.obj") { return "pieces_missing_model" }
             return "pieces_image"
         }
+        if rel.hasPrefix("model/scale-photos/") { return "scale_photo" }
         if rel.hasPrefix("model/sheet/") {
             if rel.contains("scientific") { return "sample_sheet_scientific" }
             if rel.contains("clean") { return "sample_sheet_clean" }

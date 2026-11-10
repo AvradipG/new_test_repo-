@@ -26,6 +26,8 @@ public struct SceneSplit: Sendable {
     /// Height of the table or dish floor (m, +Y up).
     public var floorY: Double
     public var resolution: Double
+    /// False when the scan holds no table or dish floor (Object Capture left it out): nothing was removed (3.10).
+    public var floorFound: Bool = true
 }
 
 public enum SceneSplitter {
@@ -44,41 +46,60 @@ public enum SceneSplitter {
         let match = matchSize ?? Swift.max(0.006, 12 * res)
         let least = minSize ?? Swift.max(0.0015, 3 * res)
 
-        // Floor: the lowest well-populated horizontal level of upward-facing surface.
-        var upY: [Double] = []
+        // Floor (3.10): the lowest level that holds a real share (3 %) of the upward-facing AREA, and has almost
+        // nothing under it. Counting triangles instead of area failed on a real scan: the table, a few large
+        // triangles, lost to the finely meshed flat tops of the pieces; the tops were deleted as "floor" and only
+        // rings of side wall were left, still joined by the table. When the lowest such level has surface under it,
+        // Object Capture left the table out, and nothing is removed.
+        let ys = positions.map { $0.y }
+        let minY = ys.min() ?? 0
+        let tol = Swift.max(2 * res, 0.001)
+        var ups: [(y: Double, area: Double)] = []
+        var areaAll = 0.0
+        var lowY: [Double] = [], triArea: [Double] = []
+        lowY.reserveCapacity(triangles.count)
+        triArea.reserveCapacity(triangles.count)
         for t in triangles {
             let a = positions[t.x], b = positions[t.y], c = positions[t.z]
             let n = simd_cross(b - a, c - a)
             let l = simd_length(n)
-            if l > 0 && n.y / l > 0.95 { upY.append((a.y + b.y + c.y) / 3) }
+            areaAll += l / 2
+            lowY.append(Swift.min(a.y, Swift.min(b.y, c.y)))
+            triArea.append(l / 2)
+            if l > 0 && n.y / l > 0.95 { ups.append(((a.y + b.y + c.y) / 3, l / 2)) }
         }
-        let ys = positions.map { $0.y }
-        let minY = ys.min() ?? 0
+        ups.sort { $0.y < $1.y }
+        let upTotal = ups.reduce(0) { $0 + $1.area }
         var floorY = minY
-        if upY.count > 50 {
-            let sorted = upY.sorted()
+        var floorFound = false
+        if upTotal > 0 {
             let bin = Swift.max(res, 0.0005)
-            // Densest bin among the lowest 40 % of up-facing triangles.
-            var best = (count: 0, y: minY)
-            let lowPart = sorted.prefix(Swift.max(10, sorted.count * 4 / 10))
             var j = 0
-            let arr = Array(lowPart)
-            for i in arr.indices {
-                while arr[i] - arr[j] > bin { j += 1 }
-                if i - j + 1 > best.count { best = (i - j + 1, arr[(i + j) / 2]) }
+            var s = 0.0
+            for i in ups.indices {
+                s += ups[i].area
+                while ups[i].y - ups[j].y > bin { s -= ups[j].area; j += 1 }
+                if s >= 0.03 * upTotal {
+                    let candidate = ups[(i + j) / 2].y
+                    var below = 0.0
+                    for k in lowY.indices where lowY[k] < candidate - tol { below += triArea[k] }
+                    if below < 0.05 * areaAll {
+                        floorY = candidate
+                        floorFound = true
+                    }
+                    break
+                }
             }
-            if Double(best.count) > 0.05 * Double(upY.count) { floorY = best.y }
         }
-        let tol = Swift.max(2 * res, 0.001)
-        // Only flat triangles at floor level go: the low sides of small grains stay.
-        let kept = triangles.filter { t in
+        // Flat triangles at floor level go (the low sides of small grains stay), and anything under the floor.
+        let kept = !floorFound ? triangles : triangles.filter { t in
             let a = positions[t.x], b = positions[t.y], c = positions[t.z]
             guard Swift.max(a.y, Swift.max(b.y, c.y)) > floorY - tol else { return false }
             let atFloor = abs(a.y - floorY) < tol && abs(b.y - floorY) < tol && abs(c.y - floorY) < tol
             guard atFloor else { return true }
             let n = simd_cross(b - a, c - a)
             let l = simd_length(n)
-            return l > 0 && abs(n.y) / l < 0.9
+            return l > 0 && abs(n.y) / l < 0.7
         }
 
         // Connected parts.
@@ -147,6 +168,7 @@ public enum SceneSplitter {
         let pieces = sorted.filter { $0.maxExtent >= match }
         let small = sorted.filter { $0.maxExtent < match && $0.maxExtent >= least }
         let specks = sorted.filter { $0.maxExtent < least }.count
-        return SceneSplit(pieces: pieces, small: small, specks: specks, containerRemoved: containerRemoved, floorY: floorY, resolution: res)
+        return SceneSplit(pieces: pieces, small: small, specks: specks, containerRemoved: containerRemoved, floorY: floorY, resolution: res,
+                          floorFound: floorFound)
     }
 }

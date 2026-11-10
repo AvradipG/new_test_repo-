@@ -558,6 +558,7 @@ struct PiecesHome: View {
     @State private var c = ""
 
     private var sets: [Scan] { model.scans.filter { $0.isPieces } }
+    @State private var showMat = false
 
     var body: some View {
         NavigationStack {
@@ -602,9 +603,14 @@ struct PiecesHome: View {
                 } header: {
                     Text("Piece sets")
                 }
+                Section {
+                    Button { showMat = true } label: { Label("Scanning mat to print (PDF, 1:1 with scale bars)", systemImage: "printer") }
+                } footer: {
+                    Text("Graph paper at true size, a degree ring and 10 cm field scales: the pieces stand out, the phone keeps track, and the scale photos show the real size.")
+                }
                 Section("How to scan pieces") {
                     TipRow(icon: "square.grid.3x3.fill", color: Theme.teal,
-                           text: "Spread the pieces on a matte, textured sheet (newspaper works), a finger-width apart. Breaks facing up where you can.")
+                           text: "Spread the pieces on the printed scanning mat (button above), inside the grid and a finger-width apart. Breaks facing up where you can.")
                     TipRow(icon: "viewfinder", color: Theme.violet, text: "Fit the box round all of them, then walk round slowly, twice: low and higher.")
                     TipRow(icon: "arrow.uturn.down", color: .orange,
                            text: "Then turn every piece over where it lies, without moving it far, and scan side 2 from the piece set's page.")
@@ -615,6 +621,7 @@ struct PiecesHome: View {
             .navigationTitle("Pieces")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: Scan.self) { s in PiecesDetailView(scanID: s.id) }
+            .sheet(isPresented: $showMat) { ScanningMatView() }
         }
     }
 }
@@ -649,6 +656,7 @@ struct PiecesDetailView: View {
     @State private var report: PiecesReport?
     @State private var show3D = false
     @State private var editTarget = false
+    @State private var gallery: GalleryTarget?
     @State private var kind: TargetShape.Kind = .auto
     @State private var a = ""
     @State private var b = ""
@@ -663,6 +671,7 @@ struct PiecesDetailView: View {
                 if let r = report {
                     resultSections(scan, r)
                 }
+                ScalePhotosSection(scan: scan) { items, url in gallery = GalleryTarget(items: items, start: items.firstIndex { $0.url == url } ?? 0) }
                 Section {
                     LabeledContent("Original shape", value: TargetEditor.describe(scan.pieceTarget))
                     Button("Change the original shape and put together again") {
@@ -707,6 +716,7 @@ struct PiecesDetailView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task(id: scan.piecesResult?.date) { report = loadReport(scan) }
             .fullScreenCover(isPresented: $show3D) { PiecesViewer(scan: scan) }
+            .fullScreenCover(item: $gallery) { target in GalleryViewer(target: target).environmentObject(model) }
             .sheet(isPresented: $editTarget) {
                 NavigationStack {
                     Form {

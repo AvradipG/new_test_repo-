@@ -65,6 +65,16 @@ extension AppModel {
     static let extrasVersion = 6
 
     func upgradeScans() async {
+        // Piece sets put together before the 3.10 floor fix (the flat tops of pieces were taken for the table) are
+        // put together again, one at a time.
+        if buildingID == nil, phase == .home,
+           var p = scans.first(where: { $0.isPieces && $0.hasModel && ($0.piecesSplit ?? 0) < 2 && $0.buildRequested != true }) {
+            p.piecesSplit = 2
+            try? ScanStore.save(p)
+            reload() // reassemble reads the stored scan
+            AppLog.info("pieces", "Putting the pieces together again with the 3.10 piece finder", scan: p)
+            reassemble(p)
+        }
         guard !upgrading else { return }
         upgrading = true
         defer {

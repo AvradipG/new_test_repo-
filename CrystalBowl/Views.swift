@@ -246,7 +246,7 @@ struct HomeView: View {
 
                 Section("How to get an accurate scan") {
                     TipRow(icon: "square.grid.3x3.fill", color: Theme.teal,
-                           text: "Textured, matte surface and soft light. Shiny or plain white tables confuse the tracking.")
+                           text: "Textured, matte surface and soft light. Shiny or plain white tables confuse the tracking. Best: the printed scanning mat (Settings › Scanning mat), whose scale bars then show in the scale photos.")
                     TipRow(icon: "hand.tap.fill", color: Theme.violet,
                            text: "Tap Start, point at the rock, tap Continue and fit the box snugly round the rock.")
                     TipRow(icon: "figure.walk.circle.fill", color: Theme.blue,
@@ -266,6 +266,8 @@ struct HomeView: View {
                 ExtraToolsSettingsSection()
 
                 SheetOptionsSettingsSection()
+
+                ScanningMatSettingsSection()
 
                 Section {
                     Toggle("Vibration guidance while scanning", isOn: $haptics)
@@ -916,6 +918,7 @@ struct ScanDetailView: View {
                 }
                 if scan.hasModel {
                     sampleSheetSection(scan)
+                    ScalePhotosSection(scan: scan) { items, url in gallery = GalleryTarget(items: items, start: items.firstIndex { $0.url == url } ?? 0) }
                     shareSection(scan)
                     driveSection(scan)
                 }

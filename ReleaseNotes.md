@@ -3,6 +3,12 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.10
+- Fixed Pieces: when the table under the pieces was only partly in the scan, the app took the flat tops of the pieces for the table, removed them and kept only rings of side wall (a set of four pieces came out as two hollow rings). The table is now found by area, and a "table" with surface under it is not a table. Piece sets made before are put together again by themselves
+- Scanning mat to print (Pieces tab, Settings): a 1:1 PDF with graph paper (1 mm, 5 mm and 1 cm), a degree ring with 0° for the mark, lettered markers that help the phone keep track, 10 cm and 4 in field scales and a 100 mm print check. A4 or US Letter, light (for dark or grey rocks) or dark (for pale rocks)
+- Scale photos: after each capture the app keeps four of its own sharp photos from round the rock, with a caption, so the mat's scale bars show the real size, like a field photo with a hammer beside the rock. On the scan page and on Google Drive in model/scale-photos
+- Self-test: checks the mat PDFs are true size and the scale-photo caption
+
 ## 3.9
 - Side views now stand on graph paper instead of beside a ruler. The origin is the rock's own lower-left corner, so the axes read its height and width directly. The measured height and width are marked on the axes, with dashed guides behind the rock. The separate ruler, the gap between ruler and rock, and the scale bar are gone
 - Top and bottom: the diameter is measured edge to edge, with guides dropped from the rim
