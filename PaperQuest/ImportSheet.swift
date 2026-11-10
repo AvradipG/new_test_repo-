@@ -64,6 +64,7 @@ struct ImportSheet: View {
     @State private var notes: [String] = []
     @State private var busy = false
     @State private var error: String?
+    @State private var progressText: String?
 
     var body: some View {
         NavigationStack {
@@ -81,13 +82,16 @@ struct ImportSheet: View {
                         LabeledContent("Stored as", value: format == "latex" ? "LaTeX" : format == "html" ? "Formatted (HTML)" : "Markdown")
                         LabeledContent("Sections found", value: "\(headings.filter { $0.level == 1 }.count)")
                         if equations > 0 { LabeledContent("Numbered equations", value: "\(equations)") }
-                        LabeledContent("Size", value: ByteCountFormatter.string(fromByteCount: Int64(text.utf8.count), countStyle: .file))
+                        LabeledContent("Text size", value: ByteCountFormatter.string(fromByteCount: Int64(ManuscriptHTML.extractEmbeddedImages(text).html.utf8.count), countStyle: .file))
                     }
                     if !notes.isEmpty {
                         Section {
                             ForEach(notes, id: \.self) { Label($0, systemImage: "info.circle").font(.footnote) }
                         }
                     }
+                }
+                if let progressText, busy {
+                    Section { HStack { ProgressView(); Text(progressText).font(.footnote) } }
                 }
                 if let error {
                     Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
@@ -156,7 +160,9 @@ struct ImportSheet: View {
             headings = PaperImport.headings(markdown: text)
             equations = 0
         }
-        if text.utf8.count > 800_000 { error = "Too large for one paper in Manuscript Studio (limit about 800 KB of text)." }
+        let (bare, figures) = ManuscriptHTML.extractEmbeddedImages(text)
+        if !figures.isEmpty { notes.append("\(figures.count) figure\(figures.count == 1 ? "" : "s") will be uploaded to the paper's private files.") }
+        if bare.utf8.count > 800_000 { error = "Too large for one paper in Manuscript Studio (limit about 800 KB of text)." }
     }
 
     private func add() async {
@@ -166,7 +172,7 @@ struct ImportSheet: View {
         let id = PaperImport.projectID(title: name, suffix: UUID().uuidString)
         do {
             try await StudioStore().createPaper(id: id, name: name, description: "Imported from \(fileName)", text: text,
-                                                format: format, sourceName: fileName)
+                                                format: format, sourceName: fileName) { step in progressText = step }
             let tracker = PaperImport.tracker(id: id, title: name, headings: headings, equations: equations,
                                               manuscriptURL: FirebaseWebConfig.manuscriptURL(paper: id).absoluteString)
             store.addTracker(tracker)

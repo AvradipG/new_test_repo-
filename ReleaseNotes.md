@@ -3,6 +3,12 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.2
+- Fixed: Manuscript Studio sign-in (the app read its settings from the wrong address), so your papers now open in the Manuscript tab
+- Google Drive setup now shows what happened, closes itself when connected, and says exactly what went wrong if not
+- Adding a paper keeps its figures: pictures in the file are uploaded to the paper's private files, as the web editor does
+- If sign-in stops, the message says at which step, and Settings › Copy a problem report includes it
+
 ## 1.1
 - New Manuscript tab: your Manuscript Studio papers with everything from the web app (writer, equations, highlights, comments with pictures and replies, history, references, files, PDF ink, templates, tabs and split views, Word/PDF export)
 - Sign in once with Google; the web app opens already signed in

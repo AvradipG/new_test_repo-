@@ -83,13 +83,15 @@ final class StudioSession: ObservableObject {
 
     /// The public web config, read from the live site (so it always matches the deployed web app).
     func config() async throws -> FirebaseWebConfig {
-        var req = URLRequest(url: FirebaseWebConfig.configURL)
-        req.cachePolicy = .reloadIgnoringLocalCacheData
-        req.timeoutInterval = 15
-        if let (data, resp) = try? await URLSession.shared.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200,
-           let c = FirebaseWebConfig.parse(js: String(decoding: data, as: UTF8.self)) {
-            if let d = try? JSONEncoder().encode(c) { UserDefaults.standard.set(d, forKey: Self.configKey) }
-            return c
+        for url in FirebaseWebConfig.configURLs {
+            var req = URLRequest(url: url)
+            req.cachePolicy = .reloadIgnoringLocalCacheData
+            req.timeoutInterval = 15
+            if let (data, resp) = try? await URLSession.shared.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200,
+               let c = FirebaseWebConfig.parse(js: String(decoding: data, as: UTF8.self)) {
+                if let d = try? JSONEncoder().encode(c) { UserDefaults.standard.set(d, forKey: Self.configKey) }
+                return c
+            }
         }
         if let c = cachedConfig { return c }
         throw StudioError(message: "Couldn't reach Manuscript Studio to read its settings. Check the connection and try again.")
@@ -103,10 +105,14 @@ final class StudioSession: ObservableObject {
         status = nil
         needsSafelist = false
         defer { busy = false }
+        var step = "Google sign-in"
         do {
             if !GoogleAuth.shared.isSignedIn { try await GoogleAuth.shared.signIn() }
+            step = "reading Manuscript Studio's settings"
             let c = try await config()
+            step = "getting the Google token"
             let googleID = try await GoogleAuth.shared.idToken()
+            step = "Firebase sign-in"
             var json: [String: Any]
             do {
                 json = try await signInWithIdp(c, postBody: "id_token=\(googleID)&providerId=google.com")
@@ -130,7 +136,8 @@ final class StudioSession: ObservableObject {
             status = "Signed in as \(email ?? "your Google account")."
         } catch {
             let text = error.localizedDescription
-            if !text.lowercased().contains("cancel") { status = "Manuscript Studio sign-in didn't work: \(text)" }
+            if !text.lowercased().contains("cancel") { status = "Manuscript Studio sign-in stopped at \(step): \(text)" }
+            if text.contains("INVALID_IDP_RESPONSE") || text.lowercased().contains("audience") { needsSafelist = true }
         }
     }
 
@@ -323,21 +330,33 @@ struct StudioStore {
         return revision
     }
 
-    /// A new paper, written like the web app's "New paper": the project (owner = this account), then the
-    /// manuscript at revision 0 with a first version entry. Returns the paper id.
-    func createPaper(id: String, name: String, description: String, text: String, format: String, sourceName: String) async throws {
+    /// A new paper, written like the web app's "New paper": the project (owner = this account), its figures in
+    /// the private Storage folder (as the web editor stores them), then the manuscript at revision 0 with a first
+    /// version entry.
+    func createPaper(id: String, name: String, description: String, text: String, format: String, sourceName: String,
+                     progress: ((String) -> Void)? = nil) async throws {
         guard let uid = session.uid else { throw StudioError(message: "Sign in to Manuscript Studio first.") }
-        guard text.utf8.count <= 800_000 else {
+        let (html, images) = ManuscriptHTML.extractEmbeddedImages(text)
+        guard html.utf8.count <= 800_000 else {
             throw StudioError(message: "This file is larger than Manuscript Studio's limit for one paper (about 800 KB of text).")
         }
         let (_, root) = try await base()
         let project: [String: Any] = ["id": id, "name": String(name.prefix(250)), "description": String(description.prefix(500)),
                                       "ownerUid": uid, "memberUids": [uid], "editorUids": [uid]]
+        progress?("Creating the paper…")
         try await commit([
             ["update": ["name": "\(root)/manuscriptProjects/\(id)", "fields": FirestoreValue.fields(project)],
              "currentDocument": ["exists": false], "updateTransforms": Self.serverTime(["createdAt"])],
         ])
-        let manuscript: [String: Any] = ["title": String(name.prefix(250)), "text": text, "format": format, "revision": 0, "updatedBy": uid]
+        var finalText = html
+        for (n, img) in images.enumerated() {
+            progress?("Uploading figure \(n + 1) of \(images.count)…")
+            let ext = img.mime.split(separator: "/").last.map(String.init) ?? "png"
+            let assetID = try await uploadFigure(pid: id, ownerUid: uid, data: img.data, mime: img.mime, name: "figure-\(n + 1).\(ext)")
+            finalText = finalText.replacingOccurrences(of: "src=\"\(img.placeholder)\"", with: "src=\"asset://\(assetID)\"")
+        }
+        progress?("Saving the text…")
+        let manuscript: [String: Any] = ["title": String(name.prefix(250)), "text": finalText, "format": format, "revision": 0, "updatedBy": uid]
         var version = manuscript
         version["label"] = "Imported from \(sourceName)"
         version["createdBy"] = uid
@@ -347,6 +366,36 @@ struct StudioStore {
             ["update": ["name": "\(root)/manuscriptProjects/\(id)/versions/\(UUID().uuidString.lowercased())", "fields": FirestoreValue.fields(version)],
              "currentDocument": ["exists": false], "updateTransforms": Self.serverTime(["createdAt"])],
         ])
+    }
+
+    /// Uploads one figure to manuscriptUsers/{owner}/{paper}/assets/ (the path the Storage rules allow) and records
+    /// it in assets/{id}, like the web editor's figure upload. Returns the asset id used as asset://ID.
+    func uploadFigure(pid: String, ownerUid: String, data: Data, mime: String, name: String) async throws -> String {
+        guard let uid = session.uid else { throw StudioError(message: "Sign in to Manuscript Studio first.") }
+        let c = try await session.config()
+        let assetID = UUID().uuidString.lowercased()
+        let path = "manuscriptUsers/\(ownerUid)/\(pid)/assets/\(UUID().uuidString.lowercased())_\(name)"
+        var comps = URLComponents(string: "https://firebasestorage.googleapis.com/v0/b/\(c.storageBucket)/o")!
+        comps.queryItems = [URLQueryItem(name: "uploadType", value: "media"), URLQueryItem(name: "name", value: path)]
+        let token = try await session.token()
+        var req = URLRequest(url: comps.url!)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(mime, forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 120
+        let (body, resp) = try await URLSession.shared.upload(for: req, from: data)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else {
+            throw StudioError(message: "Figure upload failed (\(code)): \(String(decoding: body.prefix(200), as: UTF8.self))", status: code)
+        }
+        let (_, root) = try await base()
+        let asset: [String: Any] = ["id": assetID, "name": name, "type": mime, "size": data.count, "kind": "figure", "path": path,
+                                    "createdBy": uid, "createdAt": ISO8601DateFormatter.firestoreJS.string(from: Date())]
+        try await commit([
+            ["update": ["name": "\(root)/manuscriptProjects/\(pid)/assets/\(assetID)", "fields": FirestoreValue.fields(asset)],
+             "currentDocument": ["exists": false]],
+        ])
+        return assetID
     }
 
     /// A comment as the web app writes it (annotation + comment.created event in one batch).

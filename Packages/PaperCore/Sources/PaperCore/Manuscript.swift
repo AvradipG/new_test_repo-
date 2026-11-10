@@ -18,7 +18,12 @@ public struct FirebaseWebConfig: Codable, Equatable, Sendable {
     }
 
     public static let site = URL(string: "https://manuscript-studio-181489801873.web.app")!
-    public static let configURL = URL(string: "https://manuscript-studio-181489801873.web.app/firebase-config.js")!
+    /// Where the web app publishes its config. The site root rewrites unknown paths to the reader's HTML page,
+    /// so /firebase-config.js there is not the config: /write/firebase-config.js is (checked 2026-11-10).
+    public static let configURLs = [
+        URL(string: "https://manuscript-studio-181489801873.web.app/write/firebase-config.js")!,
+        URL(string: "https://manuscript-studio-181489801873.web.app/firebase-config.js")!,
+    ]
     public static let database = "manuscript-studio"
 
     /// Reads `window.GA_FIREBASE_CONFIG = { apiKey: "...", ... }` (quotes of either kind, keys quoted or not).
@@ -224,6 +229,37 @@ public enum ManuscriptHTML {
 
     public static func anchorComment(_ html: String, quote: String, commentID: String) throws -> String {
         try wrap(html, quote: quote, open: "<span data-comment-id=\"\(escape(commentID))\" class=\"comment-anchor\">", close: "</span>")
+    }
+
+    /// Pictures embedded as data URIs (e.g. a converted Word file), replaced by "asset://pending-N" so the app can
+    /// upload each one to the paper's Storage folder and swap in its asset id (the web editor stores figures that way).
+    public struct EmbeddedImage: Equatable, Sendable {
+        public var placeholder: String
+        public var mime: String
+        public var data: Data
+    }
+
+    public static func extractEmbeddedImages(_ html: String) -> (html: String, images: [EmbeddedImage]) {
+        guard let re = try? NSRegularExpression(pattern: #"src="data:(image/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)""#) else { return (html, []) }
+        let ns = html as NSString
+        var out = ""
+        var images: [EmbeddedImage] = []
+        var last = 0
+        for m in re.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            out += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+            let mime = ns.substring(with: m.range(at: 1))
+            let b64 = ns.substring(with: m.range(at: 2)).replacingOccurrences(of: "\\s", with: "", options: .regularExpression)
+            if let data = Data(base64Encoded: b64) {
+                let ph = "asset://pending-\(images.count + 1)"
+                images.append(EmbeddedImage(placeholder: ph, mime: mime, data: data))
+                out += "src=\"\(ph)\""
+            } else {
+                out += "src=\"\""
+            }
+            last = m.range.location + m.range.length
+        }
+        out += ns.substring(from: last)
+        return (out, images)
     }
 
     /// Visible text: tags removed, common entities decoded, whitespace collapsed.

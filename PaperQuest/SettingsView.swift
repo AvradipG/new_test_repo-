@@ -135,6 +135,7 @@ struct DriveSetupSheet: View {
                             Task {
                                 await store.signInToDrive()
                                 signingIn = false
+                                if store.driveSignedIn && store.driveStatus == nil { dismiss() }
                             }
                         } label: {
                             if signingIn { ProgressView() } else { Label("Sign in with Google", systemImage: "person.badge.key") }
@@ -144,6 +145,14 @@ struct DriveSetupSheet: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.footnote.monospaced())
+                    if let status = store.driveStatus {
+                        Label(status, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
+                    } else if store.isSyncing {
+                        HStack { ProgressView(); Text("Syncing with Drive…").font(.footnote) }
+                    } else if let when = store.lastDriveSync, store.driveConnected {
+                        Label("Synced \(when.formatted(date: .abbreviated, time: .shortened))", systemImage: "checkmark.icloud.fill")
+                            .font(.footnote).foregroundStyle(Palette.done)
+                    }
                 } header: {
                     Text("Alternative: direct sync")
                 } footer: {

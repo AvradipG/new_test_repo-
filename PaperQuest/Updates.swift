@@ -45,6 +45,9 @@ enum AppInfo {
             "Papers: \(store.papers.map { "\($0.title) (\($0.nodes.count) entries)" }.joined(separator: ", "))",
         ]
         if let s = store.driveStatus { lines.append("Drive status: \(s)") }
+        let studio = StudioSession.shared
+        lines.append("Manuscript Studio: \(studio.signedIn ? "signed in as \(studio.email ?? "?")" : "not signed in"), Google: \(GoogleAuth.shared.isSignedIn ? "signed in" : "not signed in")")
+        if let s = studio.status { lines.append("Manuscript Studio status: \(s)") }
         lines += ["", "What happened:", description.isEmpty ? "(not filled in)" : description]
         return lines.joined(separator: "\n")
     }

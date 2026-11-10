@@ -20,6 +20,12 @@ final class ManuscriptTests: XCTestCase {
         XCTAssertEqual(c, FirebaseWebConfig(apiKey: "AIzaTest-123", authDomain: "manuscript.example.app",
                                              projectId: "project-ed65", storageBucket: "bucket.appspot.com"))
         XCTAssertNil(FirebaseWebConfig.parse(js: "window.GA_FIREBASE_CONFIG = { apiKey: \"\", projectId: \"\" };"))
+        // The live /write/firebase-config.js is one line of JSON with quoted keys.
+        let live = #"window.GA_FIREBASE_CONFIG={"projectId":"project-ed65bb90-aac3-42cd-b77","appId":"1:181489801873:web:0","apiKey":"AIzaXYZ","authDomain":"project-ed65bb90-aac3-42cd-b77.firebaseapp.com","storageBucket":"project-ed65bb90-aac3-42cd-b77.firebasestorage.app"};"#
+        XCTAssertEqual(FirebaseWebConfig.parse(js: live)?.apiKey, "AIzaXYZ")
+        XCTAssertEqual(FirebaseWebConfig.parse(js: live)?.storageBucket, "project-ed65bb90-aac3-42cd-b77.firebasestorage.app")
+        XCTAssertNil(FirebaseWebConfig.parse(js: "<!doctype html><html><title>Manuscript Studio</title>"), "the root rewrite is HTML, not config")
+        XCTAssertTrue(FirebaseWebConfig.configURLs[0].absoluteString.hasSuffix("/write/firebase-config.js"))
         XCTAssertEqual(FirebaseWebConfig.manuscriptURL(paper: "green-christoffel-writing").absoluteString,
                        "https://manuscript-studio-181489801873.web.app/write/?paper=green-christoffel-writing")
     }
@@ -229,5 +235,18 @@ final class PaperImportTests: XCTestCase {
         XCTAssertEqual(Set(p.nodes.map(\.id)).count, p.nodes.count)
         XCTAssertEqual(PaperImport.tracker(id: "x", title: "X", headings: [], equations: 0, manuscriptURL: nil).nodes.count,
                        Templates.article(title: "X", id: "x").nodes.count)
+    }
+}
+
+final class EmbeddedImageTests: XCTestCase {
+    func testDataImagesBecomePlaceholders() {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 1, 2, 3]).base64EncodedString()
+        let html = "<p>a</p><img src=\"data:image/png;base64,\(png)\" alt=\"Figure 1\"><img src=\"asset://keep\"><img src=\"data:image/jpeg;base64,\(png)\">"
+        let (out, images) = ManuscriptHTML.extractEmbeddedImages(html)
+        XCTAssertEqual(images.map(\.placeholder), ["asset://pending-1", "asset://pending-2"])
+        XCTAssertEqual(images.map(\.mime), ["image/png", "image/jpeg"])
+        XCTAssertEqual(images[0].data, Data([0x89, 0x50, 0x4E, 0x47, 1, 2, 3]))
+        XCTAssertEqual(out, "<p>a</p><img src=\"asset://pending-1\" alt=\"Figure 1\"><img src=\"asset://keep\"><img src=\"asset://pending-2\">")
+        XCTAssertEqual(ManuscriptHTML.extractEmbeddedImages("<p>none</p>").images.count, 0)
     }
 }
