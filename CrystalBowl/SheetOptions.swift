@@ -34,15 +34,15 @@ enum SheetItem: String, CaseIterable, Identifiable {
         case .bottom: return "Bottom"
         case .unrolled: return "Unrolled side (360°)"
         case .measurements: return "Measurements box"
-        case .rulers: return "Rulers"
-        case .scaleBars: return "Scale bars"
-        case .sizeLines: return "Height and width lines"
+        case .rulers: return "Graph paper and axes"
+        case .scaleBars: return "Scale bars (clean sheet)"
+        case .sizeLines: return "Height, width and diameter read-outs"
         case .markArrows: return "Reference mark arrows (▽)"
         case .dials: return "View dials"
         case .protractor: return "Protractor round the top"
         case .angleCaptions: return "Titles and angles"
         case .header: return "Sample name and date"
-        case .figures: return "Each picture as its own PNG, with ruler and scale"
+        case .figures: return "Each picture as its own PNG, with its graph and read-outs"
         case .plainViews: return "Plain views without drawings"
         }
     }
@@ -50,6 +50,7 @@ enum SheetItem: String, CaseIterable, Identifiable {
     var note: String? {
         switch self {
         case .bottom: return "Only when the rock was flipped and its underside scanned."
+        case .rulers: return "Each side view sits on graph paper whose origin is the rock's lower-left corner."
         case .figures: return "One file per view: what is ticked above is drawn on it."
         case .plainViews: return "The bare 3D views, for your own layouts."
         default: return nil

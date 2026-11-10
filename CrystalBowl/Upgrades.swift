@@ -60,7 +60,9 @@ extension AppModel {
     /// 5 (3.8): the mark finder looks for thin lines, red top and black bottom marks (a written label is not a
     /// mark); sheets are laid out as separate figures, each with its own ruler and scale, as ticked in
     /// "What to include". Every older scan is evaluated again.
-    static let extrasVersion = 5
+    /// 6 (3.9): side views on graph paper (origin at the rock's corner, height and width read off the axes);
+    /// no ruler laid beside the rock and no scale bar in the figures.
+    static let extrasVersion = 6
 
     func upgradeScans() async {
         guard !upgrading else { return }

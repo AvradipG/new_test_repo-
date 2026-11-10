@@ -95,7 +95,13 @@ extension AppModel {
                     parent = reportsFolder ?? logFolder
                 }
                 let before = FolderCopy.record(url) // a file that grows during the upload goes again next time
-                let id = try await uploadReplacing(client, url, name: url.lastPathComponent, parent: parent, existing: records[rel]?.id)
+                // Upload a still copy: the log keeps growing while it is sent, and a file larger than the size
+                // announced when the upload opened is refused by Google with HTTP 400 (seen in 3.8's log).
+                let still = FileManager.default.temporaryDirectory.appendingPathComponent("upload-" + url.lastPathComponent)
+                try? FileManager.default.removeItem(at: still)
+                try FileManager.default.copyItem(at: url, to: still)
+                defer { try? FileManager.default.removeItem(at: still) }
+                let id = try await uploadReplacing(client, still, name: url.lastPathComponent, parent: parent, existing: records[rel]?.id)
                 records[rel] = DriveFileRecord(id: id, size: before.size, modified: before.modified)
                 Self.saveRecords(records, Self.logRecordsKey)
             }

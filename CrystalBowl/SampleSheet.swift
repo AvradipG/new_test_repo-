@@ -363,139 +363,254 @@ enum SampleSheet {
         return v.title + " from 0°"
     }
 
-    /// A side view: title strip on top, ruler in its own column on the left, height on the right, width and the
-    /// scale bar underneath. Nothing is drawn over the rock except the thin mark arrow above it.
-    static func sideFigure(_ v: View3D, scan: Scan, rig: SampleRig, unit: LengthUnit, reference: Double,
-                           referenceIsMark: Bool, opt: SheetOptions) -> UIImage {
-        let pad = figurePad, S = sideSize
-        let s = S / pixels
-        let d = rig.data
-        let ppm = CGFloat(v.pxPerMM) * s
-        let rulerW: CGFloat = opt.has(.rulers) ? 96 : 0
-        let rightW: CGFloat = opt.has(.sizeLines) ? 180 : pad
-        let headerH: CGFloat = opt.has(.angleCaptions) || opt.has(.dials) ? 124 : pad
-        let baseInImage = CGFloat(v.baseY) * s
-        let box = CGRect(x: v.box.minX * s, y: v.box.minY * s, width: v.box.width * s, height: v.box.height * s)
-        // The ruler may reach above the picture: the picture moves down so it stays on the figure.
-        var rulerTop: CGFloat = 0
-        if opt.has(.rulers), let total = RulerTicks.ticks(coveringMM: d.heightMM + 3, unit: unit).last?.mm {
-            rulerTop = baseInImage - CGFloat(total) * ppm - 24
+    // MARK: Graph paper (3.9): the rock measured against its own axes, no ruler laid beside it
+
+    static let gridMinor = UIColor(red: 0.91, green: 0.93, blue: 0.97, alpha: 1)
+    static let gridMid = UIColor(red: 0.82, green: 0.86, blue: 0.92, alpha: 1)
+    static let gridMajor = UIColor(red: 0.65, green: 0.72, blue: 0.84, alpha: 1)
+    static let heightColor = UIColor(red: 0.69, green: 0.47, blue: 0.04, alpha: 1)
+
+    /// The render with its white background made see-through, so the graph paper shows round the rock.
+    static func cutout(_ img: UIImage) -> UIImage {
+        guard let cg = img.cgImage else { return img }
+        let w = cg.width, h = cg.height
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = ctx.data else { return img }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let p = data.bindMemory(to: UInt8.self, capacity: w * h * 4)
+        for i in 0..<(w * h) {
+            let o = i * 4
+            if Int(p[o]) + Int(p[o + 1]) + Int(p[o + 2]) >= 750 {
+                p[o] = 0; p[o + 1] = 0; p[o + 2] = 0; p[o + 3] = 0
+            }
         }
-        let arrowTop: CGFloat = opt.has(.markArrows) ? box.minY - 34 : box.minY
-        let imgY = Swift.max(headerH, headerH - Swift.min(rulerTop, arrowTop) + 6)
-        let img = CGRect(x: pad + rulerW, y: imgY, width: S, height: S)
-        var y = img.maxY
-        let widthLineY = img.minY + box.maxY + 30
-        if opt.has(.sizeLines) { y = Swift.max(y, widthLineY + 44) }
-        let barY = y + 34
-        let height = (opt.has(.scaleBars) ? barY + 64 : y + 16) + pad
-        let size = CGSize(width: img.maxX + rightW, height: height)
-        let fmt = UIGraphicsImageRendererFormat()
-        fmt.scale = 1
-        return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
-            let g = ctx.cgContext
-            UIColor.white.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-            v.image.draw(in: img)
-            if opt.has(.angleCaptions) {
-                let maxW = size.width - img.minX - (opt.has(.dials) ? 130 : pad)
-                let title = sideTitle(v, referenceIsMark: referenceIsMark)
-                text(title, at: CGPoint(x: img.minX, y: pad - 6), size: fitted(title, size: 32, weight: .bold, maxWidth: maxW), weight: .bold)
-                var sub = "protractor " + Rotation.text(reference + (v.offset ?? 0))
-                if opt.has(.header) { sub += " · " + scan.name }
-                text(sub, at: CGPoint(x: img.minX, y: pad + 40), size: fitted(sub, size: 21, maxWidth: maxW), color: .darkGray, mono: true)
-            }
-            if opt.has(.dials) {
-                miniDial(g, centre: CGPoint(x: size.width - pad - 50, y: pad + 46), radius: 40, viewOffset: v.offset ?? 0)
-            }
-            if opt.has(.rulers) {
-                ruler(g, x: pad, baseY: img.minY + baseInImage, pxPerMM: ppm, mm: d.heightMM + 3, unit: unit, width: 64)
-            }
-            let b = box.offsetBy(dx: img.minX, dy: img.minY)
-            if opt.has(.sizeLines) {
-                let hMM = Double(v.box.height) / v.pxPerMM, wMM = Double(v.box.width) / v.pxPerMM
-                let hx = b.maxX + 26
-                let hc = SampleRig.Palette.height.darker()
-                dimension(g, from: CGPoint(x: hx, y: b.minY), to: CGPoint(x: hx, y: b.maxY), label: "", color: hc, labelOffset: .zero)
-                text(unit.format(hMM), at: CGPoint(x: hx + 16, y: b.midY - 14), size: 24, weight: .bold, color: hc, mono: true)
-                dimension(g, from: CGPoint(x: b.minX, y: widthLineY), to: CGPoint(x: b.maxX, y: widthLineY), label: "", color: accent, labelOffset: .zero)
-                text(unit.format(wMM), at: CGPoint(x: b.midX, y: widthLineY + 12), size: 24, weight: .bold, color: accent, align: .center, mono: true)
-            }
-            if opt.has(.markArrows) { markTick(g, view: v, in: img, scale: s) }
-            if opt.has(.scaleBars) {
-                scaleBar(g, at: CGPoint(x: img.minX, y: barY), pxPerMM: ppm, unit: unit, maxWidth: S * 0.45)
+        return ctx.makeImage().map { UIImage(cgImage: $0) } ?? img
+    }
+
+    /// Graph-paper lines in `plot` (origin bottom-left). The finest lines kept are at least 6 px apart.
+    static func drawGrid(_ g: CGContext, plot: CGRect, ppm: CGFloat, xs: [RulerTicks.Tick], ys: [RulerTicks.Tick]) {
+        let step: CGFloat = xs.count > 1 ? CGFloat(xs[1].mm) * ppm : 10
+        let minLevel = step >= 6 ? 0 : (step * 5 >= 6 ? 1 : 2)
+        for (ticks, vertical) in [(xs, true), (ys, false)] {
+            for t in ticks where t.level >= minLevel {
+                let c = t.level == 2 ? gridMajor : (t.level == 1 ? gridMid : gridMinor)
+                g.setStrokeColor(c.cgColor)
+                g.setLineWidth(t.level == 2 ? 1.5 : 1)
+                let d = CGFloat(t.mm) * ppm
+                if vertical {
+                    g.move(to: CGPoint(x: plot.minX + d, y: plot.minY))
+                    g.addLine(to: CGPoint(x: plot.minX + d, y: plot.maxY))
+                } else {
+                    g.move(to: CGPoint(x: plot.minX, y: plot.maxY - d))
+                    g.addLine(to: CGPoint(x: plot.maxX, y: plot.maxY - d))
+                }
+                g.strokePath()
             }
         }
     }
 
-    /// Top or bottom: the protractor ring (top), the mark direction, diameter and scale bar below.
+    static func dashed(_ g: CGContext, from a: CGPoint, to b: CGPoint, color: UIColor, width: CGFloat = 2) {
+        g.setStrokeColor(color.cgColor)
+        g.setLineWidth(width)
+        g.setLineDash(phase: 0, lengths: [7, 5])
+        g.move(to: a)
+        g.addLine(to: b)
+        g.strokePath()
+        g.setLineDash(phase: 0, lengths: [])
+    }
+
+    static func triangle(_ g: CGContext, _ a: CGPoint, _ b: CGPoint, _ c: CGPoint, color: UIColor, filled: Bool = true) {
+        g.setFillColor(color.cgColor)
+        g.setStrokeColor(color.cgColor)
+        g.setLineWidth(2.5)
+        g.move(to: a)
+        g.addLine(to: b)
+        g.addLine(to: c)
+        g.closePath()
+        if filled { g.fillPath() } else { g.strokePath() }
+    }
+
+    /// A side view's silhouette in mm and its graph, rounded up to whole units with room above for the mark arrow.
+    static func sideGrid(_ v: View3D, unit: LengthUnit) -> (wMM: Double, hMM: Double, xs: [RulerTicks.Tick], ys: [RulerTicks.Tick]) {
+        let w = Double(v.box.width) / v.pxPerMM, h = Double(v.box.height) / v.pxPerMM
+        return (w, h, RulerTicks.ticks(coveringMM: w + 3, unit: unit), RulerTicks.ticks(coveringMM: h * 1.06 + 4, unit: unit))
+    }
+
+    /// One scale for every side view of a scan: the largest graph is about 680 px.
+    static func sidePPM(_ views: [View3D], unit: LengthUnit) -> CGFloat {
+        let spans = views.filter { $0.offset != nil }.map { v -> Double in
+            let g = sideGrid(v, unit: unit)
+            return Swift.max(g.xs.last?.mm ?? 50, g.ys.last?.mm ?? 50)
+        }
+        return CGFloat(680 / Swift.max(10, spans.max() ?? 60))
+    }
+
+    /// A side view on graph paper. The origin is the rock's own lower-left corner, so the axes read its height
+    /// and width directly; both are marked on the axes and carried across by dashed guides behind the rock.
+    /// Title, angle and the view dial sit in a strip above; nothing is drawn over the rock but the mark arrow.
+    static func sideFigure(_ v: View3D, scan: Scan, unit: LengthUnit, reference: Double, referenceIsMark: Bool,
+                           opt: SheetOptions, ppm: CGFloat) -> UIImage {
+        let pad = figurePad
+        let gridOn = opt.has(.rulers), reads = opt.has(.sizeLines)
+        let (wMM, hMM, xs, ys) = sideGrid(v, unit: unit)
+        let gW = xs.last?.mm ?? wMM, gH = ys.last?.mm ?? hMM
+        let k = ppm / CGFloat(v.pxPerMM)
+        let axes = gridOn || reads
+        let labelW: CGFloat = axes ? 74 : 0
+        var lines: [(String, CGFloat, UIFont.Weight, UIColor)] = []
+        if opt.has(.angleCaptions) {
+            lines.append((sideTitle(v, referenceIsMark: referenceIsMark), 32, .bold, ink))
+            lines.append(("protractor " + Rotation.text(reference + (v.offset ?? 0)), 20, .regular, .darkGray))
+        }
+        if reads { lines.append(("height " + unit.format(hMM) + " · width " + unit.format(wMM), 20, .semibold, accent)) }
+        if opt.has(.header) { lines.append((scan.name, 20, .regular, .darkGray)) }
+        let textW = lines.map { width($0.0, size: $0.1, weight: $0.2) }.max() ?? 0
+        let dialW: CGFloat = opt.has(.dials) ? 130 : 0
+        var headH = pad
+        for l in lines { headH += l.1 * 1.5 }
+        headH = Swift.max(headH, opt.has(.dials) ? pad + 100 : 0) + 18
+        let plot = CGRect(x: pad + labelW, y: headH + 24, width: CGFloat(gW) * ppm, height: CGFloat(gH) * ppm)
+        let size = CGSize(width: Swift.max(plot.maxX + 70, pad + textW + dialW + 12), height: plot.maxY + (axes ? 64 : 20) + pad)
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        let rock = cutout(v.image)
+        return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
+            let g = ctx.cgContext
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            func X(_ mm: Double) -> CGFloat { plot.minX + CGFloat(mm) * ppm }
+            func Y(_ mm: Double) -> CGFloat { plot.maxY - CGFloat(mm) * ppm }
+            if gridOn { drawGrid(g, plot: plot, ppm: ppm, xs: xs, ys: ys) }
+            if reads {
+                dashed(g, from: CGPoint(x: X(0), y: Y(hMM)), to: CGPoint(x: X(gW), y: Y(hMM)), color: heightColor)
+                dashed(g, from: CGPoint(x: X(wMM), y: Y(0)), to: CGPoint(x: X(wMM), y: Y(gH)), color: accent)
+            }
+            // The rock, its silhouette's lower-left corner on the origin.
+            let side = CGFloat(pixels) * k
+            rock.draw(in: CGRect(x: plot.minX - v.box.minX * k, y: plot.maxY - v.box.maxY * k, width: side, height: side))
+            if axes {
+                g.setStrokeColor(ink.cgColor)
+                g.setLineWidth(2)
+                g.move(to: CGPoint(x: X(0), y: Y(gH)))
+                g.addLine(to: CGPoint(x: X(0), y: Y(0)))
+                g.addLine(to: CGPoint(x: X(gW), y: Y(0)))
+                g.strokePath()
+            }
+            if gridOn {
+                for t in ys where t.level == 2 {
+                    let y = Y(t.mm)
+                    g.move(to: CGPoint(x: X(0) - 8, y: y))
+                    g.addLine(to: CGPoint(x: X(0), y: y))
+                    g.strokePath()
+                    if let l = t.label, !(reads && abs(t.mm - hMM) * Double(ppm) < 24) {
+                        text(l, at: CGPoint(x: X(0) - 12, y: y - 11), size: 18, weight: .semibold, align: .right, mono: true)
+                    }
+                }
+                for t in xs where t.level == 2 {
+                    let x = X(t.mm)
+                    g.move(to: CGPoint(x: x, y: Y(0)))
+                    g.addLine(to: CGPoint(x: x, y: Y(0) + 8))
+                    g.strokePath()
+                    if let l = t.label, !(reads && abs(t.mm - wMM) * Double(ppm) < 34) {
+                        text(l, at: CGPoint(x: x, y: Y(0) + 11), size: 18, weight: .semibold, align: .center, mono: true)
+                    }
+                }
+                text(unit.rulerCaption, at: CGPoint(x: X(0) - 12, y: Y(gH) - 30), size: 18, weight: .bold, color: accent, align: .right)
+                text(unit.rulerCaption, at: CGPoint(x: X(gW) + 10, y: Y(0) + 11), size: 18, weight: .bold, color: accent)
+            }
+            if reads {
+                let y = Y(hMM)
+                triangle(g, CGPoint(x: X(0), y: y), CGPoint(x: X(0) - 11, y: y - 7), CGPoint(x: X(0) - 11, y: y + 7), color: heightColor)
+                text(unit.format(hMM, symbol: false), at: CGPoint(x: X(0) - 15, y: y - 12), size: 19, weight: .bold,
+                     color: heightColor, align: .right, mono: true)
+                let x = X(wMM)
+                triangle(g, CGPoint(x: x, y: Y(0)), CGPoint(x: x - 7, y: Y(0) + 11), CGPoint(x: x + 7, y: Y(0) + 11), color: accent)
+                text(unit.format(wMM, symbol: false), at: CGPoint(x: x, y: Y(0) + 14), size: 19, weight: .bold,
+                     color: accent, align: .center, mono: true)
+            }
+            if opt.has(.markArrows), let off = v.offset {
+                // Across the silhouette at the mark's position; solid when it faces the camera.
+                let a = off * .pi / 180
+                let x = X(wMM / 2 + sin(a) * wMM / 2)
+                let y = Y(hMM) - 14
+                let facing = cos(a) > 0.05 && abs(sin(a)) < 0.95
+                triangle(g, CGPoint(x: x, y: y), CGPoint(x: x - 11, y: y - 20), CGPoint(x: x + 11, y: y - 20), color: markRed, filled: facing)
+            }
+            var y = pad - 6
+            for l in lines {
+                text(l.0, at: CGPoint(x: pad, y: y), size: l.1, weight: l.2, color: l.3)
+                y += l.1 * 1.5
+            }
+            if opt.has(.dials) {
+                miniDial(g, centre: CGPoint(x: size.width - pad - 50, y: pad + 46), radius: 40, viewOffset: v.offset ?? 0)
+            }
+        }
+    }
+
+    /// Top or bottom: the protractor ring (top), the mark direction, and the diameter measured edge to edge
+    /// with guides dropped from the rim. No ruler or scale bar beside it.
     static func endFigure(_ v: View3D, scan: Scan, rig: SampleRig, unit: LengthUnit, opt: SheetOptions) -> UIImage {
         let pad = figurePad
         let isTop = v.id == "top"
         let area: CGFloat = 720, inner: CGFloat = 480
-        let headerH: CGFloat = opt.has(.angleCaptions) ? 112 : pad
+        let reads = opt.has(.sizeLines)
+        let d = rig.data
+        let k = scan.scaleFactor
+        let dia = d.shape?.kind == .cylinder ? d.shape!.diameter * 1000 * k : d.fitsDiameterMM
+        let headerH: CGFloat = opt.has(.angleCaptions) ? (opt.has(.header) ? 140 : 112) : pad
         let region = CGRect(x: pad, y: headerH, width: area, height: area)
         let img = CGRect(x: region.midX - inner / 2, y: region.midY - inner / 2, width: inner, height: inner)
         let s = inner / pixels
         let ppm = CGFloat(v.pxPerMM) * s
-        let d = rig.data
-        let k = scan.scaleFactor
-        let barY = region.maxY + 30
-        let size = CGSize(width: region.maxX + pad, height: (opt.has(.scaleBars) || opt.has(.sizeLines) ? barY + 70 : region.maxY) + pad)
+        let disc = CGRect(x: img.minX + v.box.minX * s, y: img.minY + v.box.minY * s, width: v.box.width * s, height: v.box.height * s)
+        let dimY = region.maxY + 26
+        let size = CGSize(width: region.maxX + pad, height: (reads ? dimY + 52 : region.maxY) + pad)
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1
         return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
             let g = ctx.cgContext
             UIColor.white.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
+            if reads {
+                // Guides from the rim straight down to the diameter line, behind everything else.
+                dashed(g, from: CGPoint(x: disc.minX, y: disc.midY), to: CGPoint(x: disc.minX, y: dimY), color: accent, width: 1.5)
+                dashed(g, from: CGPoint(x: disc.maxX, y: disc.midY), to: CGPoint(x: disc.maxX, y: dimY), color: accent, width: 1.5)
+            }
             v.image.draw(in: img)
             let c = CGPoint(x: img.midX, y: img.midY)
             if opt.has(.angleCaptions) {
                 let title = isTop ? "Top (seen from above)" : "Bottom (seen from below)"
                 text(title, at: CGPoint(x: pad, y: pad - 6), size: 32, weight: .bold)
-                var sub = isTop ? "0° (the mark) at the bottom · + = counter-clockwise" : "0° (the mark) at the top edge"
-                if opt.has(.header) { sub += " · " + scan.name }
-                text(sub, at: CGPoint(x: pad, y: pad + 40), size: fitted(sub, size: 21, maxWidth: area), color: .darkGray)
+                let sub = isTop ? "0° (the mark) at the bottom · + = counter-clockwise" : "0° (the mark) at the top edge"
+                text(sub, at: CGPoint(x: pad, y: pad + 40), size: fitted(sub, size: 20, maxWidth: area), color: .darkGray)
+                if opt.has(.header) { text(scan.name, at: CGPoint(x: pad, y: pad + 70), size: fitted(scan.name, size: 20, maxWidth: area), color: .darkGray) }
             }
             if isTop && opt.has(.protractor) {
                 let R = CGFloat(d.circleRadius * 1000 * k) * ppm * 1.06
                 protractor(g, centre: c, radius: R)
             } else if opt.has(.markArrows) {
                 // Where the mark is: bottom edge from above, top edge from below.
-                let yTip: CGFloat = isTop ? img.maxY + 10 : img.minY - 10
+                let yTip: CGFloat = isTop ? disc.maxY + 10 : disc.minY - 10
                 let dir: CGFloat = isTop ? 1 : -1
-                g.setFillColor(markRed.cgColor)
-                g.move(to: CGPoint(x: c.x, y: yTip))
-                g.addLine(to: CGPoint(x: c.x - 13, y: yTip + dir * 24))
-                g.addLine(to: CGPoint(x: c.x + 13, y: yTip + dir * 24))
-                g.closePath()
-                g.fillPath()
+                triangle(g, CGPoint(x: c.x, y: yTip), CGPoint(x: c.x - 13, y: yTip + dir * 24), CGPoint(x: c.x + 13, y: yTip + dir * 24), color: markRed)
                 text("0°", at: CGPoint(x: c.x + 20, y: yTip + (isTop ? 0 : -24)), size: 22, weight: .bold, color: markRed)
             }
-            if opt.has(.sizeLines) {
-                let dia = d.shape?.kind == .cylinder ? d.shape!.diameter * 1000 * k : d.fitsDiameterMM
-                text("Ø " + unit.format(dia), at: CGPoint(x: region.maxX, y: barY - 4), size: 26, weight: .bold, color: accent, align: .right, mono: true)
-            }
-            if opt.has(.scaleBars) {
-                scaleBar(g, at: CGPoint(x: region.minX, y: barY + 6), pxPerMM: ppm, unit: unit, maxWidth: area * 0.4)
+            if reads {
+                dimension(g, from: CGPoint(x: disc.minX, y: dimY), to: CGPoint(x: disc.maxX, y: dimY), label: "", color: accent, labelOffset: .zero)
+                text("Ø " + unit.format(dia), at: CGPoint(x: disc.midX, y: dimY + 12), size: 24, weight: .bold, color: accent, align: .center, mono: true)
             }
         }
     }
 
-    /// The unrolled side with its ruler, angle axis (0° = the mark in the middle) and captions.
+    /// The unrolled side with a height axis on its left edge, the angle axis (0° = the mark in the middle) and captions.
     static func unrolledFigure(_ img0: UIImage, _ u: Unroller.Result, scan: Scan, unit: LengthUnit, opt: SheetOptions) -> UIImage {
         let pad = figurePad
         let k = Swift.min(1.4, 1400 / Swift.max(1, img0.size.width))
-        let rulerW: CGFloat = opt.has(.rulers) ? 100 : 0
-        let headerH: CGFloat = opt.has(.angleCaptions) ? 112 : pad + (opt.has(.markArrows) ? 30 : 0)
-        let img = CGRect(x: pad + rulerW, y: headerH + 10, width: img0.size.width * k, height: img0.size.height * k)
-        let ppm = img.height / CGFloat(u.heightMM)
-        var rulerTop: CGFloat = img.minY
-        if opt.has(.rulers), let total = RulerTicks.ticks(coveringMM: u.heightMM, unit: unit).last?.mm {
-            rulerTop = img.maxY - CGFloat(total) * ppm - 24
-        }
-        let shift = Swift.max(0, headerH - rulerTop)
-        let r = img.offsetBy(dx: 0, dy: shift)
+        let axisW: CGFloat = opt.has(.rulers) ? 70 : 0
+        let headerH: CGFloat = opt.has(.angleCaptions) ? 120 : pad + (opt.has(.markArrows) ? 30 : 0)
+        let r = CGRect(x: pad + axisW, y: headerH + 14, width: img0.size.width * k, height: img0.size.height * k)
+        let ppm = r.height / CGFloat(u.heightMM)
         let captionY = r.maxY + (opt.has(.angleCaptions) ? 52 : 16)
         let size = CGSize(width: r.maxX + pad + 20, height: captionY + (opt.has(.angleCaptions) ? 64 : 0) + pad)
         let fmt = UIGraphicsImageRendererFormat()
@@ -514,7 +629,23 @@ enum SampleSheet {
                 if opt.has(.header) { sub += " · " + scan.name }
                 text(sub, at: CGPoint(x: r.minX, y: pad + 40), size: fitted(sub, size: 21, maxWidth: size.width - r.minX - pad), color: .darkGray)
             }
-            if opt.has(.rulers) { ruler(g, x: pad, baseY: r.maxY, pxPerMM: ppm, mm: u.heightMM, unit: unit, width: 64) }
+            if opt.has(.rulers) {
+                // Height above the base, read straight off the image's left edge.
+                g.setStrokeColor(ink.cgColor)
+                g.setLineWidth(2)
+                g.move(to: CGPoint(x: r.minX, y: r.minY))
+                g.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+                g.strokePath()
+                for t in RulerTicks.ticks(coveringMM: u.heightMM, unit: unit) where t.mm <= u.heightMM + 0.01 && t.level >= 1 {
+                    let y = r.maxY - CGFloat(t.mm) * ppm
+                    g.setLineWidth(t.level == 2 ? 2 : 1)
+                    g.move(to: CGPoint(x: r.minX - (t.level == 2 ? 10 : 6), y: y))
+                    g.addLine(to: CGPoint(x: r.minX, y: y))
+                    g.strokePath()
+                    if let l = t.label { text(l, at: CGPoint(x: r.minX - 14, y: y - 11), size: 18, weight: .semibold, align: .right, mono: true) }
+                }
+                text(unit.rulerCaption, at: CGPoint(x: r.minX - 14, y: r.minY - 30), size: 18, weight: .bold, color: accent, align: .right)
+            }
             if opt.has(.angleCaptions) {
                 for a in stride(from: -180, through: 180, by: 30) {
                     let x = r.midX - CGFloat(a) / 360 * r.width
@@ -594,9 +725,10 @@ enum SampleSheet {
     static func figures(_ views: [View3D], scan: Scan, rig: SampleRig, unit: LengthUnit, reference: Double, referenceIsMark: Bool,
                         unrolled: Unroller.Result?, unrolledImage: UIImage?, opt: SheetOptions) -> [Figure] {
         var out: [Figure] = []
+        let ppm = sidePPM(views, unit: unit)
         for v in views where v.offset != nil {
-            out.append(Figure(id: v.id, image: sideFigure(v, scan: scan, rig: rig, unit: unit, reference: reference,
-                                                          referenceIsMark: referenceIsMark, opt: opt)))
+            out.append(Figure(id: v.id, image: sideFigure(v, scan: scan, unit: unit, reference: reference,
+                                                          referenceIsMark: referenceIsMark, opt: opt, ppm: ppm)))
         }
         for v in views where v.offset == nil {
             out.append(Figure(id: v.id, image: endFigure(v, scan: scan, rig: rig, unit: unit, opt: opt)))

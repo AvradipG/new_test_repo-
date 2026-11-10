@@ -3,6 +3,13 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.9
+- Side views now stand on graph paper instead of beside a ruler. The origin is the rock's own lower-left corner, so the axes read its height and width directly. The measured height and width are marked on the axes, with dashed guides behind the rock. The separate ruler, the gap between ruler and rock, and the scale bar are gone
+- Top and bottom: the diameter is measured edge to edge, with guides dropped from the rim
+- Unrolled side: the height axis is on the image's own edge
+- All scans get the new pictures by themselves
+- Fixed: the app log upload could be refused by Google (HTTP 400) when the log grew while it was being sent
+
 ## 3.8
 - The reference mark is found again, on every scan, with a new finder. 0° is the side that faced the X-ray source, marked by a thin line along the sample, or a red mark at the top and a black mark at the bottom, or only one of them. A sample number written along the sample is no longer taken for the mark (it was on one scan, which put the real line at 180°)
 - What was found is written to the app log, so a wrong pick can be traced
