@@ -1,0 +1,30 @@
+name: Paper Quest sign-in probe
+on:
+  push:
+    branches: [paper-quest-probe]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          SITE=https://manuscript-studio-181489801873.web.app
+          for p in /firebase-config.js /write/firebase-config.js; do
+            echo "== $p"; curl -s -o cfg.js -w "HTTP %{http_code} %{content_type}\n" "$SITE$p"
+            head -c 300 cfg.js | sed -E 's/(apiKey["'"'"']?[[:space:]]*:[[:space:]]*["'"'"'])[^"'"'"']{8}/\1********/'; echo
+          done
+          KEY=$(grep -oE "apiKey[\"']?[[:space:]]*:[[:space:]]*[\"'][^\"']+" cfg.js | head -1 | sed -E "s/.*[\"']//")
+          [ -z "$KEY" ] && curl -s "$SITE/firebase-config.js" -o cfg.js && KEY=$(grep -oE "apiKey[\"']?[[:space:]]*:[[:space:]]*[\"'][^\"']+" cfg.js | head -1 | sed -E "s/.*[\"']//")
+          echo "api key found: ${KEY:+yes}"
+          echo "== Firebase project config (authorized domains, Google provider audiences)"
+          curl -s "https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig?key=$KEY" | python3 -c "import sys,json;d=json.load(sys.stdin);print(json.dumps({k:d.get(k) for k in ['projectId','authorizedDomains','idpConfig','error']},indent=1))"
+          echo "== createAuthUri google.com"
+          curl -s -X POST "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=$KEY" -H 'Content-Type: application/json' \
+            -d '{"providerId":"google.com","continueUri":"http://localhost"}' | python3 -c "import sys,json,urllib.parse as u;d=json.load(sys.stdin);a=d.get('authUri','');print('error',d.get('error'));print('client_id in authUri:',dict(u.parse_qsl(u.urlsplit(a).query)).get('client_id'))"
+          echo "== Google auth page for the app's iOS client"
+          CID=60541649934-sfas6f95kuv4jsr323f81bc99imtp60e.apps.googleusercontent.com
+          RS=com.googleusercontent.apps.60541649934-sfas6f95kuv4jsr323f81bc99imtp60e
+          curl -s -L -o g.html -w "HTTP %{http_code} final %{url_effective}\n" "https://accounts.google.com/o/oauth2/v2/auth?client_id=$CID&redirect_uri=$RS:/oauth2redirect&response_type=code&scope=openid%20email%20https://www.googleapis.com/auth/drive.file&code_challenge=abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrs&code_challenge_method=S256" | sed -E 's/(client_id|code_challenge)=[^&]*/\1=…/g'
+          grep -oiE "(invalid_client|redirect_uri_mismatch|invalid_request|access_denied|disallowed_useragent|Error 4[0-9][0-9][^<]{0,80}|This app is blocked|has not completed the Google verification|Access blocked[^<]{0,80})" g.html | sort -u | head
+          echo "== Manuscript workspace"
+          curl -s -o w.html -w "HTTP %{http_code}\n" "$SITE/write/?paper=green-christoffel-writing"; grep -o '<title>[^<]*' w.html
