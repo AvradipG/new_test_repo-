@@ -56,7 +56,7 @@ public enum SceneSplitter {
         let tol = Swift.max(2 * res, 0.001)
         var ups: [(y: Double, area: Double)] = []
         var areaAll = 0.0
-        var lowY: [Double] = [], triArea: [Double] = []
+        var lowY: [Double] = [], triArea: [Double] = [] // lowY: each triangle's mid height
         lowY.reserveCapacity(triangles.count)
         triArea.reserveCapacity(triangles.count)
         for t in triangles {
@@ -64,7 +64,7 @@ public enum SceneSplitter {
             let n = simd_cross(b - a, c - a)
             let l = simd_length(n)
             areaAll += l / 2
-            lowY.append(Swift.min(a.y, Swift.min(b.y, c.y)))
+            lowY.append((a.y + b.y + c.y) / 3)
             triArea.append(l / 2)
             if l > 0 && n.y / l > 0.95 { ups.append(((a.y + b.y + c.y) / 3, l / 2)) }
         }
@@ -81,8 +81,11 @@ public enum SceneSplitter {
                 while ups[i].y - ups[j].y > bin { s -= ups[j].area; j += 1 }
                 if s >= 0.03 * upTotal {
                     let candidate = ups[(i + j) / 2].y
+                    // Surface whose middle lies clearly under the candidate (a bumpy floor's own triangles don't
+                    // count). A small margin, not the removal tolerance: pieces may be only 3–4 mm thick.
+                    let margin = Swift.max(0.0005, 0.5 * res)
                     var below = 0.0
-                    for k in lowY.indices where lowY[k] < candidate - tol { below += triArea[k] }
+                    for k in lowY.indices where lowY[k] < candidate - margin { below += triArea[k] }
                     if below < 0.05 * areaAll {
                         floorY = candidate
                         floorFound = true
