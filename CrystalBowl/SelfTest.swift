@@ -192,7 +192,21 @@ enum SelfTest {
         check("Scale photo caption", stamped.size.width == 400 && stamped.size.height > 300,
               String(format: "%.0f × %.0f px, caption strip below the photo", stamped.size.width, stamped.size.height))
 
-        // 9. The app log.
+        // 9. Which mat (3.11): a dark rock in the middle of a light frame, and the advice for pale and dark rock.
+        let probe = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 300), format: fmt1).image { c in
+            UIColor(white: 0.92, alpha: 1).setFill()
+            c.fill(CGRect(x: 0, y: 0, width: 300, height: 300))
+            UIColor(white: 0.3, alpha: 1).setFill()
+            c.cgContext.fillEllipse(in: CGRect(x: 75, y: 75, width: 150, height: 150))
+        }
+        let tone = RockTone.measure(probe)
+        let toneOK = tone.map { abs($0.rock - 0.3) < 0.05 && abs($0.surround - 0.92) < 0.05 } ?? false
+        let adviceOK = MatAdvisor.advise(rockLuma: 0.3).tone == .light && MatAdvisor.advise(rockLuma: 0.8).tone == .dark
+        check("Scanning mat advice", toneOK && adviceOK && ScanningMat.guideURL != nil,
+              tone.map { String(format: "rock %.2f on %.2f → light mat; pale rock → dark mat; guide PDF %@", $0.rock, $0.surround,
+                                ScanningMat.guideURL == nil ? "missing" : "present") } ?? "could not measure")
+
+        // 10. The app log.
         let marker = "self-test marker \(id)"
         AppLog.info("selftest", marker)
         AppLog.flush()

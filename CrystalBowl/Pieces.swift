@@ -606,7 +606,7 @@ struct PiecesHome: View {
                 Section {
                     Button { showMat = true } label: { Label("Scanning mat to print (PDF, 1:1 with scale bars)", systemImage: "printer") }
                 } footer: {
-                    Text("Graph paper at true size, a degree ring and 10 cm field scales: the pieces stand out, the phone keeps track, and the scale photos show the real size.")
+                    Text("Light mat for dark or grey pieces, dark mat for white or pale ones; the mat page can check the rock with the camera. Graph paper at true size, a degree ring and 10 cm field scales: the pieces stand out, the phone keeps track, and the scale photos show the real size.")
                 }
                 Section("How to scan pieces") {
                     TipRow(icon: "square.grid.3x3.fill", color: Theme.teal,
@@ -672,6 +672,7 @@ struct PiecesDetailView: View {
                     resultSections(scan, r)
                 }
                 ScalePhotosSection(scan: scan) { items, url in gallery = GalleryTarget(items: items, start: items.firstIndex { $0.url == url } ?? 0) }
+                MatAdviceSection(scan: scan)
                 Section {
                     LabeledContent("Original shape", value: TargetEditor.describe(scan.pieceTarget))
                     Button("Change the original shape and put together again") {

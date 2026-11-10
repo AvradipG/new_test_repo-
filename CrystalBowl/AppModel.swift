@@ -414,7 +414,24 @@ final class AppModel: ObservableObject {
         Task.detached(priority: .utility) {
             let files = ScalePhotos.make(scan: scan, from: dir, side: side, scores: scores)
             AppLog.info("capture", "Kept \(files.count) scale photo(s) of side \(side) in model/scale-photos", scan: scan)
+            // Did the rock stand out from what it lay on? (3.11) Middle of the photos against their edges.
+            let measured = files.compactMap { ScalePhotos.load($0, maxPixel: 400).flatMap { RockTone.measure($0) } }
+            guard !measured.isEmpty else { return }
+            let rock = RockTone.median(measured.map { $0.rock }), round = RockTone.median(measured.map { $0.surround })
+            let tip = MatAdvisor.checkContrast(rockLuma: rock, surroundLuma: round)
+            AppLog.info("mat", String(format: "Side %d: rock brightness %.2f, surroundings %.2f%@", side, rock, round,
+                                      tip == nil ? " (good contrast)" : ": too alike, tip shown on the scan page"), scan: scan)
+            await MainActor.run { self.setMatTip(scan.id, tip: tip, rockLuma: scan.isPieces ? nil : rock) }
         }
+    }
+
+    /// Stores the mat advice of a capture. The rock's own brightness from its model, when known, is kept.
+    func setMatTip(_ id: String, tip: String?, rockLuma: Double?) {
+        guard var s = ScanStore.loadAll().first(where: { $0.id == id }) else { return }
+        s.matTip = tip
+        if s.rockLuma == nil, let l = rockLuma { s.rockLuma = l }
+        try? ScanStore.save(s)
+        reload()
     }
 
     private func captureFinished() {

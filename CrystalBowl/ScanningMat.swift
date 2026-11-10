@@ -3,6 +3,7 @@ import UIKit
 import PDFKit
 import ImageIO
 import UniformTypeIdentifiers
+import ScanMath
 
 /// The printable scanning mat (3.10): a 1:1 graph-paper work area with a degree ring, lettered tracking markers and
 /// geologist's field scales (10 cm and 4 in, black and white blocks). Made by tools/make_mat.py; vector PDFs in
@@ -11,10 +12,7 @@ enum ScanningMat {
     enum Paper: String, CaseIterable, Identifiable {
         case a4 = "A4", letter = "Letter"
         var id: String { rawValue }
-        static var local: Paper {
-            let r = Locale.current.region?.identifier ?? ""
-            return ["US", "CA", "MX", "PH", "CL", "CO"].contains(r) ? .letter : .a4
-        }
+        static var local: Paper { MatAdvisor.paper(region: Locale.current.region?.identifier) == "Letter" ? .letter : .a4 }
     }
 
     enum Tone: String, CaseIterable, Identifiable {
@@ -22,6 +20,8 @@ enum ScanningMat {
         var id: String { rawValue }
         var title: String { self == .light ? "Light (dark or grey rocks)" : "Dark (white or pale rocks)" }
     }
+
+    static var guideURL: URL? { Bundle.main.url(forResource: "CrystalBowl_scanning_mat_guide", withExtension: "pdf") }
 
     static func url(_ paper: Paper, _ tone: Tone) -> URL? {
         Bundle.main.url(forResource: "CrystalBowl_scanning_mat_\(paper.rawValue)_\(tone.rawValue)", withExtension: "pdf")
@@ -32,7 +32,16 @@ enum ScanningMat {
 struct ScanningMatView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var paper = ScanningMat.Paper.local
-    @State private var tone = ScanningMat.Tone.light
+    @State private var tone: ScanningMat.Tone
+    @State private var advice: String?
+    @State private var showCamera = false
+    @State private var showGuide = false
+
+    /// `suggested`: the mat the app recommends for the rock in hand (from an earlier scan), with why.
+    init(suggested: MatAdvisor.Advice? = nil) {
+        _tone = State(initialValue: suggested?.tone == .dark ? .dark : .light)
+        _advice = State(initialValue: suggested.map { "Recommended: the \($0.tone == .dark ? "dark" : "light") mat. " + $0.reason })
+    }
 
     var body: some View {
         NavigationStack {
@@ -40,6 +49,43 @@ struct ScanningMatView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Print it, lay it flat and place the rock or the pieces inside the grid, a finger-width apart. Its scale bars show in the photos, and the app keeps a few of those photos as scale photos, like a field photo with a hammer beside the rock.")
                         .font(.footnote).foregroundStyle(.secondary)
+                    // Which mat: the guide, and the app's own check.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Which mat?", systemImage: "questionmark.circle").font(.headline)
+                        HStack(alignment: .top, spacing: 10) {
+                            MatSwatch(dark: false)
+                            Text("**Light mat** for dark, grey, brown, red, green or black rock: shale, mudstone, basalt, coal, dark sandstone, most cores and plugs. The default when unsure.")
+                                .font(.footnote)
+                        }
+                        HStack(alignment: .top, spacing: 10) {
+                            MatSwatch(dark: true)
+                            Text("**Dark mat** for white, cream or very pale rock: limestone, chalk, white sandstone, quartzite, gypsum, anhydrite, salt, marble.")
+                                .font(.footnote)
+                        }
+                        Button { showCamera = true } label: {
+                            Label("Check my rock with the camera", systemImage: "camera.viewfinder").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                        if let advice {
+                            Label(advice, systemImage: "checkmark.seal.fill").font(.footnote).foregroundStyle(.green)
+                        }
+                        if let g = ScanningMat.guideURL {
+                            Button { showGuide = true } label: { Label("Full guide (PDF, one page)", systemImage: "doc.text") }
+                                .sheet(isPresented: $showGuide) {
+                                    NavigationStack {
+                                        MatPreview(url: g).ignoresSafeArea(edges: .bottom)
+                                            .navigationTitle("Scanning mat guide").navigationBarTitleDisplayMode(.inline)
+                                            .toolbar {
+                                                ToolbarItem(placement: .confirmationAction) { Button("Done") { showGuide = false } }
+                                                ToolbarItem(placement: .primaryAction) { ShareLink(item: g) { Image(systemName: "square.and.arrow.up") } }
+                                            }
+                                    }
+                                }
+                        }
+                    }
+                    .padding(12)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                     Picker("Paper", selection: $paper) {
                         ForEach(ScanningMat.Paper.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -72,6 +118,17 @@ struct ScanningMatView: View {
             }
             .navigationTitle("Scanning mat")
             .navigationBarTitleDisplayMode(.inline)
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraShot { img in
+                    showCamera = false
+                    guard let img, let m = RockTone.measure(img) else { return }
+                    let a = MatAdvisor.advise(rockLuma: m.rock)
+                    tone = a.tone == .dark ? .dark : .light
+                    advice = "Use the \(a.tone == .dark ? "dark" : "light") mat. " + a.reason
+                    AppLog.info("mat", String(format: "Camera check: rock brightness %.2f, surroundings %.2f, %@ mat", m.rock, m.surround, a.tone.rawValue))
+                }
+                .ignoresSafeArea()
+            }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
     }
@@ -215,5 +272,172 @@ struct ScalePhotosSection: View {
                 Text("Photos from the scan with the mat's scale bars in view, kept automatically. Google Drive › model/scale-photos.")
             }
         }
+    }
+}
+
+private struct MatSwatch: View {
+    let dark: Bool
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4).fill(dark ? Color(red: 0.12, green: 0.16, blue: 0.23) : Color(red: 0.89, green: 0.95, blue: 0.96))
+            Path { p in
+                for i in 1..<4 {
+                    let d = CGFloat(i) * 10
+                    p.move(to: CGPoint(x: d, y: 0))
+                    p.addLine(to: CGPoint(x: d, y: 40))
+                    p.move(to: CGPoint(x: 0, y: d))
+                    p.addLine(to: CGPoint(x: 40, y: d))
+                }
+            }
+            .stroke(dark ? Color(red: 0.55, green: 0.72, blue: 0.85) : Color(red: 0.24, green: 0.55, blue: 0.67), lineWidth: 0.7)
+            Circle().fill(dark ? Color(white: 0.87) : Color(white: 0.33)).frame(width: 18, height: 18)
+        }
+        .frame(width: 40, height: 40)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityHidden(true)
+    }
+}
+
+/// How light a rock is in a photo: the middle of the frame (where the rock is when the phone points at it)
+/// against the frame's edges (what it lies on). Median luma 0–1.
+enum RockTone {
+    static func pixels(_ img: UIImage, side n: Int = 96) -> [UInt8]? {
+        guard let cg = img.cgImage else { return nil }
+        var px = [UInt8](repeating: 0, count: n * n * 4)
+        let ok: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: n, height: n))
+            return true
+        }
+        return ok ? px : nil
+    }
+
+    static func luma(_ p: [UInt8], _ i: Int) -> Double {
+        (0.299 * Double(p[i * 4]) + 0.587 * Double(p[i * 4 + 1]) + 0.114 * Double(p[i * 4 + 2])) / 255
+    }
+
+    static func median(_ a: [Double]) -> Double {
+        guard !a.isEmpty else { return 0 }
+        let s = a.sorted()
+        return s[s.count / 2]
+    }
+
+    static func measure(_ img: UIImage) -> (rock: Double, surround: Double)? {
+        let n = 96
+        guard let p = pixels(img, side: n) else { return nil }
+        var mid: [Double] = [], edge: [Double] = []
+        let a = Int(Double(n) * 0.32), b = Int(Double(n) * 0.68), e = Int(Double(n) * 0.12)
+        for y in 0..<n {
+            for x in 0..<n {
+                let l = luma(p, y * n + x)
+                if (a..<b).contains(x) && (a..<b).contains(y) {
+                    mid.append(l)
+                } else if x < e || x >= n - e || y < e || y >= n - e {
+                    edge.append(l)
+                }
+            }
+        }
+        return (median(mid), median(edge))
+    }
+
+    /// Median brightness of a rendered surface (the unrolled side), its white or green background left out.
+    static func surface(_ img: UIImage) -> Double? {
+        let n = 128
+        guard let p = pixels(img, side: n) else { return nil }
+        var ls: [Double] = []
+        for i in 0..<(n * n) {
+            let r = p[i * 4], g = p[i * 4 + 1], b = p[i * 4 + 2]
+            if r > 247 && g > 247 && b > 247 { continue }
+            if g > 230 && r < 40 && b < 40 { continue }
+            ls.append(luma(p, i))
+        }
+        return ls.count > 200 ? median(ls) : nil
+    }
+}
+
+/// One photo from the camera.
+struct CameraShot: UIViewControllerRepresentable {
+    let done: (UIImage?) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(done) }
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let c = UIImagePickerController()
+        c.sourceType = .camera
+        c.delegate = context.coordinator
+        return c
+    }
+    func updateUIViewController(_ c: UIImagePickerController, context: Context) {}
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let done: (UIImage?) -> Void
+        init(_ d: @escaping (UIImage?) -> Void) { done = d }
+        func imagePickerController(_ p: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            done(info[.originalImage] as? UIImage)
+        }
+        func imagePickerControllerDidCancel(_ p: UIImagePickerController) { done(nil) }
+    }
+}
+
+/// On a scan's page: which mat suits this rock, a warning when the rock and what it lay on looked alike, and
+/// one when the rock is too big for the mat (3.11).
+struct MatAdviceSection: View {
+    let scan: Scan
+    @State private var show = false
+
+    var body: some View {
+        let advice = scan.rockLuma.map { MatAdvisor.advise(rockLuma: $0) }
+        let size = MatAdviceSection.footprintMM(scan)
+        let paper = MatAdvisor.paper(region: Locale.current.region?.identifier)
+        let tooBig = size.map { !MatAdvisor.fits(lengthMM: $0.0, widthMM: $0.1, paper: paper) } ?? false
+        if advice != nil || scan.matTip != nil || tooBig {
+            Section {
+                if let tip = scan.matTip {
+                    Label(tip, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
+                }
+                if let a = advice {
+                    Label("Mat for this rock: \(a.tone == .dark ? "dark" : "light"). " + a.reason, systemImage: "square.grid.3x3")
+                        .font(.footnote)
+                }
+                if tooBig, let s = size {
+                    Label(String(format: "The rock is about %.0f × %.0f mm, bigger than the %@ mat's work area: lay it diagonally or tape two sheets side by side.", s.0, s.1, paper),
+                          systemImage: "arrow.up.left.and.arrow.down.right").font(.footnote)
+                }
+                Button { show = true } label: { Label("Scanning mat to print", systemImage: "printer") }
+            } header: {
+                Text("Scanning mat")
+            }
+            .sheet(isPresented: $show) { ScanningMatView(suggested: advice) }
+        }
+    }
+
+    /// The two longest sizes (a rock lies on its largest face), true mm.
+    static func footprintMM(_ scan: Scan) -> (Double, Double)? {
+        guard let st = scan.stats else { return nil }
+        let k = scan.scaleFactor
+        let d = [st.axisA * k, st.axisB * k, st.axisC * k].sorted(by: >)
+        return (d[0], d[1])
+    }
+}
+
+/// Under "Start new scan": the mat for this Sample ID when it was scanned before, else a pointer to the guide.
+struct MatHint: View {
+    @EnvironmentObject var model: AppModel
+    let sampleName: String
+    @State private var show = false
+
+    var body: some View {
+        let key = sampleName.lowercased().split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let known = key.isEmpty ? nil : model.scans.filter { $0.sampleKey == key && $0.rockLuma != nil }.max { $0.created < $1.created }
+        let advice = known?.rockLuma.map { MatAdvisor.advise(rockLuma: $0) }
+        Button { show = true } label: {
+            if let a = advice {
+                Label("Use the \(a.tone == .dark ? "dark" : "light") scanning mat: " + a.reason, systemImage: "square.grid.3x3.fill")
+                    .font(.footnote)
+            } else {
+                Label("Scanning mat: light for dark or grey rock, dark for pale rock. Tap to print or to check the rock with the camera.",
+                      systemImage: "square.grid.3x3")
+                    .font(.footnote)
+            }
+        }
+        .sheet(isPresented: $show) { ScanningMatView(suggested: advice) }
     }
 }

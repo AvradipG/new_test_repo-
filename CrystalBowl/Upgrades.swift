@@ -75,6 +75,17 @@ extension AppModel {
             AppLog.info("pieces", "Putting the pieces together again with the 3.10 piece finder", scan: p)
             reassemble(p)
         }
+        // Rock brightness for the mat advice (3.11), read from the saved unrolled side of older scans.
+        for s in scans where !s.isPieces && s.rockLuma == nil {
+            let dir = s.exportsURL.appendingPathComponent("sheet", isDirectory: true)
+            let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            if let u = files.first(where: { $0.lastPathComponent.contains("_unrolled_") }), let img = UIImage(contentsOfFile: u.path),
+               let l = RockTone.surface(img), var t = scans.first(where: { $0.id == s.id }) {
+                t.rockLuma = l
+                try? ScanStore.save(t)
+            }
+        }
+        reload()
         guard !upgrading else { return }
         upgrading = true
         defer {
@@ -116,6 +127,7 @@ extension AppModel {
             if let fit = loaded.1.shape { scan.shape = ShapeRecord(fit) }
             let rig = SampleRig(scene: loaded.0, data: loaded.1, name: scan.name)
             let unrolled = Unroller.detectMark(rig: rig, scan: &scan)
+            if let u = unrolled, let l = RockTone.surface(u.image) { scan.rockLuma = l }
             let (ref, isMark) = SampleSheet.reference(for: scan)
             let out = SampleSheet.make(rig: rig, scan: scan, reference: ref, referenceIsMark: isMark, unrolled: unrolled)
             do {

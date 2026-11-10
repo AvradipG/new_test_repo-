@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.11
+- Which scanning mat: the mat page explains it (light mat for dark, grey, brown or black rock; dark mat for white or pale rock), has a one-page guide to print, and can check the rock with the camera and pick the mat
+- Automatic advice: under Start new scan, a Sample ID scanned before gets its mat named (the app knows how light the rock is from its model). After every capture the app compares the rock with what it lay on; when they were too alike, the scan page says so and names the mat for next time. It also warns when a rock is too big for the mat
+- Mat paper size follows the country (A4 or US Letter)
+
 ## 3.10
 - Fixed Pieces: when the table under the pieces was only partly in the scan, the app took the flat tops of the pieces for the table, removed them and kept only rings of side wall (a set of four pieces came out as two hollow rings). The table is now found by area, and a "table" with surface under it is not a table. Piece sets made before are put together again by themselves
 - Scanning mat to print (Pieces tab, Settings): a 1:1 PDF with graph paper (1 mm, 5 mm and 1 cm), a degree ring with 0° for the mark, lettered markers that help the phone keep track, 10 cm and 4 in field scales and a 100 mm print check. A4 or US Letter, light (for dark or grey rocks) or dark (for pale rocks)

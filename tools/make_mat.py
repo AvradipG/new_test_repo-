@@ -158,6 +158,86 @@ def mat(paper, tone):
     return p
 
 
+def wrap(s, size, width_mm):
+    """Lines of `s` no wider than width_mm at `size` pt (Helvetica, approximate widths)."""
+    def w(x): return sum(0.556 if ch.isdigit() else (0.28 if ch in ' .,:;|ilI' else 0.6 if ch.isupper() else 0.5) for ch in x) * size / MM
+    out, line = [], ''
+    for word in s.split(' '):
+        cand = word if not line else line + ' ' + word
+        if line and w(cand) > width_mm:
+            out.append(line); line = word
+        else:
+            line = cand
+    if line: out.append(line)
+    return out
+
+
+def guide():
+    """One page (A4; prints fine on Letter at 'fit'): which mat to use and how."""
+    W, H = PAGES['A4']
+    p = Page(W, H)
+    m = 16.0
+    y = H - m - 6
+    def para(s, size=9, bold=False, indent=0.0, colour=(0.12, 0.12, 0.12), width=None, gap=1.35):
+        nonlocal y
+        p.fill(colour)
+        for l in wrap(s, size, (width or (W - 2 * m)) - indent):
+            p.text(m + indent, y, l, size=size, bold=bold)
+            y -= size * gap / MM
+    para('Crystal Bowl scanning mat: which one to use, and how', 16, True)
+    y -= 1
+    para('The rock (or the broken pieces) must stand out from the mat: then Object Capture separates it cleanly, the phone keeps track as you walk round, and the scale photos show the real size. Choose by how light the rock is.', 9.5)
+    y -= 3
+    # two swatch columns
+    colw = (W - 2 * m - 10) / 2
+    top = y
+    lowest = top - 44
+    for k, (tone, title, items) in enumerate((
+        ('light', 'LIGHT mat (pale cyan grid)', ['Dark, grey, brown, red, green or black rock', 'Shale, mudstone, basalt, coal, dark or iron-stained sandstone, most cores and plugs', 'Rock with a black reference line (the line still shows)', 'Default when unsure: least ink, brightest scale photos']),
+        ('dark', 'DARK mat (navy grid)', ['White, cream or very pale rock', 'Limestone, chalk, white sandstone, quartzite, gypsum, anhydrite, salt, marble', 'Pale plugs whose edge disappears on white paper', 'Uses more ink: print on matte paper, let it dry']))):
+        x0 = m + k * (colw + 10)
+        fillc, minor, mid, major, labc, ringc = TONES[tone]
+        p.fill(fillc); p.rect(x0, top - 42, 42, 40)
+        p.stroke(minor); p.width(0.15)
+        for i in range(0, 41, 2): p.line(x0 + i * 42 / 40, top - 42, x0 + i * 42 / 40, top - 2); p.line(x0, top - 42 + i, x0 + 42, top - 42 + i)
+        p.stroke(major); p.width(0.5)
+        for i in range(0, 41, 10): p.line(x0 + i * 42 / 40, top - 42, x0 + i * 42 / 40, top - 2); p.line(x0, top - 42 + i, x0 + 42, top - 42 + i)
+        # a rock on it
+        rock = (0.35, 0.33, 0.31) if tone == 'light' else (0.88, 0.86, 0.80)
+        p.fill(rock); p.circle(x0 + 21, top - 22, 9, fill=True)
+        p.fill((0.1, 0.1, 0.1))
+        p.text(x0 + 46, top - 6, title, size=10, bold=True)
+        yy = top - 12
+        for it in items:
+            for j, l in enumerate(wrap(it, 8.5, colw - 50)):
+                p.text(x0 + 46 + (0 if j == 0 else 2.5), yy, ('- ' if j == 0 else '') + l, size=8.5)
+                yy -= 8.5 * 1.3 / MM
+        lowest = min(lowest, yy)
+    y = lowest - 6
+    para('Not sure? Let the app decide', 11.5, True)
+    para('1. In the app: Settings (or the Pieces tab) > Scanning mat > "Check my rock with the camera". Hold the phone over the rock so it fills the middle of the frame: the app measures how light it is and picks the mat.', 9, indent=2)
+    para('2. If this Sample ID was scanned before, the app already knows the rock and says which mat to use under "Start new scan".', 9, indent=2)
+    para('3. After every scan the app compares the rock with what it lay on. If they were too alike, the scan page says so and names the other mat for next time.', 9, indent=2)
+    para('Rule of thumb: brightness of the rock 0 (black) to 1 (white). Up to about 0.63, light mat; above, dark mat.', 9, indent=2, colour=(0.12, 0.3, 0.75))
+    y -= 2
+    para('Paper size', 11.5, True)
+    para('A4 (Europe, Asia, Middle East, Africa, Australia) or US Letter (USA, Canada, Mexico, Philippines). Work area: A4 15 x 23 cm, Letter 15 x 21 cm. The rock, or the whole spread of pieces, should leave about 1 cm free all round; the app warns when a scanned rock is too big for the mat. A bigger rock: lay it diagonally, or tape two sheets side by side (the grid then restarts; the scale bars stay correct).', 9, indent=2)
+    y -= 2
+    para('Printing at true size (1:1)', 11.5, True)
+    para('Print at 100 % / "Actual size". Never "Fit to page" or "Shrink oversized pages". Measure the line at the top of the mat: it must be exactly 100 mm (also check one 1 cm block of the scale bars). If it is off by more than 1 mm, set the printer to 100 % and print again. Matte paper is best; glossy paper reflects light into the photos.', 9, indent=2)
+    y -= 2
+    para('Laying out and scanning', 11.5, True)
+    for s in ['Lay the mat flat on a table, out of direct sun and lamp glare; tape the corners if the paper curls.',
+              'Put the rock in the middle of the grid with its reference mark facing 0 on the degree ring (the side that faces the X-ray source).',
+              'Broken pieces: inside the grid, about a finger-width apart, breaks facing up where you can. Do not move them between side 1 and side 2; turn each one over where it lies.',
+              'Keep the lettered squares and at least one scale bar in view while you walk round: they help the phone keep its place and they appear in the scale photos.',
+              'The app keeps four of its own photos per side as scale photos, with the mat scale in view, like a field photo with a hammer beside the rock (Google Drive > model/scale-photos).']:
+        para('- ' + s, 9, indent=2)
+    p.fill((0.45, 0.45, 0.45))
+    p.text(W - m, m - 6, 'Crystal Bowl Scanner - scanning mat guide - files: CrystalBowl_scanning_mat_<A4|Letter>_<light|dark>.pdf', size=6.5, align='r')
+    return p
+
+
 def write_pdf(path, page):
     content = '\n'.join(page.ops).encode('latin-1')
     objs = []
@@ -186,4 +266,5 @@ if __name__ == '__main__':
     for paper in PAGES:
         for tone in TONES:
             write_pdf(os.path.join(d, 'CrystalBowl_scanning_mat_%s_%s.pdf' % (paper, tone)), mat(paper, tone))
+    write_pdf(os.path.join(d, 'CrystalBowl_scanning_mat_guide.pdf'), guide())
     print('ok')

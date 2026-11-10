@@ -43,6 +43,10 @@ struct Scan: Identifiable, Codable, Hashable {
     var pieceTarget: TargetShape?
     /// Which piece finder the pieces were last put together with (2 = 3.10 floor fix). Older sets are put together again.
     var piecesSplit: Int?
+    /// Median brightness (0–1) of the rock's surface, for choosing the scanning mat (3.11).
+    var rockLuma: Double?
+    /// Set after a capture when the rock and what it lay on looked alike: which mat to use next time (3.11).
+    var matTip: String?
     /// Photos of the second side (every piece turned over).
     var side2PhotoCount: Int?
     /// Latest reconstruction of the pieces.

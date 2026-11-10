@@ -191,6 +191,7 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!model.isCaptureSupported)
+                    MatHint(sampleName: sampleName)
                     if !model.isCaptureSupported {
                         Text("3D capture needs a LiDAR iPhone (12 Pro or later Pro model) on iOS 17 or later.")
                             .font(.footnote).foregroundStyle(.secondary)
@@ -919,6 +920,7 @@ struct ScanDetailView: View {
                 if scan.hasModel {
                     sampleSheetSection(scan)
                     ScalePhotosSection(scan: scan) { items, url in gallery = GalleryTarget(items: items, start: items.firstIndex { $0.url == url } ?? 0) }
+                    MatAdviceSection(scan: scan)
                     shareSection(scan)
                     driveSection(scan)
                 }
