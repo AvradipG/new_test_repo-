@@ -47,6 +47,18 @@ public struct PlacedEnvelope: Sendable {
         }
     }
 
+    /// How far a point lies outside (negative inside).
+    public func outsideDistance(_ p: SIMD3<Double>) -> Double {
+        let d = p - center
+        switch kind {
+        case .cylinder:
+            let a = simd_dot(d, axes[0])
+            return Swift.max(simd_length(d - axes[0] * a) - half.x, abs(a) - half.y)
+        case .box:
+            return Swift.max(abs(simd_dot(d, axes[0])) - half.x, Swift.max(abs(simd_dot(d, axes[1])) - half.y, abs(simd_dot(d, axes[2])) - half.z))
+        }
+    }
+
     public var volume: Double {
         let cyl: Double = Double.pi * half.x * half.x * 2 * half.y
         let box: Double = 8 * half.x * half.y * half.z

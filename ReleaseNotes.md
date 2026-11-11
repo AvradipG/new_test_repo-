@@ -3,6 +3,13 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.12
+- Broken pieces now go back together inside the original cylinder. The app finds the cylinder on the largest piece (its curved outside and flat ends) and fits every other piece into the empty part of it, outside against the wall or ends and breaks against each other, with nothing overlapping or sticking out. This works even when only one side of the pieces was scanned. Before, nothing was put together unless both faces of a break had been scanned
+- Fixed: choosing "Cylinder" without typing a diameter was quietly changed back to "Let the app work it out". The cylinder is now kept, and the app measures its diameter on the pieces
+- A piece that fits in two places almost equally well (a symmetric gap) is still put in, marked "low: check by eye", with a note saying so
+- Bits of table that stayed stuck to a piece are left out of the put-together picture and model
+- Piece sets made before are put together again by themselves
+
 ## 3.11
 - Which scanning mat: the mat page explains it (light mat for dark, grey, brown or black rock; dark mat for white or pale rock), has a one-page guide to print, and can check the rock with the camera and pick the mat
 - Automatic advice: under Start new scan, a Sample ID scanned before gets its mat named (the app knows how light the rock is from its model). After every capture the app compares the rock with what it lay on; when they were too alike, the scan page says so and names the mat for next time. It also warns when a rock is too big for the mat

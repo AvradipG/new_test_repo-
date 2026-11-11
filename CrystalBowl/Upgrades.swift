@@ -65,14 +65,14 @@ extension AppModel {
     static let extrasVersion = 6
 
     func upgradeScans() async {
-        // Piece sets put together before the 3.10 floor fix (the flat tops of pieces were taken for the table) are
-        // put together again, one at a time.
+        // Piece sets put together before 3.12 are put together again, one at a time: 2 = the 3.10 floor fix (the flat
+        // tops of pieces were taken for the table), 3 = 3.12, pieces fitted into the original cylinder.
         if buildingID == nil, phase == .home,
-           var p = scans.first(where: { $0.isPieces && $0.hasModel && ($0.piecesSplit ?? 0) < 2 && $0.buildRequested != true }) {
-            p.piecesSplit = 2
+           var p = scans.first(where: { $0.isPieces && $0.hasModel && ($0.piecesSplit ?? 0) < 3 && $0.buildRequested != true }) {
+            p.piecesSplit = 3
             try? ScanStore.save(p)
             reload() // reassemble reads the stored scan
-            AppLog.info("pieces", "Putting the pieces together again with the 3.10 piece finder", scan: p)
+            AppLog.info("pieces", "Putting the pieces together again with the 3.12 cylinder fit", scan: p)
             reassemble(p)
         }
         // Rock brightness for the mat advice (3.11), read from the saved unrolled side of older scans.

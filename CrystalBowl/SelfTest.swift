@@ -206,6 +206,37 @@ enum SelfTest {
               tone.map { String(format: "rock %.2f on %.2f → light mat; pale rock → dark mat; guide PDF %@", $0.rock, $0.surround,
                                 ScanningMat.guideURL == nil ? "missing" : "present") } ?? "could not measure")
 
+        // 9b. Pieces (3.12): the original cylinder is found on a disc with a quarter cut out (Ø 38 × 15 mm, seen
+        // from above only, as it lies on a table).
+        do {
+            let r = 0.019, len = 0.015, hs = 0.0012
+            var P: [SIMD3<Double>] = [], N: [SIMD3<Double>] = []
+            var th = Double.pi
+            while th < 2.5 * Double.pi {
+                var y = hs / 2
+                while y < len { P.append(SIMD3(r * cos(th), y, r * sin(th))); N.append(SIMD3(cos(th), 0, sin(th))); y += hs }
+                th += hs / r
+            }
+            var x = -r
+            while x < r {
+                var z = -r
+                while z < r {
+                    let a = atan2(z, x)
+                    if x * x + z * z < r * r && !(a > Double.pi / 2) { P.append(SIMD3(x, len, z)); N.append(SIMD3(0, 1, 0)) }
+                    z += hs
+                }
+                x += hs
+            }
+            let piece = Piece(id: 1, points: P, normals: N, spacing: hs)
+            if let patch = CylinderFinder.fit(piece, radius: nil) {
+                let c = CoreCylinder.fit(anchor: piece, patch: patch, radiusGiven: false, length: nil, floorY: 0, volumeNeeded: piece.volume)
+                check("Pieces: original cylinder", abs(patch.radius - r) < 0.0004 && abs(c.length - len) < 0.0015,
+                      String(format: "Ø %.1f × %.1f mm found (made Ø 38.0 × 15.0)", patch.radius * 2000, c.length * 1000))
+            } else {
+                check("Pieces: original cylinder", false, "no cylinder found on the demo disc")
+            }
+        }
+
         // 10. The app log.
         let marker = "self-test marker \(id)"
         AppLog.info("selftest", marker)

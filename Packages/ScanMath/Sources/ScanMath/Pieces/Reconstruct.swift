@@ -18,6 +18,7 @@ public struct ReconstructionOptions: Sendable {
     public var sampleSpacing: Double?
     public var match = MatchParams()
     public var assembly = AssemblyParams()
+    public var mould = MouldParams()
     public init() {}
 }
 
@@ -74,6 +75,10 @@ public struct PiecesReport: Codable, Sendable {
         public var ambiguity: Double?
         public var confidence: String
         public var note: String?
+        /// "breaks" or "cylinder" (3.12); nil in older reports.
+        public var placedBy: String?
+        /// Cylinder fits: share of the surface touching the cylinder or other pieces (3.12).
+        public var fitShare: Double?
     }
     public struct SmallEntry: Codable, Sendable {
         public var label: String
@@ -123,6 +128,9 @@ public struct PiecesReport: Codable, Sendable {
     public var containerRemoved = false
     public var guidance: [String] = []
     public var limits: [String] = []
+    /// How the pieces were put together: "breaks" (pair matches) or "cylinder" (fitted into the original
+    /// cylinder); nil in reports before 3.12.
+    public var assembly: String?
     public var method = "Geometry-only reassembly (DRA Fragment Reconstruction Studio method, phone port): break facets placed face to face and spun, contact ICP, scored on break contact, tightness and overlap; beam-search assembly; empty space inside the target shape split into missing regions."
     public var units = "mm, cm³; poses are 4x4 row-major matrices in metres, from the first scan's frame to the assembly frame"
 }
@@ -238,12 +246,33 @@ public enum PieceReconstructor {
             }
         }
 
+        // The original cylinder (3.12), from the curved outside and flat ends of the largest piece: given as a
+        // cylinder (with or without its diameter), or recognised when left to the app.
+        progress?(0.26, "Looking for the original cylinder…")
+        var cylinder: CoreCylinder?
+        var anchorID: Int?
+        if !items.isEmpty, options.target.kind == .cylinder || options.target.kind == .auto {
+            let given = options.target.kind == .cylinder
+            let givenR: Double? = given ? options.target.aMM.map { $0 / 2000 } : nil
+            let givenL: Double? = given ? options.target.bMM.map { $0 / 1000 } : nil
+            let big = items.max { $0.piece.volume < $1.piece.volume }!
+            if let patch = CylinderFinder.fit(big.piece, radius: givenR) {
+                let enough = given ? (patch.share >= 0.08 && patch.arcDegrees >= 60) : (patch.share >= 0.2 && patch.arcDegrees >= 150)
+                if enough {
+                    let need = items.reduce(0.0) { $0 + $1.piece.volume }
+                    cylinder = CoreCylinder.fit(anchor: big.piece, patch: patch, radiusGiven: givenR != nil, length: givenL,
+                                                floorY: s1.floorFound ? s1.floorY : nil, volumeNeeded: need)
+                    anchorID = big.id
+                }
+            }
+        }
+
         // Break or original outside?
         progress?(0.27, "Telling break surfaces from the original outside…")
         let rough = items.map { $0.piece.roughness(radius: 3 * spacing) }
         let all = rough.flatMap { $0 }
         let lowQ = quantile(all, 0.3), highQ = quantile(all, 0.85)
-        let radius: Double? = options.target.kind == .cylinder ? options.target.aMM.map { $0 / 2000 } : nil
+        let radius: Double? = cylinder?.radius ?? (options.target.kind == .cylinder ? options.target.aMM.map { $0 / 2000 } : nil)
         for (k, it) in items.enumerated() {
             let ext = radius.map { cylinderExterior(it.piece, radius: $0) }
             it.piece.classify(roughness: rough[k], lowQuantile: lowQ, highQuantile: highQ, exterior: ext)
@@ -266,8 +295,16 @@ public enum PieceReconstructor {
             }
         }
 
-        progress?(0.82, "Putting the pieces together…")
-        let asm = pieces.count >= 2 ? PieceAssembler.assemble(pieces, pairs: pairs, params: options.assembly) : nil
+        progress?(0.8, "Putting the pieces together…")
+        var asm = pieces.count >= 2 ? PieceAssembler.assemble(pieces, pairs: pairs, params: options.assembly) : nil
+        // Fitted into the cylinder (3.12): kept when it puts at least as many pieces together as the break matches.
+        if let cyl = cylinder, let anchor = anchorID, pieces.count >= 2 {
+            let m = MouldAssembler.assemble(pieces, anchor: anchor, cylinder: cyl, pairs: pairs, params: options.mould) { f, note in
+                progress?(0.8 + 0.1 * f, note)
+            }
+            let byBreaks = asm?.clusters.first?.count ?? 0
+            if m.placed.count >= 2 && m.placed.count >= byBreaks { asm = m }
+        }
         rec.assembly = asm
 
         // Missing regions in the main group.
@@ -275,7 +312,8 @@ public enum PieceReconstructor {
             progress?(0.9, "Looking for missing pieces…")
             let poses = asm.placed.filter { main.contains($0.key) }.mapValues { $0.pose }
             let members = pieces.filter { poses[$0.id] != nil }
-            if let env = MissingFinder.envelope(members, poses: poses, target: options.target) {
+            let fitted: PlacedEnvelope? = asm.method == "cylinder" ? asm.cylinder?.envelope : nil
+            if let env = fitted ?? MissingFinder.envelope(members, poses: poses, target: options.target) {
                 rec.envelope = env
                 let r = MissingFinder.regions(members, poses: poses, envelope: env)
                 rec.missing = r.regions
@@ -285,7 +323,7 @@ public enum PieceReconstructor {
         } else if pieces.count == 1, options.target.kind != .none {
             // One piece: what is missing from the target is everything it doesn't fill.
             let poses = [pieces[0].id: Pose.identity]
-            if let env = MissingFinder.envelope(pieces, poses: poses, target: options.target) {
+            if let env = cylinder?.envelope ?? MissingFinder.envelope(pieces, poses: poses, target: options.target) {
                 rec.envelope = env
                 let r = MissingFinder.regions(pieces, poses: poses, envelope: env)
                 rec.missing = r.regions
@@ -361,10 +399,26 @@ public enum PieceReconstructor {
             var note = asm?.unplaced[it.id]
             if let pl = placed {
                 status = pl.role
-                if !pl.confirmedBy.isEmpty || pl.neighbours.count >= 2 { confidence = "high" }
-                else if pl.gain >= 0.06 && pl.ambiguity < 0.6 { confidence = "medium" }
-                else { confidence = "low" }
-                note = pl.role == "anchor" ? "reference piece: the others are placed relative to it" : nil
+                if pl.role == "anchor" {
+                    confidence = "high"
+                } else if pl.method == "cylinder" {
+                    // A fit in the cylinder is sure when it is clearly better than the next place the piece could go.
+                    if pl.gain >= 0.3 && pl.ambiguity < 0.7 && (!pl.confirmedBy.isEmpty || pl.neighbours.count >= 2) { confidence = "high" }
+                    else if pl.gain >= 0.2 && pl.ambiguity < 0.85 { confidence = "medium" }
+                    else { confidence = "low" }
+                } else {
+                    if !pl.confirmedBy.isEmpty || pl.neighbours.count >= 2 { confidence = "high" }
+                    else if pl.gain >= 0.06 && pl.ambiguity < 0.6 { confidence = "medium" }
+                    else { confidence = "low" }
+                }
+                if pl.role == "anchor" {
+                    note = pl.method == "cylinder" ? "reference piece: the cylinder was fitted to its outside, the others are fitted in round it"
+                        : "reference piece: the others are placed relative to it"
+                } else if pl.method == "cylinder" && pl.ambiguity >= 0.85 {
+                    note = String(format: "another place fits almost as well (%.0f%% as good): check by eye", pl.ambiguity * 100)
+                } else {
+                    note = nil
+                }
             } else if rec.items.count < 2 {
                 status = "not_matched"
                 note = "only one piece"
@@ -383,7 +437,8 @@ public enum PieceReconstructor {
                 sideJoinOverlap: join, sizeMM: size, volumeCM3: round3(p.volume * 1e6), surfaceCM2: round2(p.surfaceArea * 1e4),
                 asFoundCentreMM: mm(it.first.centroid), poseInAssembly: placed?.pose.matrix, cluster: placed?.cluster,
                 placedVia: via, touches: touches, confirmedBy: confirmed, contactShare: contactShare,
-                overlapShare: overlap, ambiguity: amb, confidence: confidence, note: note)
+                overlapShare: overlap, ambiguity: amb, confidence: confidence, note: note,
+                placedBy: placed?.method, fitShare: placed?.contact.map { round3($0) })
             r.pieces.append(entry)
         }
         var smallVolume = 0.0
@@ -438,6 +493,10 @@ public enum PieceReconstructor {
         r.volumes = PiecesReport.Volumes(envelopeCM3: envelopeCM3, piecesCM3: piecesVolume * 1e6, smallFragmentsCM3: smallVolume * 1e6,
                                          missingCM3: rec.envelope != nil ? missingVolume * 1e6 : nil, recoveredShare: recovered)
         r.groups = (asm?.clusters ?? []).map { $0.map(label) }
+        r.assembly = asm?.method
+        if asm?.method == "cylinder" {
+            r.method = "Pieces fitted into the original cylinder (phone method, 3.12): the cylinder is placed on the largest piece's curved outside and flat ends, then each other piece is fitted into the empty part of it, its outside onto the wall or ends and its breaks onto the pieces already in place, with no piece poking out or overlapping another; several arrangements are kept while pieces are added and the best whole arrangement is kept. Break pairs found by shape matching are used as starting points and as confirmation."
+        }
 
         // What the user can do next.
         var g: [String] = []
@@ -461,6 +520,11 @@ public enum PieceReconstructor {
                             r.small.count, (rec.split1.pieces.last?.maxExtent ?? 0.006) * 1000, smallVolume * 1e6))
         }
         if rec.split1.containerRemoved { g.append("A dish rim was recognised and left out of the pieces.") }
+        if asm?.method == "cylinder", let env = rec.envelope {
+            let ref = r.pieces.first(where: { $0.status == "anchor" })?.label ?? "the largest piece"
+            let size = String(format: "Fitted into a cylinder Ø %.1f × %.1f mm", env.half.x * 2000, env.half.y * 2000)
+            g.insert(size + " placed on the outside of " + ref + " (" + env.note + "). Each piece's outside was laid on the cylinder's wall or ends and its breaks against the others.", at: 0)
+        }
         r.guidance = g
         r.limits = [
             "Pieces shorter than about 6 mm (or 12 mesh edges) are not matched; grains under about 1.5 mm are below what phone photogrammetry resolves and are only counted.",
@@ -468,6 +532,7 @@ public enum PieceReconstructor {
             "Pieces touching each other in the scan are seen as one piece: keep them apart.",
             "Missing regions are where the target shape is not filled by any placed piece. With no target given, the shape is fitted to the pieces and the missing estimate is weaker.",
             "Confidence: high = confirmed by a second neighbour or an independent pair match; medium = a clear single fit; low = check by eye.",
+            "Fitting into a cylinder uses the largest piece's curved outside and flat ends. A piece that fits in two places equally well (a symmetric gap, or breaks not scanned because they faced the table) is placed in one of them and marked low: turn the pieces over and scan side 2 to settle it.",
         ]
         return r
     }

@@ -30,6 +30,11 @@ public struct PlacedPiece: Sendable {
     public var ambiguity: Double
     public var neighbours: [Int]
     public var confirmedBy: [Int]
+    /// "breaks" (pair matches of break surfaces) or "cylinder" (fitted into the original cylinder, 3.12).
+    public var method: String = "breaks"
+    /// Cylinder fits: share of the surface touching the mould or other pieces, and share poking out of it.
+    public var contact: Double? = nil
+    public var outside: Double? = nil
 }
 
 public struct AssemblyResult: Sendable {
@@ -37,6 +42,10 @@ public struct AssemblyResult: Sendable {
     public var unplaced: [Int: String]
     public var clusters: [[Int]]
     public var score: Double
+    /// "breaks" or "cylinder" (3.12).
+    public var method: String = "breaks"
+    /// The cylinder the pieces were fitted into (frame of the anchor piece as scanned).
+    public var cylinder: CoreCylinder? = nil
 }
 
 public enum PieceAssembler {

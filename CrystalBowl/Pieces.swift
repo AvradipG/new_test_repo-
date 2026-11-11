@@ -97,15 +97,26 @@ enum PiecesWorker {
             poses[it.id] = Pose(R: matrix_identity_double3x3, t: SIMD3(cursor + r - c.x, -it.piece.lo.y, minZ - c.z))
             cursor += 2 * r + 0.008
         }
+        // 3.12: fitted into the cylinder, anything well outside it can't be rock: scraps of table or dish that
+        // stayed attached to a piece. They are left out of the pictures and the assembled model.
+        let env: PlacedEnvelope? = rec.assembly?.method == "cylinder" ? rec.envelope : nil
+        let debris = Swift.max(0.002, 3 * rec.split1.resolution)
+        func keep(_ a: SIMD3<Double>, _ b: SIMD3<Double>, _ c: SIMD3<Double>, placed: Bool) -> Bool {
+            guard placed, let env else { return true }
+            return env.outsideDistance((a + b + c) / 3) < debris
+        }
         for it in rec.items {
             guard let W = poses[it.id] else { continue }
+            let isPlaced = placed[it.id] != nil
             for t in it.first.triangles {
-                out.append(Tri(a: W.apply(first.positions[t.x]), b: W.apply(first.positions[t.y]), c: W.apply(first.positions[t.z]), piece: it.id))
+                let a = W.apply(first.positions[t.x]), b = W.apply(first.positions[t.y]), c = W.apply(first.positions[t.z])
+                if keep(a, b, c, placed: isPlaced) { out.append(Tri(a: a, b: b, c: c, piece: it.id)) }
             }
             if let c2 = it.second, let S = it.secondPose, let m2 = second {
                 let T = W.compose(S)
                 for t in c2.triangles {
-                    out.append(Tri(a: T.apply(m2.positions[t.x]), b: T.apply(m2.positions[t.y]), c: T.apply(m2.positions[t.z]), piece: it.id))
+                    let a = T.apply(m2.positions[t.x]), b = T.apply(m2.positions[t.y]), c = T.apply(m2.positions[t.z])
+                    if keep(a, b, c, placed: isPlaced) { out.append(Tri(a: a, b: b, c: c, piece: it.id)) }
                 }
             }
         }
@@ -327,6 +338,7 @@ enum PiecesWorker {
             } else {
                 sub += "none"
             }
+            if rec.assembly?.method == "cylinder" { sub += " · pieces fitted into it" }
             sub += " · red = missing material · geometry only, colours mark the pieces"
             SampleSheet.text(sub, at: CGPoint(x: gap, y: 96), size: 24, color: .darkGray)
             var ppm = 0.0
@@ -512,8 +524,10 @@ struct TargetEditor: View {
             Text("Unknown, no target").tag(TargetShape.Kind.none)
         }
         if kind == .cylinder {
-            LabeledContent("Diameter (\(u))") { TextField("e.g. 25.4", text: $a).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
+            LabeledContent("Diameter (\(u))") { TextField("from the pieces", text: $a).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
             LabeledContent("Length (\(u))") { TextField("optional", text: $b).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
+            Text("Leave the diameter empty and the app measures it on the largest piece's curved outside.")
+                .font(.caption).foregroundStyle(.secondary)
         } else if kind == .cuboid {
             LabeledContent("Side a (\(u))") { TextField("longest", text: $a).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
             LabeledContent("Side b (\(u))") { TextField("middle", text: $b).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
@@ -528,8 +542,9 @@ struct TargetEditor: View {
     static func target(_ kind: TargetShape.Kind, _ a: String, _ b: String, _ c: String) -> TargetShape {
         switch kind {
         case .cylinder:
-            guard let d = number(a) else { return .auto }
-            return TargetShape(kind: .cylinder, aMM: d, bMM: number(b))
+            // 3.12: a cylinder without a diameter stays a cylinder (it used to fall back to "let the app work it
+            // out", so the choice was lost); the diameter is then measured on the pieces.
+            return TargetShape(kind: .cylinder, aMM: number(a), bMM: number(b))
         case .cuboid:
             return TargetShape(kind: .cuboid, aMM: number(a), bMM: number(b), cMM: number(c))
         default:
@@ -542,7 +557,9 @@ struct TargetEditor: View {
         switch t.kind {
         case .auto: return "worked out by the app"
         case .none: return "none"
-        case .cylinder: return "cylinder Ø " + (t.aMM.map(L) ?? "?") + (t.bMM.map { " × " + L($0) } ?? "")
+        case .cylinder:
+            guard let d = t.aMM else { return "cylinder, diameter from the pieces" + (t.bMM.map { ", length " + L($0) } ?? "") }
+            return "cylinder Ø " + L(d) + (t.bMM.map { " × " + L($0) } ?? "")
         case .cuboid: return "cuboid " + [t.aMM, t.bMM, t.cMM].map { $0.map(L) ?? "?" }.joined(separator: " × ")
         }
     }
@@ -806,7 +823,7 @@ struct PiecesDetailView: View {
         } header: {
             Text("Pieces (\(r.pieces.count))")
         } footer: {
-            Text("Sizes are the piece's own longest, middle and shortest extent. Confidence: high = confirmed by a second piece; medium = one clear fit; low = check by eye.")
+            Text("Sizes are the piece's own longest, middle and shortest extent. Confidence: high = confirmed by a second piece; medium = one clear fit; low = another place fits about as well: check by eye.")
         }
         if !r.missing.isEmpty {
             Section("Missing (\(r.missing.count))") {

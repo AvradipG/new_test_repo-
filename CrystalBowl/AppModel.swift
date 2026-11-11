@@ -442,7 +442,7 @@ final class AppModel: ObservableObject {
         if captureSide == 2 {
             scan = scans.first { $0.id == scan.id } ?? scan
             scan.side2PhotoCount = ScanStore.countPhotos(in: scan.images2URL)
-            scan.piecesSplit = 2
+            scan.piecesSplit = 3
             scan.buildRequested = true
             scan.buildAttempts = 0
             scan.pauses = 0
@@ -459,7 +459,7 @@ final class AppModel: ObservableObject {
         scan.passes = passNumber
         scan.coverage = guide.bandCoverage
         if flippedThisCapture { scan.underside = true } else if scan.underside == nil { scan.underside = false }
-        if scan.isPieces { scan.piecesSplit = 2 }
+        if scan.isPieces { scan.piecesSplit = 3 }
         scan.buildRequested = true
         scan.buildAttempts = 0
         scan.pauses = 0
