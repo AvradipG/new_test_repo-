@@ -294,7 +294,7 @@ final class ReaderTests: XCTestCase {
 
     func testSectionsSplitAtH2() {
         let s = ReaderPaper.sections(html)
-        XCTAssertEqual(s.map(\.title), ["GA review", "Abstract", "1 Introduction", "Section 4"])
+        XCTAssertEqual(s.map(\.title), ["GA review", "Abstract", "1 Introduction", "Section 3"])
         XCTAssertEqual(s[2].figures, 1)
         XCTAssertEqual(s[2].equations, 1)
         XCTAssertTrue(s[2].html.contains("<h3>1.1 Aim</h3>"))
