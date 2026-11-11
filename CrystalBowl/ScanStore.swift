@@ -68,6 +68,8 @@ struct Scan: Identifiable, Codable, Hashable {
     /// How the cut was set: "auto" (found by colour), "user" (set or corrected by hand), "none" (the user said
     /// there is no stand), "not_found" (looked for, none found). nil = not looked for yet.
     var standCheck: String?
+    /// What the AI second opinion said about the stand, when it was asked (3.15).
+    var standAI: String?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {

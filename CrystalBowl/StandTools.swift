@@ -158,12 +158,17 @@ struct StandSection: View {
                       systemImage: "scissors").font(.callout)
             case "user":
                 Label("The stand is cut off where you set it.", systemImage: "scissors").font(.callout)
+            case "ai":
+                Label("A stand under the rock was found by the AI second opinion and cut off. Check the cut.", systemImage: "sparkles").font(.callout)
             case "none":
                 Label("No stand: the whole model is measured.", systemImage: "cube").font(.callout)
             case "not_found":
                 Label("No stand found under the rock.", systemImage: "cube").font(.callout)
             default:
                 Label("Not looked at yet (it happens when the sample sheets are made).", systemImage: "clock").font(.callout)
+            }
+            if let note = scan.standAI {
+                Label(note, systemImage: "sparkles").font(.footnote).foregroundStyle(.secondary)
             }
             Button { editing = true } label: {
                 Label(scan.standCutY == nil ? "Cut off a stand under the rock" : "Check or move the cut", systemImage: "slider.vertical.3")
@@ -186,6 +191,9 @@ struct StandEditor: View {
     @State private var strip: StandStrip.Strip?
     @State private var share: Double = 0.85
     @State private var loading = true
+    @State private var aiAnswer: AIAssist.StandAnswer?
+    @State private var aiError: String?
+    @State private var asking = false
 
     var body: some View {
         NavigationStack {
@@ -205,6 +213,10 @@ struct StandEditor: View {
                                             .frame(width: g.size.width, height: Swift.max(0, g.size.height - y))
                                             .offset(y: y)
                                         Rectangle().fill(Color.red).frame(width: g.size.width, height: 3).offset(y: y - 1.5)
+                                        if let a = aiAnswer, a.hasStand {
+                                            Rectangle().fill(Color.blue).frame(width: g.size.width, height: 2)
+                                                .offset(y: g.size.height * a.boundaryFromTop - 1)
+                                        }
                                     }
                                     .contentShape(Rectangle())
                                     .gesture(DragGesture(minimumDistance: 0).onChanged { v in
@@ -216,6 +228,19 @@ struct StandEditor: View {
                         Text(heightsText(s))
                             .font(.callout.monospacedDigit())
                         Slider(value: $share, in: 0.02...0.98)
+                        if AIAssist.isReady {
+                            Button { Task { await askAI(s) } } label: {
+                                Label(asking ? "Asking…" : "Ask the AI where the stand begins", systemImage: "sparkles")
+                            }
+                            .disabled(asking)
+                            if let a = aiAnswer {
+                                Text(aiText(a)).font(.footnote).foregroundStyle(.blue)
+                                if a.hasStand {
+                                    Button("Move the red line to the AI's (blue) line") { share = Swift.min(Swift.max(a.boundaryFromTop, 0.02), 0.98) }
+                                }
+                            }
+                            if let e = aiError { Text(e).font(.footnote).foregroundStyle(.orange) }
+                        }
                         Button {
                             model.setStand(scan, cutY: s.y(atShare: share))
                             dismiss()
@@ -251,6 +276,24 @@ struct StandEditor: View {
         let a: String = "Cut " + L(below) + " above the bottom"
         let b: String = " · rock " + L(rock) + " tall · model " + L(s.heightMM)
         return a + b
+    }
+
+    private func aiText(_ a: AIAssist.StandAnswer) -> String {
+        let sure: String = String(format: "%.0f%% sure", a.confidence * 100)
+        let what: String = a.hasStand ? "The AI sees a stand below the blue line (" + sure + "). " : "The AI sees no stand (" + sure + "). "
+        return what + a.reason
+    }
+
+    private func askAI(_ s: StandStrip.Strip) async {
+        asking = true
+        aiError = nil
+        do {
+            aiAnswer = try await AIAssist.askStand(strip: s.image, heightMM: s.heightMM)
+        } catch {
+            aiError = error.localizedDescription
+            AppLog.warn("ai", "Stand check failed: " + error.localizedDescription, scan: scan)
+        }
+        asking = false
     }
 
     private func prepare() async {

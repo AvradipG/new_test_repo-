@@ -116,11 +116,38 @@ extension AppModel {
         // as it is; when one is found the model is measured and sliced again without it.
         if scan.standCheck == nil && !scan.isPieces {
             upgradeNote = "Looking for a stand under the rock: \(scan.name)"
-            if let found = await StandStrip.examine(scan) {
-                scan.standCutY = found.cutY
-                scan.standCheck = "auto"
-                AppLog.info("stand", String(format: "Stand found under the rock: cut %.1f mm above the bottom (%.0f%% of the height; rock luma %.2f, stand %.2f); measured again without it",
-                                            found.heightMM, found.result.standShare * 100, found.result.rockLuma, found.result.standLuma), scan: scan)
+            let found = await StandStrip.examine(scan)
+            var cutY: Double? = found?.cutY
+            var how: String = found == nil ? "not_found" : "auto"
+            // 3.15: the AI second opinion, when switched on.
+            if AIAssist.isReady, let strip = StandStrip.load(scan),
+               let a = try? await AIAssist.askStand(strip: strip.image, heightMM: strip.heightMM) {
+                let why: String = " (" + a.reason + ")"
+                if let c = cutY {
+                    let apart: Double = abs(strip.share(atY: c) - a.boundaryFromTop)
+                    if !a.hasStand {
+                        scan.standAI = "The AI sees no stand here" + why + ": check the cut."
+                    } else if apart < 0.06 {
+                        scan.standAI = "The AI agrees with the cut."
+                    } else {
+                        scan.standAI = "The AI puts the top of the stand elsewhere" + why + ": check the cut."
+                    }
+                } else if a.hasStand && a.confidence >= 0.75 && a.boundaryFromTop > 0.2 && a.boundaryFromTop < 0.95 {
+                    let y: Double = strip.y(atShare: a.boundaryFromTop)
+                    cutY = y
+                    how = "ai"
+                    scan.standAI = "Found by the AI" + why + ": check the cut."
+                    StandStrip.writeInfo(strip, scan: scan, cutY: y, how: "ai")
+                } else if a.hasStand {
+                    scan.standAI = "The AI suspects a stand, but isn't sure" + why + ": have a look."
+                }
+            }
+            if let y = cutY {
+                scan.standCutY = y
+                scan.standCheck = how
+                let above: String = StandStrip.load(scan).map { String(format: "%.1f mm above the bottom", (y - $0.bottomY) * 1000 * $0.scaleFactor) } ?? "?"
+                let detail: String = found.map { String(format: " (%.0f%% of the height; rock luma %.2f, stand %.2f)", $0.result.standShare * 100, $0.result.rockLuma, $0.result.standLuma) } ?? ""
+                AppLog.info("stand", "Stand found under the rock by " + (how == "ai" ? "the AI" : "its colour") + ": cut " + above + detail + "; measured again without it", scan: scan)
                 try? ScanStore.save(scan)
                 reload()
                 await repair(scan)

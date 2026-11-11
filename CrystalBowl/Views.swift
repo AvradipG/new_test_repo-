@@ -297,6 +297,8 @@ struct HomeView: View {
 
                 ExtraToolsSettingsSection()
 
+                AISettingsSection()
+
                 SheetOptionsSettingsSection()
 
                 ScanningMatSettingsSection()
