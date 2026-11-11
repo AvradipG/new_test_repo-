@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.14
+- Stand under the rock: a small rock lifted on a block (wood, cork, putty) for the scan is measured without the block. The app finds where the block's colour begins on the rock's unrolled side, cuts the model there and closes the cut, so size, volume, cross-sections and sample sheets are the rock's alone. Check or move the cut on the scan page (drag the line), or say there is no stand. The full model is kept, and a rock-only STL/OBJ goes to Google Drive
+- Which mat: the camera check now finds the rock in the photo (a small rock used to be read from the mat around it, so a dark rock got the dark mat). It shows what it measured; tap the rock to measure it there instead. The check after each capture works the same way
+- Older scans are looked at once for a stand, and their sheets are made again
+
 ## 3.13
 - Sharp close-ups: right after a scan the close-up camera opens by itself. It starts on the macro lens, which focuses from 2 cm, at its full resolution with no digital zoom. Hold the phone 3–5 cm from the rock and move slowly over it; each time you hold still on a new spot and the picture is sharp, a full-resolution photo is taken by itself (you feel a tap). Blurred ones are dropped. The Main lens gives 48 MP photos from 20 cm or more
 - Fixed: after the first round, "Fill the gaps" showed the summary again and took no photos. The live camera, the shutter and the automatic photos now come back for every new pass

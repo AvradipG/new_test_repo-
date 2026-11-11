@@ -63,6 +63,8 @@ enum Unroller {
         /// Protractor angle of each column (decreasing left to right: that is how the surface reads from outside).
         let angles: [Double]
         let mark: MarkDetection?
+        /// Median colour (0–1) of each row of surface, top row first; nil where a row shows none (3.14).
+        var rowColours: [SIMD3<Double>?] = []
     }
 
     static func unroll(rig: SampleRig, steps: Int = 144, heightPixels: Double = 640) -> Result? {
@@ -153,10 +155,32 @@ enum Unroller {
         let positive = angles.map { $0 < 0 ? $0 + 360 : $0 }
         let mark = MarkFinder.detect(rgb: rgb, width: totalW, height: rows, valid: valid, columnAngles: positive,
                                      circumferenceMM: 2 * .pi * R / unitPerMM)
+        // Each row's median colour, for finding a stand under the rock (3.14).
+        var rowColours: [SIMD3<Double>?] = []
+        for y in 0..<rows {
+            var rs: [Float] = [], gs: [Float] = [], bs: [Float] = []
+            for x in 0..<totalW where valid[y * totalW + x] {
+                let c = rgb[y * totalW + x]
+                rs.append(c.x)
+                gs.append(c.y)
+                bs.append(c.z)
+            }
+            if rs.count < 8 {
+                rowColours.append(nil)
+                continue
+            }
+            rs.sort()
+            gs.sort()
+            bs.sort()
+            let m = rs.count / 2
+            rowColours.append(SIMD3(Double(rs[m]), Double(gs[m]), Double(bs[m])))
+        }
         // Background to white for display.
         let shown = whitened(out)
-        return Result(image: shown, pxPerMM: pxPerMM, heightMM: H / unitPerMM, circumferenceMM: 2 * .pi * R / unitPerMM,
-                      angles: angles, mark: mark)
+        var result = Result(image: shown, pxPerMM: pxPerMM, heightMM: H / unitPerMM, circumferenceMM: 2 * .pi * R / unitPerMM,
+                            angles: angles, mark: mark)
+        result.rowColours = rowColours
+        return result
     }
 
     static func whitened(_ cg: CGImage) -> UIImage {

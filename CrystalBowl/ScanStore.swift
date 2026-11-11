@@ -62,6 +62,12 @@ struct Scan: Identifiable, Codable, Hashable {
     /// this one is ("upright" or "upside_down"). Kept apart; merged later on the computer if wanted.
     var pairedScanID: String?
     var orientation: String?
+    /// Stand under the rock (3.14): the model is cut at this height (model frame, metres, +Y up) and only the
+    /// rock above it is measured, sliced and drawn. nil = nothing cut.
+    var standCutY: Double?
+    /// How the cut was set: "auto" (found by colour), "user" (set or corrected by hand), "none" (the user said
+    /// there is no stand), "not_found" (looked for, none found). nil = not looked for yet.
+    var standCheck: String?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {

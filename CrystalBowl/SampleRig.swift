@@ -70,6 +70,74 @@ struct MeasureData: @unchecked Sendable {
 
 /// Reads mesh vertices out of a SceneKit node tree, in world coordinates.
 enum SceneGeometry {
+    /// Drops the triangles whose middle lies below height `y` (world, metres): the stand under a rock (3.14).
+    /// Vertex data and materials stay as they are, so the texture is unchanged.
+    static func cutBelow(_ root: SCNNode, y: Float) {
+        var nodes: [SCNNode] = [root]
+        nodes += root.childNodes { _, _ in true }
+        for node in nodes {
+            guard let g = node.geometry, let src = g.sources(for: .vertex).first, src.usesFloatComponents,
+                  src.componentsPerVector >= 3 else { continue }
+            let m = node.simdWorldTransform
+            var ys = [Float](repeating: 0, count: src.vectorCount)
+            let stride = src.dataStride, offset = src.dataOffset, bpc = src.bytesPerComponent
+            src.data.withUnsafeBytes { raw in
+                for i in 0..<src.vectorCount {
+                    let base = offset + i * stride
+                    guard base + bpc * 3 <= raw.count else { break }
+                    let p: SIMD3<Float>
+                    if bpc == 8 {
+                        p = SIMD3(Float(raw.loadUnaligned(fromByteOffset: base, as: Double.self)),
+                                  Float(raw.loadUnaligned(fromByteOffset: base + 8, as: Double.self)),
+                                  Float(raw.loadUnaligned(fromByteOffset: base + 16, as: Double.self)))
+                    } else {
+                        p = SIMD3(raw.loadUnaligned(fromByteOffset: base, as: Float.self),
+                                  raw.loadUnaligned(fromByteOffset: base + 4, as: Float.self),
+                                  raw.loadUnaligned(fromByteOffset: base + 8, as: Float.self))
+                    }
+                    let w = m * SIMD4(p, 1)
+                    ys[i] = w.y
+                }
+            }
+            var elements: [SCNGeometryElement] = []
+            var materials: [SCNMaterial] = []
+            for (k, e) in g.elements.enumerated() {
+                let mat: SCNMaterial? = g.materials.isEmpty ? nil : g.materials[k % g.materials.count]
+                guard e.primitiveType == .triangles else {
+                    elements.append(e)
+                    if let mat { materials.append(mat) }
+                    continue
+                }
+                let bpi = e.bytesPerIndex
+                var kept: [UInt32] = []
+                e.data.withUnsafeBytes { raw in
+                    for t in 0..<e.primitiveCount {
+                        var tri: [Int] = []
+                        for c in 0..<3 {
+                            let o = (t * 3 + c) * bpi
+                            guard o + bpi <= raw.count else { break }
+                            switch bpi {
+                            case 4: tri.append(Int(raw.loadUnaligned(fromByteOffset: o, as: UInt32.self)))
+                            case 2: tri.append(Int(raw.loadUnaligned(fromByteOffset: o, as: UInt16.self)))
+                            default: tri.append(Int(raw.loadUnaligned(fromByteOffset: o, as: UInt8.self)))
+                            }
+                        }
+                        guard tri.count == 3, tri.allSatisfy({ $0 < ys.count }) else { continue }
+                        let mid: Float = (ys[tri[0]] + ys[tri[1]] + ys[tri[2]]) / 3
+                        if mid >= y { kept += tri.map { UInt32($0) } }
+                    }
+                }
+                guard !kept.isEmpty else { continue }
+                elements.append(SCNGeometryElement(indices: kept, primitiveType: .triangles))
+                if let mat { materials.append(mat) }
+            }
+            guard !elements.isEmpty else { continue }
+            let cut = SCNGeometry(sources: g.sources, elements: elements)
+            cut.materials = materials
+            node.geometry = cut
+        }
+    }
+
     static func positions(in root: SCNNode, maxPoints: Int = 60_000) -> [SIMD3<Float>] {
         var nodes: [SCNNode] = [root]
         nodes += root.childNodes { _, _ in true }
@@ -144,7 +212,13 @@ final class SampleRig {
         let s = scan
         return await Task.detached(priority: .userInitiated) { () -> (SCNScene, MeasureData)? in
             guard let scene = try? SCNScene(url: url, options: nil) else { return nil }
-            let pts = SceneGeometry.positions(in: scene.rootNode)
+            var pts = SceneGeometry.positions(in: scene.rootNode)
+            // 3.14: without the stand under the rock.
+            if let cy = s.standCutY {
+                SceneGeometry.cutBelow(scene.rootNode, y: Float(cy))
+                let above = pts.filter { Double($0.y) >= cy }
+                if above.count >= 20 { pts = above }
+            }
             guard let data = MeasureData.compute(points: pts, scan: s) else { return nil }
             return (scene, data)
         }.value

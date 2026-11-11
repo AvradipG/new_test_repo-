@@ -62,7 +62,8 @@ extension AppModel {
     /// "What to include". Every older scan is evaluated again.
     /// 6 (3.9): side views on graph paper (origin at the rock's corner, height and width read off the axes);
     /// no ruler laid beside the rock and no scale bar in the figures.
-    static let extrasVersion = 6
+    /// 7 (3.14): a stand under the rock is looked for and cut off; sheets made again without it.
+    static let extrasVersion = 7
 
     func upgradeScans() async {
         // Piece sets put together before 3.12 are put together again, one at a time: 2 = the 3.10 floor fix (the flat
@@ -111,6 +112,25 @@ extension AppModel {
 
     private func upgrade(_ original: Scan) async {
         var scan = scans.first { $0.id == original.id } ?? original
+        // 3.14: a stand under the rock (a block that lifts a small rock for the scan), looked for once on the model
+        // as it is; when one is found the model is measured and sliced again without it.
+        if scan.standCheck == nil && !scan.isPieces {
+            upgradeNote = "Looking for a stand under the rock: \(scan.name)"
+            if let found = await StandStrip.examine(scan) {
+                scan.standCutY = found.cutY
+                scan.standCheck = "auto"
+                AppLog.info("stand", String(format: "Stand found under the rock: cut %.1f mm above the bottom (%.0f%% of the height; rock luma %.2f, stand %.2f); measured again without it",
+                                            found.heightMM, found.result.standShare * 100, found.result.rockLuma, found.result.standLuma), scan: scan)
+                try? ScanStore.save(scan)
+                reload()
+                await repair(scan)
+                reload()
+                scan = scans.first { $0.id == original.id } ?? scan
+            } else {
+                scan.standCheck = "not_found"
+                try? ScanStore.save(scan)
+            }
+        }
         if scan.needsRepair {
             await repair(scan)
             reload()

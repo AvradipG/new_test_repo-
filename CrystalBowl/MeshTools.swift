@@ -10,6 +10,21 @@ enum MeshTools {
         return ScanMath.stats(positions: mesh.positions, indices: mesh.indices, unitToMM: 1000)
     }
 
+    /// The scan's model as measured: with a stand under the rock cut off (3.14).
+    static func measure(_ scan: Scan) -> MeshStats? {
+        guard let mesh = loadMesh(scan) else { return nil }
+        return ScanMath.stats(positions: mesh.positions, indices: mesh.indices, unitToMM: 1000)
+    }
+
+    /// The scan's model, without the stand when one was found or set (3.14): cut exactly at the stand's top and
+    /// closed there, so volume and sections are the rock's.
+    static func loadMesh(_ scan: Scan) -> (positions: [SIMD3<Float>], indices: [UInt32])? {
+        guard let mesh = loadMesh(scan.modelURL) else { return nil }
+        guard let y = scan.standCutY else { return mesh }
+        let cut = MeshCut.above(positions: mesh.positions, indices: mesh.indices, y: Float(y))
+        return cut.indices.count >= 12 ? (cut.positions, cut.indices) : mesh
+    }
+
     /// All triangles of the model in world coordinates (metres).
     static func loadMesh(_ url: URL) -> (positions: [SIMD3<Float>], indices: [UInt32])? {
         let asset = MDLAsset(url: url)
@@ -62,6 +77,7 @@ enum MeshTools {
             }
         }
         if let report = writeReport(scan) { urls.append(report) }
+        urls += StandStrip.exportRockOnly(scan) // 3.14: the rock without its stand
         let dims = dimensionsURL(scan)
         if (try? dimensionsData(scan).write(to: dims, options: .atomic)) != nil { urls.append(dims) }
         return urls

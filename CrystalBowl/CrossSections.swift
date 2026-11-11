@@ -72,7 +72,7 @@ enum CrossSectionMaker {
     /// `override` gives the mesh directly (the self-test's demo rock) instead of reading the scan's model file.
     static func make(scan: Scan, axis: Int, spacingMM: Double,
                      mesh override: (positions: [SIMD3<Float>], indices: [UInt32])? = nil) throws -> SectionSeries {
-        guard let mesh = override ?? MeshTools.loadMesh(scan.modelURL) else {
+        guard let mesh = override ?? MeshTools.loadMesh(scan) else {
             throw NSError(domain: "CrystalBowl", code: 3, userInfo: [NSLocalizedDescriptionKey: "Couldn't read the model"])
         }
         // Axis 3 slices horizontally up the model as it stood (+Y up); depth is then height above the lowest point.

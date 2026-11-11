@@ -134,7 +134,7 @@ struct ChangeSummary: Sendable {
 enum ChangeMapExport {
     /// This scan (`compared`) against an earlier one (`reference`), both with their own scale corrections.
     static func make(compared: Scan, reference: Scan) -> ChangeSummary? {
-        guard let b = MeshTools.loadMesh(compared.modelURL), let a = MeshTools.loadMesh(reference.modelURL),
+        guard let b = MeshTools.loadMesh(compared), let a = MeshTools.loadMesh(reference),
               let r = ChangeMap.compare(reference: a, compared: b, scaleA: reference.scaleFactor, scaleB: compared.scaleFactor)
         else { return nil }
         let dir = compared.exportsURL.appendingPathComponent("change", isDirectory: true)

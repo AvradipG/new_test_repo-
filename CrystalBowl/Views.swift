@@ -973,6 +973,7 @@ struct ScanDetailView: View {
                     }
                 }
                 if scan.hasModel {
+                    StandSection(scan: scan)
                     detailSection(scan)
                     RepeatsSection(scan: scan, repeats: model.repeats(of: scan))
                     SectionsPanel(scan: scan, viewer: $sectionViewer)

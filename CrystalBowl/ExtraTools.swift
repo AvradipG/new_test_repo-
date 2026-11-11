@@ -257,10 +257,10 @@ struct CoringRows: View {
 
     private func run() {
         working = true
-        let url = scan.modelURL, f = scan.scaleFactor, d = diameter, v = vertical, id = scan.id
+        let measured = scan, f = scan.scaleFactor, d = diameter, v = vertical, id = scan.id
         Task {
             let result = await Task.detached { () -> CoringResult? in
-                guard let mesh = MeshTools.loadMesh(url) else { return nil }
+                guard let mesh = MeshTools.loadMesh(measured) else { return nil }
                 return VirtualCoring.longestPlug(positions: mesh.positions, indices: mesh.indices, diameter: d / 1000 / f,
                                                  vertical: v, step: 0.001 / f, gridStep: 0.002 / f)
             }.value
@@ -324,7 +324,7 @@ enum CTFrameExport {
 
     /// OBJ in millimetres (caliper scale applied) and a JSON with the matrix and conventions.
     static func write(_ scan: Scan, voxelUM: Double) -> [URL] {
-        guard let mesh = MeshTools.loadMesh(scan.modelURL) else { return [] }
+        guard let mesh = MeshTools.loadMesh(scan) else { return [] }
         let frame = CTFrame.make(mesh.positions)
         let scale = 1000 * scan.scaleFactor
         var obj = "# Crystal Bowl model in the micro-CT frame, millimetres\n"

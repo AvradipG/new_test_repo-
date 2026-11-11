@@ -483,7 +483,8 @@ final class AppModel: ObservableObject {
             let files = ScalePhotos.make(scan: scan, from: dir, side: side, scores: scores)
             AppLog.info("capture", "Kept \(files.count) scale photo(s) of side \(side) in model/scale-photos", scan: scan)
             // Did the rock stand out from what it lay on? (3.11) Middle of the photos against their edges.
-            let measured = files.compactMap { ScalePhotos.load($0, maxPixel: 400).flatMap { RockTone.measure($0) } }
+            // 3.14: the rock where it is in each photo, not the middle of the frame (mostly mat for a small rock).
+            let measured = files.compactMap { ScalePhotos.load($0, maxPixel: 640).flatMap { RockTone.measureObject($0) } }
             guard !measured.isEmpty else { return }
             let rock = RockTone.median(measured.map { $0.rock }), round = RockTone.median(measured.map { $0.surround })
             let tip = MatAdvisor.checkContrast(rockLuma: rock, surroundLuma: round)
@@ -702,8 +703,8 @@ final class AppModel: ObservableObject {
                 try await photogrammetry(scan)
             }
             setProgress(0.9, "Measuring…")
-            let url = scan.modelURL
-            guard let stats = await Task.detached(operation: { MeshTools.measure(url) }).value else {
+            let measured = scan
+            guard let stats = await Task.detached(operation: { MeshTools.measure(measured) }).value else {
                 throw NSError(domain: "CrystalBowl", code: 3, userInfo: [NSLocalizedDescriptionKey: "The model file couldn't be read"])
             }
             scan.stats = stats
@@ -865,8 +866,8 @@ final class AppModel: ObservableObject {
     /// Measures a scan whose model was built but never measured (version 1.3 could stop at 100% after writing it).
     func measure(_ scan: Scan) async {
         var done = scan
-        let url = scan.modelURL
-        done.stats = await Task.detached { MeshTools.measure(url) }.value
+        let measured = scan
+        done.stats = await Task.detached { MeshTools.measure(measured) }.value
         try? ScanStore.save(done)
         reload()
     }
@@ -932,8 +933,8 @@ final class AppModel: ObservableObject {
         repairing.insert(original.id)
         defer { repairing.remove(original.id) }
         var scan = scans.first { $0.id == original.id } ?? original
-        let url = scan.modelURL
-        guard let stats = await Task.detached(operation: { MeshTools.measure(url) }).value else {
+        let measured = scan
+        guard let stats = await Task.detached(operation: { MeshTools.measure(measured) }).value else {
             errorMessage = "Couldn't read the model of \"\(scan.name)\" to repair it."
             return
         }

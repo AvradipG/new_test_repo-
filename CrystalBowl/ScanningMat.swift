@@ -3,6 +3,7 @@ import UIKit
 import PDFKit
 import ImageIO
 import UniformTypeIdentifiers
+import Vision
 import ScanMath
 
 /// The printable scanning mat (3.10): a 1:1 graph-paper work area with a degree ring, lettered tracking markers and
@@ -36,6 +37,7 @@ struct ScanningMatView: View {
     @State private var advice: String?
     @State private var showCamera = false
     @State private var showGuide = false
+    @State private var checkPhoto: UIImage?
 
     /// `suggested`: the mat the app recommends for the rock in hand (from an earlier scan), with why.
     init(suggested: MatAdvisor.Advice? = nil) {
@@ -121,13 +123,19 @@ struct ScanningMatView: View {
             .fullScreenCover(isPresented: $showCamera) {
                 CameraShot { img in
                     showCamera = false
-                    guard let img, let m = RockTone.measure(img) else { return }
-                    let a = MatAdvisor.advise(rockLuma: m.rock)
-                    tone = a.tone == .dark ? .dark : .light
-                    advice = "Use the \(a.tone == .dark ? "dark" : "light") mat. " + a.reason
-                    AppLog.info("mat", String(format: "Camera check: rock brightness %.2f, surroundings %.2f, %@ mat", m.rock, m.surround, a.tone.rawValue))
+                    checkPhoto = img
                 }
                 .ignoresSafeArea()
+            }
+            .sheet(isPresented: Binding(get: { checkPhoto != nil }, set: { if !$0 { checkPhoto = nil } })) {
+                if let img = checkPhoto {
+                    MatCheckView(photo: img) { reading in
+                        let a = MatAdvisor.advise(rockLuma: reading.rock)
+                        tone = a.tone == .dark ? .dark : .light
+                        advice = "Use the \(a.tone == .dark ? "dark" : "light") mat. " + a.reason
+                        checkPhoto = nil
+                    }
+                }
             }
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }
@@ -341,6 +349,87 @@ enum RockTone {
         return (median(mid), median(edge))
     }
 
+    /// One reading of a photo (3.14): the rock's brightness, the surroundings', and where the rock was measured
+    /// (normalised, origin top-left, as the photo is shown).
+    struct Reading {
+        var rock: Double
+        var surround: Double
+        var region: CGRect
+        /// "tap" (where the user tapped), "found" (the object the camera picked out) or "middle".
+        var how: String
+    }
+
+    /// The photo upright and small, as drawn on screen.
+    static func upright(_ img: UIImage, maxPixel: CGFloat = 640) -> CGImage? {
+        let s = img.size
+        guard s.width > 0, s.height > 0 else { return nil }
+        let k = Swift.min(1, maxPixel / Swift.max(s.width, s.height))
+        let size = CGSize(width: (s.width * k).rounded(), height: (s.height * k).rounded())
+        let fmt = UIGraphicsImageRendererFormat()
+        fmt.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: fmt).image { _ in img.draw(in: CGRect(origin: .zero, size: size)) }.cgImage
+    }
+
+    /// Lumas (0–1) of an image, row-major from the top.
+    static func lumas(_ cg: CGImage) -> [Double]? {
+        let w = cg.width, h = cg.height
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        let ok: Bool = px.withUnsafeMutableBytes { buf in
+            guard let ctx = CGContext(data: buf.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+            return true
+        }
+        guard ok else { return nil }
+        return (0..<(w * h)).map { luma(px, $0) }
+    }
+
+    /// The rock, measured where it is in the photo (3.14). The old check took the middle third of the frame,
+    /// which for a 1–2 cm rock is mostly mat: a dark conglomerate read as 0.73 and got the dark mat. Now the
+    /// rock is found as the picture's main object (or taken where the user tapped), and within it the pixels
+    /// that stand out most from the surroundings are measured, so a pale stand under a dark rock doesn't count.
+    static func measureObject(_ img: UIImage, tap: CGPoint? = nil) -> Reading? {
+        guard let cg = upright(img), let L = lumas(cg) else { return nil }
+        let w = cg.width, h = cg.height
+        let e = Int(Double(Swift.min(w, h)) * 0.12)
+        var edge: [Double] = []
+        for y in 0..<h {
+            let rowEdge: Bool = y < e || y >= h - e
+            for x in 0..<w {
+                let colEdge: Bool = x < e || x >= w - e
+                if rowEdge || colEdge { edge.append(L[y * w + x]) }
+            }
+        }
+        let surround = median(edge)
+        func values(in r: CGRect) -> [Double] {
+            let x0 = Swift.max(0, Int(r.minX * CGFloat(w))), x1 = Swift.min(w, Int(r.maxX * CGFloat(w)))
+            let y0 = Swift.max(0, Int(r.minY * CGFloat(h))), y1 = Swift.min(h, Int(r.maxY * CGFloat(h)))
+            var out: [Double] = []
+            if x1 > x0 && y1 > y0 { for y in y0..<y1 { for x in x0..<x1 { out.append(L[y * w + x]) } } }
+            return out
+        }
+        if let t = tap {
+            let side: CGFloat = 0.06 * CGFloat(Swift.min(w, h))
+            let rw: CGFloat = side / CGFloat(w), rh: CGFloat = side / CGFloat(h)
+            let r = CGRect(x: t.x - rw / 2, y: t.y - rh / 2, width: rw, height: rh)
+            let v = values(in: r)
+            if v.count >= 9 { return Reading(rock: median(v), surround: surround, region: r, how: "tap") }
+        }
+        let request = VNGenerateObjectnessBasedSaliencyImageRequest()
+        try? VNImageRequestHandler(cgImage: cg, orientation: .up).perform([request])
+        let boxes = request.results?.first?.salientObjects?.map { $0.boundingBox } ?? []
+        if let b = boxes.max(by: { $0.width * $0.height < $1.width * $1.height }), b.width * b.height < 0.8 {
+            // Vision's box has its origin bottom-left.
+            let r = CGRect(x: b.minX, y: 1 - b.maxY, width: b.width, height: b.height)
+            let v = values(in: r).sorted { abs($0 - surround) > abs($1 - surround) }
+            let top = Array(v.prefix(Swift.max(9, v.count * 2 / 5)))
+            if top.count >= 9 { return Reading(rock: median(top), surround: surround, region: r, how: "found") }
+        }
+        let r = CGRect(x: 0.34, y: 0.34, width: 0.32, height: 0.32)
+        let v = values(in: r)
+        return v.isEmpty ? nil : Reading(rock: median(v), surround: surround, region: r, how: "middle")
+    }
+
     /// Median brightness of a rendered surface (the unrolled side), its white or green background left out.
     static func surface(_ img: UIImage) -> Double? {
         let n = 128
@@ -353,6 +442,71 @@ enum RockTone {
             ls.append(luma(p, i))
         }
         return ls.count > 200 ? median(ls) : nil
+    }
+}
+
+/// The photo of the rock with the spot that was measured (3.14). Tap the rock to measure it there instead.
+struct MatCheckView: View {
+    let photo: UIImage
+    let use: (RockTone.Reading) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var reading: RockTone.Reading?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .overlay {
+                            GeometryReader { g in
+                                ZStack(alignment: .topLeading) {
+                                    Color.clear
+                                    if let r = reading?.region {
+                                        Rectangle().stroke(Color.yellow, lineWidth: 3)
+                                            .frame(width: r.width * g.size.width, height: r.height * g.size.height)
+                                            .offset(x: r.minX * g.size.width, y: r.minY * g.size.height)
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture { p in measure(tap: CGPoint(x: p.x / Swift.max(1, g.size.width), y: p.y / Swift.max(1, g.size.height))) }
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    if let r = reading {
+                        let a = MatAdvisor.advise(rockLuma: r.rock)
+                        Text(String(format: "Rock brightness %.2f, mat and table %.2f.", r.rock, r.surround))
+                            .font(.callout.monospacedDigit())
+                        Label("Use the \(a.tone == .dark ? "dark" : "light") mat. " + a.reason, systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                        Text(r.how == "tap" ? "Measured where you tapped (yellow square)." : "Measured on the rock the camera picked out (yellow box). If it boxed the wrong thing, tap the rock itself.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Button {
+                            AppLog.info("mat", String(format: "Camera check (%@): rock brightness %.2f, surroundings %.2f, %@ mat", r.how, r.rock, r.surround, a.tone.rawValue))
+                            use(r)
+                            dismiss()
+                        } label: { Label("Use the \(a.tone == .dark ? "dark" : "light") mat", systemImage: "square.grid.3x3.fill").frame(maxWidth: .infinity) }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        ProgressView("Finding the rock…")
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Which mat?")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .task { measure(tap: nil) }
+        }
+    }
+
+    private func measure(tap: CGPoint?) {
+        let img = photo
+        Task {
+            let r = await Task.detached { RockTone.measureObject(img, tap: tap) }.value
+            reading = r
+        }
     }
 }
 
