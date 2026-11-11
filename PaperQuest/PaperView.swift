@@ -18,6 +18,7 @@ struct PaperView: View {
     @State private var manuscript: URL?
     @State private var showPaperInfo = false
     @State private var confirmRemove = false
+    @State private var showReader = false
 
     struct AddTarget: Identifiable {
         let parent: Node?
@@ -121,6 +122,9 @@ struct PaperView: View {
             if paper.manuscriptURL != nil {
                 Button { openManuscript(paper) } label: { Label("Open manuscript", systemImage: "doc.richtext") }
             }
+            if StudioSession.shared.signedIn && (paper.manuscriptURL?.contains("manuscript-studio-181489801873") ?? false) {
+                Button { showReader = true } label: { Label("Read the paper", systemImage: "book") }
+            }
             Button { showPaperInfo = true } label: { Label("Title and link", systemImage: "pencil") }
             Button(role: .destructive) { confirmRemove = true } label: { Label("Remove from this iPhone", systemImage: "trash") }
         } label: {
@@ -145,6 +149,12 @@ struct PaperView: View {
             .sheet(item: $detail) { node in NodeSheet(paperID: paperID, nodeID: node.id) }
             .sheet(item: $manuscript) { url in SafariView(url: url).ignoresSafeArea() }
             .sheet(isPresented: $showPaperInfo) { PaperInfoSheet(paper: paper) }
+            .sheet(isPresented: $showReader) {
+                NavigationStack {
+                    ReaderView(paperID: paper.id, title: paper.title)
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showReader = false } } }
+                }
+            }
     }
 
     private var parentMenuShown: Binding<Bool> {

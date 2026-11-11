@@ -283,3 +283,30 @@ final class ChatWireTests: XCTestCase {
         XCTAssertTrue(r.contains("1970-01-01T00:00:00Z"))
     }
 }
+
+final class ReaderTests: XCTestCase {
+    let html = """
+    <h1>GA review</h1><p>Avradip Ghosh</p><h2>Abstract</h2><p>Waves.</p>\
+    <h2>1 Introduction</h2><p>Intro <span data-inline-equation="true" data-latex="x">x</span>.</p>\
+    <div data-equation="true" data-latex="a=b" data-number="1.1" class="writer-equation">a=b</div>\
+    <h3>1.1 Aim</h3><img src="asset://f1" alt="Figure 1"><h2></h2><p>Untitled section.</p>
+    """
+
+    func testSectionsSplitAtH2() {
+        let s = ReaderPaper.sections(html)
+        XCTAssertEqual(s.map(\.title), ["GA review", "Abstract", "1 Introduction", "Section 4"])
+        XCTAssertEqual(s[2].figures, 1)
+        XCTAssertEqual(s[2].equations, 1)
+        XCTAssertTrue(s[2].html.contains("<h3>1.1 Aim</h3>"))
+        XCTAssertFalse(s[1].html.contains("Introduction"))
+        XCTAssertEqual(ReaderPaper.sections("<p>Only text</p>").map(\.title), ["Opening"])
+    }
+
+    func testPageLoadsFiguresLazilyThroughTheAppScheme() {
+        let s = ReaderPaper.sections(html)[2]
+        let page = ReaderPaper.page(s, dark: false)
+        XCTAssertTrue(page.contains(#"src="pqasset://f1" loading="lazy""#))
+        XCTAssertFalse(page.contains(#"src="asset://"#), "no raw asset links left")
+        XCTAssertTrue(page.contains("katex.min.js"))
+    }
+}

@@ -202,6 +202,7 @@ struct ManuscriptView: View {
     @State private var showQuest = false
     @State private var safari: URL?
     @State private var showImport = false
+    @State private var showReader = false
 
     var body: some View {
         Group {
@@ -231,6 +232,7 @@ struct ManuscriptView: View {
                             }
                         }
                         Divider()
+                        Button { showReader = true } label: { Label("Read section by section", systemImage: "book") }
                         Button { web.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
                         Button { safari = FirebaseWebConfig.manuscriptURL(paper: current) } label: {
                             Label("Open in Safari view", systemImage: "safari")
@@ -243,6 +245,12 @@ struct ManuscriptView: View {
                     Button { showImport = true } label: { Image(systemName: "plus") }
                         .accessibilityLabel("Add a paper")
                 }
+            }
+        }
+        .sheet(isPresented: $showReader) {
+            NavigationStack {
+                ReaderView(paperID: current, title: papers.first { $0.id == current }?.name ?? "Paper")
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { showReader = false } } }
             }
         }
         .sheet(isPresented: $showImport) {
