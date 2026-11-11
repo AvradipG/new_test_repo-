@@ -220,9 +220,9 @@ enum AppLog {
     private static func prune() {
         let fm = FileManager.default
         let limit = Date().addingTimeInterval(-60 * 86_400)
-        for dir in [folder, reportsFolder] {
+        for dir in [folder, reportsFolder, folder.appendingPathComponent("Screens", isDirectory: true)] {
             let items = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-            for url in items where url.pathExtension == "log" || url.pathExtension == "json" {
+            for url in items where url.pathExtension == "log" || url.pathExtension == "json" || url.pathExtension == "png" {
                 let mod = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
                 if mod < limit { try? fm.removeItem(at: url) }
             }
@@ -241,6 +241,10 @@ enum AppLog {
         let reports = ((try? fm.contentsOfDirectory(at: reportsFolder, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
         out += reports.map { ("iOS reports/\($0.lastPathComponent)", $0) }
+        // Screens saved for a report by shaking the phone (3.13).
+        let screens = ((try? fm.contentsOfDirectory(at: folder.appendingPathComponent("Screens", isDirectory: true), includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "png" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        out += screens.map { ("Screens/\($0.lastPathComponent)", $0) }
         return out
     }
 

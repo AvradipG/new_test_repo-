@@ -87,12 +87,14 @@ extension AppModel {
             let client = DriveClient()
             let root = try await client.folder(named: ScanPackage.rootFolder, in: "root")
             let logFolder = try await client.folder(named: "_app-log", in: root)
-            var reportsFolder: String?
+            var subfolders: [String: String] = [:]
             for (rel, url) in todo {
                 var parent = logFolder
-                if rel.hasPrefix("iOS reports/") {
-                    if reportsFolder == nil { reportsFolder = try await client.folder(named: "iOS reports", in: logFolder) }
-                    parent = reportsFolder ?? logFolder
+                // "iOS reports/…" and "Screens/…" (3.13) go into folders of that name.
+                if let slash = rel.firstIndex(of: "/") {
+                    let sub = String(rel[..<slash])
+                    if subfolders[sub] == nil { subfolders[sub] = try await client.folder(named: sub, in: logFolder) }
+                    parent = subfolders[sub] ?? logFolder
                 }
                 let before = FolderCopy.record(url) // a file that grows during the upload goes again next time
                 // Upload a still copy: the log keeps growing while it is sent, and a file larger than the size

@@ -518,6 +518,9 @@ enum ScanPackage {
                  "note": "smallest vertical cylinder holding the rock as it stood when scanned; caliper-corrected when a check exists"]
             } ?? NSNull(),
             "detail_photos": scan.detailCount,
+            "detail_note": "detail/: full-resolution close-ups (macro and main lens), taken by the automatic shutter when the phone was still and the picture sharp; detail/detail.json lists lens, zoom, focus, sharpness and direction of each",
+            "orientation": scan.orientation ?? NSNull(),
+            "paired_scan": scan.pairedScanID ?? NSNull(),
             "blurry_photos_set_aside": scan.blurrySetAside ?? 0,
             "quick_scan": scan.quick ?? false,
             "upright_as_scanned_mm": scan.stats?.upright.map { u -> Any in

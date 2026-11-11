@@ -3,6 +3,13 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.13
+- Sharp close-ups: right after a scan the close-up camera opens by itself. It starts on the macro lens, which focuses from 2 cm, at its full resolution with no digital zoom. Hold the phone 3–5 cm from the rock and move slowly over it; each time you hold still on a new spot and the picture is sharp, a full-resolution photo is taken by itself (you feel a tap). Blurred ones are dropped. The Main lens gives 48 MP photos from 20 cm or more
+- Fixed: after the first round, "Fill the gaps" showed the summary again and took no photos. The live camera, the shutter and the automatic photos now come back for every new pass
+- Scan the rock upside down after finishing: it becomes its own scan, linked to the first, to keep apart or merge later on the computer (offered after the close-ups, and on the scan page)
+- Shake the phone to save the screen for a problem report: it goes to Photos and to the app log on Google Drive
+- During the 3D scan the app no longer asks you to come closer than about 20 cm, where the 3D camera can't focus
+
 ## 3.12
 - Broken pieces now go back together inside the original cylinder. The app finds the cylinder on the largest piece (its curved outside and flat ends) and fits every other piece into the empty part of it, outside against the wall or ends and breaks against each other, with nothing overlapping or sticking out. This works even when only one side of the pieces was scanned. Before, nothing was put together unless both faces of a break had been scanned
 - Fixed: choosing "Cylinder" without typing a diameter was quietly changed back to "Let the app work it out". The cylinder is now kept, and the app measures its diameter on the pieces

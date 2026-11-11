@@ -47,6 +47,37 @@ struct RootView: View {
             }
         }
         .tint(Theme.violet)
+        // 3.13: close-ups straight after a "dimensions + detail" capture, while the rock is still in place.
+        .fullScreenCover(item: $model.detailAfterCapture) { scan in
+            DetailCaptureView(scan: scan, afterScan: true) { model.closeDetailAfterCapture() }
+        }
+        .confirmationDialog("Scan the rock upside down too?", isPresented: Binding(
+            get: { model.offerUpsideDown != nil },
+            set: { if !$0 { model.offerUpsideDown = nil } }
+        ), titleVisibility: .visible, presenting: model.offerUpsideDown) { scan in
+            Button("Turn it over and scan it") { model.offerUpsideDown = nil; model.startUpsideDownScan(of: scan) }
+            Button("Not now", role: .cancel) { model.offerUpsideDown = nil }
+        } message: { _ in
+            Text("Turn the rock upside down where it lies and scan it again. It is kept as its own scan, linked to this one, so the two can be compared or merged later on the computer.")
+        }
+        .overlay(alignment: .top) {
+            if let text = model.toast {
+                Text(text)
+                    .font(.callout.bold())
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .allowsHitTesting(false)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.toast)
+        .onReceive(NotificationCenter.default.publisher(for: .deviceDidShake)) { _ in
+            if ScreenSnap.take(reason: "shake") { model.showToast("Screen saved to Photos and the app log") }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.userDidTakeScreenshotNotification)) { _ in
+            AppLog.info("screen", "iOS screenshot taken (phase \(model.phase == .capturing ? "capturing" : "home"))")
+        }
         .alert("Something went wrong", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { if !$0 { model.errorMessage = nil } }
@@ -1002,7 +1033,7 @@ struct ScanDetailView: View {
                 SheetOptionsView(scan: scan).environmentObject(model)
             }
             .fullScreenCover(isPresented: $showDetailCamera) {
-                DetailCaptureView(scan: scan) {
+                DetailCaptureView(scan: scan, afterScan: false) {
                     showDetailCamera = false
                     model.reload()
                     Task { await model.syncAllPending() }
@@ -1257,6 +1288,13 @@ extension ScanDetailView {
         }
     }
 
+    /// The linked scan of the same rock the other way up (3.13).
+    func pairText(_ scan: Scan, _ other: Scan) -> String {
+        let when: String = other.created.formatted(date: .abbreviated, time: .shortened)
+        let lead: String = scan.orientation == "upside_down" ? "Upside-down scan of " : "Upside-down scan: "
+        return lead + other.name + " (" + when + ")"
+    }
+
     func detailSection(_ scan: Scan) -> some View {
         Section {
             Button { showDetailCamera = true } label: {
@@ -1264,14 +1302,28 @@ extension ScanDetailView {
                       systemImage: "camera.macro")
             }
             if scan.detailCount > 0 {
-                ShareLink(items: ScanStore.photoURLs(in: scan.detailURL)) {
+                let urls = ScanStore.photoURLs(in: scan.detailURL)
+                Button {
+                    let items = urls.map { GalleryItem(url: $0, title: "Close-up " + $0.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "DETAIL_", with: "")) }
+                    gallery = GalleryTarget(items: items, start: 0)
+                } label: { Label("See the close-ups full size", systemImage: "photo.on.rectangle.angled") }
+                ShareLink(items: urls) {
                     Label("Share close-ups", systemImage: "square.and.arrow.up")
                 }
             }
+            if model.isCaptureSupported && scan.orientation != "upside_down" && scan.pairedScanID == nil {
+                Button { model.startUpsideDownScan(of: scan) } label: {
+                    Label("Scan it upside down (a linked scan)", systemImage: "arrow.up.and.down.circle")
+                }
+            }
+            if let other = scan.pairedScanID, let o = model.scans.first(where: { $0.id == other }) {
+                Label(pairText(scan, o), systemImage: "link")
+                    .font(.caption)
+            }
         } header: {
-            Text("Detail photos (optional)")
+            Text("Close-ups and the other side")
         } footer: {
-            Text("For surface patterns and later image identification. The camera uses all lenses (macro, main, telephoto), keeps the rock in focus, zooms to it and drops blurred shots. Not needed for the dimensions.")
+            Text("Close-ups are the sharp, full-resolution photos for surface patterns: the macro lens from a few centimetres, the main lens at 48 MP from further away. Hold still on a spot and the photo is taken by itself; blurred ones are dropped. The upside-down scan is kept as its own scan, linked to this one.")
         }
     }
 }

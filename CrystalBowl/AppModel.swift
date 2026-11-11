@@ -84,6 +84,16 @@ final class AppModel: ObservableObject {
     var logUploadScheduled = false
     var savingToPhotos = false
     @Published var photosNote: String?
+    /// Close-ups opened by themselves after a "dimensions + detail" capture, while the rock is still in place (3.13).
+    @Published var detailAfterCapture: Scan?
+    /// After those close-ups: offer to scan the rock upside down as its own, linked scan (3.13).
+    @Published var offerUpsideDown: Scan?
+    /// Short message across the top of the screen (screen saved for a report, …).
+    @Published var toast: String?
+    /// A new pass was asked for; Object Capture's "pass completed" flag is ignored until it clears (3.13).
+    var newPassAsked: Date?
+    var newPassRetried = false
+    var lastPassDiagnostic = Date.distantPast
 
     let guide = CaptureGuide()
 
@@ -127,6 +137,30 @@ final class AppModel: ObservableObject {
             piecesCapture = false
             captureSide = 1
             beginCapture(scan, images: scan.imagesURL, checkpoint: scan.checkpointURL, quick: quick)
+        } catch {
+            errorMessage = "Couldn't create the scan folder: \(error.localizedDescription)"
+        }
+    }
+
+    /// The same rock turned upside down, as a scan of its own linked to the first one (3.13). The two can be kept
+    /// apart or merged later on the computer.
+    func startUpsideDownScan(of original: Scan) {
+        guard isCaptureSupported else { return }
+        do {
+            var scan = try ScanStore.create(name: original.name)
+            scan.quick = original.quick
+            scan.pairedScanID = original.id
+            scan.orientation = "upside_down"
+            try? ScanStore.save(scan)
+            if var first = scans.first(where: { $0.id == original.id }) {
+                first.pairedScanID = scan.id
+                if first.orientation == nil { first.orientation = "upright" }
+                try? ScanStore.save(first)
+            }
+            AppLog.info("capture", "Upside-down scan of \(original.name) (\(original.id)) started as \(scan.id)", scan: scan)
+            piecesCapture = false
+            captureSide = 1
+            beginCapture(scan, images: scan.imagesURL, checkpoint: scan.checkpointURL, quick: original.quick ?? false)
         } catch {
             errorMessage = "Couldn't create the scan folder: \(error.localizedDescription)"
         }
@@ -178,6 +212,8 @@ final class AppModel: ObservableObject {
         captureSession = session
         captureStage = .initializing
         passCompleted = false
+        newPassAsked = nil
+        newPassRetried = false
         passNumber = 1
         shotCount = 0
         feedbackText = nil
@@ -228,7 +264,27 @@ final class AppModel: ObservableObject {
         @unknown default: break
         }
         let wasCompleted = passCompleted
-        passCompleted = session.userCompletedScanPass
+        // 3.13: on iOS 27 the "pass completed" flag stayed set after a new pass was started, so the app kept
+        // showing the pass summary: no camera view, no shutter, no photos on the gap-filling pass (seen in the
+        // log: "2 passes", no photo added). After a new pass is asked for, the flag is ignored until it clears.
+        let sessionDone = session.userCompletedScanPass
+        if let asked = newPassAsked {
+            if !sessionDone {
+                newPassAsked = nil
+                AppLog.info("capture", "Pass \(passNumber) is running (Object Capture cleared its pass flag after \(String(format: "%.1f", Date().timeIntervalSince(asked))) s)")
+            } else if Date().timeIntervalSince(asked) > 3 && !newPassRetried {
+                newPassRetried = true
+                AppLog.warn("capture", "Object Capture still reports the last pass as done 3 s after pass \(passNumber) was started; asking again (state \(String(describing: session.state)), can take photos \(session.canRequestImageCapture))")
+                session.beginNewScanPass()
+            }
+            passCompleted = false
+        } else {
+            passCompleted = sessionDone
+        }
+        if passNumber > 1 && !passCompleted && Date().timeIntervalSince(lastPassDiagnostic) > 10 {
+            lastPassDiagnostic = Date()
+            AppLog.info("capture", "Pass \(passNumber): \(session.numberOfShotsTaken) photos in the session, files \(photoFiles.map { String($0 - photosBefore) } ?? "?"), can take photos \(session.canRequestImageCapture), pass flag \(sessionDone), state \(String(describing: session.state))")
+        }
         feedbackText = Self.describe(session.feedback)
         guide.update(sessionShots: session.numberOfShotsTaken, files: photoFiles.map { max(0, $0 - photosBefore) },
                      capturing: captureStage == .capturing && !passCompleted, feedback: feedbackText)
@@ -259,7 +315,7 @@ final class AppModel: ObservableObject {
     static func describe(_ feedback: Set<ObjectCaptureSession.Feedback>) -> String? {
         let text: [String: String] = [
             "objectTooClose": "Move back a little",
-            "objectTooFar": "Move closer to the rock (the 3D camera doesn't zoom: zoom would spoil the true size)",
+            "objectTooFar": "Move a little closer, but stay about 20 cm away: the 3D camera can't focus nearer. Sharp close-ups come next, with the macro lens",
             "movingTooFast": "Slow down",
             "environmentLowLight": "Low light: the phone's light is coming on. More room light is better still",
             "environmentTooDark": "Too dark: turn on a lamp or tap the light button",
@@ -353,12 +409,24 @@ final class AppModel: ObservableObject {
         guide.newPass(flipped: true)
         flippedThisCapture = true
         passNumber += 1
+        newPassStarted()
     }
 
     func anotherPass() {
         captureSession?.beginNewScanPass()
         guide.newPass(flipped: false)
         passNumber += 1
+        newPassStarted()
+    }
+
+    /// Back to the live camera at once: the summary goes away, the shutter and automatic photos are back.
+    private func newPassStarted() {
+        newPassAsked = Date()
+        newPassRetried = false
+        passCompleted = false
+        if let s = captureSession {
+            AppLog.info("capture", "Pass \(passNumber) started (state \(String(describing: s.state)), pass flag \(s.userCompletedScanPass), can take photos \(s.canRequestImageCapture), \(s.numberOfShotsTaken) photos so far)")
+        }
     }
 
     func finishCapture() { captureSession?.finish() }
@@ -470,6 +538,25 @@ final class AppModel: ObservableObject {
         reload()
         if scan.isPieces { tab = .pieces } else { path = [scan] }
         reconstruct(scan)
+        // 3.13: the close-ups follow straight away, while the rock is still where it was scanned.
+        if !scan.isPieces && !quickCapture { detailAfterCapture = scan }
+    }
+
+    /// Closing the close-ups that followed a capture: offer the upside-down scan of the same rock.
+    func closeDetailAfterCapture() {
+        let scan = detailAfterCapture
+        detailAfterCapture = nil
+        reload()
+        Task { await syncAllPending() }
+        if let scan, scans.first(where: { $0.id == scan.id })?.pairedScanID == nil { offerUpsideDown = scan }
+    }
+
+    func showToast(_ text: String) {
+        toast = text
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if self?.toast == text { self?.toast = nil }
+        }
     }
 
     // MARK: Building the model (in the background)

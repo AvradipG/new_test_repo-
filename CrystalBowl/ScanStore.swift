@@ -58,6 +58,10 @@ struct Scan: Identifiable, Codable, Hashable {
     var bedding: [BeddingRecord]?
     /// True when the rock was flipped and its underside scanned; false when it wasn't (3.7). Nil for older scans.
     var underside: Bool?
+    /// The same rock scanned the other way up, as its own scan (3.13): the id of the other scan, and which way up
+    /// this one is ("upright" or "upside_down"). Kept apart; merged later on the computer if wanted.
+    var pairedScanID: String?
+    var orientation: String?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {
