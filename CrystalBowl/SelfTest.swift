@@ -214,15 +214,17 @@ enum SelfTest {
             var th = Double.pi
             while th < 2.5 * Double.pi {
                 var y = hs / 2
-                while y < len { P.append(SIMD3(r * cos(th), y, r * sin(th))); N.append(SIMD3(cos(th), 0, sin(th))); y += hs }
+                let c: Double = cos(th), s: Double = sin(th)
+                while y < len { P.append(SIMD3(r * c, y, r * s)); N.append(SIMD3(c, 0, s)); y += hs }
                 th += hs / r
             }
             var x = -r
             while x < r {
                 var z = -r
                 while z < r {
-                    let a = atan2(z, x)
-                    if x * x + z * z < r * r && !(a > Double.pi / 2) { P.append(SIMD3(x, len, z)); N.append(SIMD3(0, 1, 0)) }
+                    let a: Double = atan2(z, x)
+                    let d2: Double = x * x + z * z
+                    if d2 < r * r && a <= Double.pi / 2 { P.append(SIMD3(x, len, z)); N.append(SIMD3(0, 1, 0)) }
                     z += hs
                 }
                 x += hs

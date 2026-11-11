@@ -94,7 +94,9 @@ public struct CoreCylinder: Sendable {
             let d = u * cos(th) + v * sin(th)
             for j in 0...along {
                 let t = t0 + length * Double(j) / Double(along)
-                P.append(base + axis * t + d * radius)
+                let along3: SIMD3<Double> = axis * t
+                let out3: SIMD3<Double> = d * radius
+                P.append(base + along3 + out3)
                 N.append(-d)
             }
         }
@@ -105,9 +107,12 @@ public struct CoreCylinder: Sendable {
             for k in 0..<m {
                 let th = 2 * Double.pi * Double(k) / Double(m)
                 let d = u * cos(th) + v * sin(th)
-                P.append(base + axis * t0 + d * r)
+                let off: SIMD3<Double> = d * r
+                let bottom3: SIMD3<Double> = base + axis * t0
+                let top3: SIMD3<Double> = base + axis * t1
+                P.append(bottom3 + off)
                 N.append(axis)
-                P.append(base + axis * t1 + d * r)
+                P.append(top3 + off)
                 N.append(-axis)
             }
         }
@@ -448,7 +453,9 @@ public enum MouldAssembler {
         }
 
         func near(_ a: Piece, _ Wa: Pose, _ b: Piece, _ Wb: Pose) -> Bool {
-            simd_length(Wa.apply(a.centroid) - Wb.apply(b.centroid)) < a.radius + b.radius + 3 * Swift.max(a.spacing, b.spacing)
+            let gap: Double = simd_length(Wa.apply(a.centroid) - Wb.apply(b.centroid))
+            let reach: Double = a.radius + b.radius + 3 * Swift.max(a.spacing, b.spacing)
+            return gap < reach
         }
 
         /// The surface a new piece may touch: the mould and every piece already in place.
@@ -530,7 +537,9 @@ public enum MouldAssembler {
                     var y = -cyl.radius + cell / 2
                     while y < cyl.radius {
                         if x * x + y * y <= cyl.radius * cyl.radius {
-                            let c = cyl.base + cyl.axis * t + u * x + v * y
+                            let onAxis: SIMD3<Double> = cyl.base + cyl.axis * t
+                            let across: SIMD3<Double> = u * x + v * y
+                            let c: SIMD3<Double> = onAxis + across
                             var inside = false
                             for (q, W, Wi) in placed where simd_length(c - W.apply(q.centroid)) < q.radius + cell {
                                 if q.signedDistance(Wi.apply(c)) < 0 { inside = true; break }
@@ -547,7 +556,12 @@ public enum MouldAssembler {
             var out = [empty.centroid]
             let kk = Swift.min(k, empty.count)
             guard kk > 0 else { return out }
-            var C = (0..<kk).map { empty[($0 * empty.count) / kk + (empty.count / kk) / 2] }
+            let stride0: Int = empty.count / kk
+            var C: [SIMD3<Double>] = []
+            for j in 0..<kk {
+                let at: Int = (j * empty.count) / kk + stride0 / 2
+                C.append(empty[Swift.min(empty.count - 1, at)])
+            }
             for _ in 0..<8 {
                 var sums = [SIMD3<Double>](repeating: .zero, count: kk), counts = [Int](repeating: 0, count: kk)
                 for e in empty {
@@ -588,7 +602,9 @@ public enum MouldAssembler {
                         for f in 0..<params.wallHeights {
                             let share = params.wallHeights > 1 ? Double(f) / Double(params.wallHeights - 1) : 0.5
                             let at = cyl.t0 + share * free
-                            S.append(Pose(R: Rs, t: cyl.base - perp + A * (at - lo)))
+                            let slide: SIMD3<Double> = A * (at - lo)
+                            let move: SIMD3<Double> = cyl.base - perp
+                            S.append(Pose(R: Rs, t: move + slide))
                         }
                     }
                 }
@@ -601,8 +617,10 @@ public enum MouldAssembler {
                     for k in 0..<params.endSpins {
                         let Rs = Pose.rotation(axis: A, degrees: 360 * Double(k) / Double(params.endSpins)) * R0
                         for c in centres.prefix(params.voidCentres) {
-                            var t = c - Rs * p.centroid
-                            t += A * (tEnd - simd_dot(Rs * f.centroid + t, A))
+                            var t: SIMD3<Double> = c - Rs * p.centroid
+                            let faceAt: SIMD3<Double> = Rs * f.centroid + t
+                            let gap: Double = tEnd - simd_dot(faceAt, A)
+                            t += A * gap
                             S.append(Pose(R: Rs, t: t))
                         }
                     }
@@ -708,7 +726,9 @@ public enum MouldAssembler {
                 var grew = false
                 let left = others.filter { st.poses[$0.id] == nil }
                 for (k, p) in left.enumerated() {
-                    let f = (Double(depth) + (Double(b) + Double(k + 1) / Double(left.count)) / Double(beam.count)) / Double(others.count)
+                    let withinState: Double = Double(k + 1) / Double(left.count)
+                    let withinDepth: Double = (Double(b) + withinState) / Double(beam.count)
+                    let f: Double = (Double(depth) + withinDepth) / Double(others.count)
                     progress?(Swift.min(1, f), "Fitting the pieces into the cylinder (P\(p.id))…")
                     let cands = ctx.place(p, st)
                     guard let top = cands.first else { continue }

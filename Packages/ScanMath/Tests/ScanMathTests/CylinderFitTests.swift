@@ -12,7 +12,9 @@ final class CylinderFitTests: XCTestCase {
 
     /// Angle (radians) of the break between the two parts of the quarter, at radius r and height y.
     func breakAngle(_ r: Double, _ y: Double) -> Double {
-        let deg: Double = 135 + 7 * sin(r * 310 + 0.4) * cos(y * 380) + 4 * sin(y * 650 + r * 170)
+        let w1: Double = 7 * sin(r * 310 + 0.4) * cos(y * 380)
+        let w2: Double = 4 * sin(y * 650 + r * 170)
+        let deg: Double = 135 + w1 + w2
         return deg * .pi / 180
     }
 
@@ -66,9 +68,12 @@ final class CylinderFitTests: XCTestCase {
                     let th = f(r, y)
                     let p = SIMD3(r * cos(th), y, r * sin(th))
                     let e = 1e-6
-                    let tr = (f(r + e, y) - f(r - e, y)) / (2 * e), ty = (f(r, y + e) - f(r, y - e)) / (2 * e)
-                    let dr = SIMD3(cos(th) - r * sin(th) * tr, 0, sin(th) + r * cos(th) * tr)
-                    let dy = SIMD3(-r * sin(th) * ty, 1, r * cos(th) * ty)
+                    let tr: Double = (f(r + e, y) - f(r - e, y)) / (2 * e)
+                    let ty: Double = (f(r, y + e) - f(r, y - e)) / (2 * e)
+                    let c: Double = cos(th), s: Double = sin(th)
+                    let rs: Double = r * s, rc: Double = r * c
+                    let dr = SIMD3<Double>(c - rs * tr, 0, s + rc * tr)
+                    let dy = SIMD3<Double>(-rs * ty, 1, rc * ty)
                     var n = simd_normalize(simd_cross(dr, dy))
                     let eTheta = SIMD3(-sin(th), 0, cos(th))
                     if simd_dot(n, eTheta) * sign < 0 { n = -n }
