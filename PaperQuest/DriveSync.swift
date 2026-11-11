@@ -112,6 +112,35 @@ extension Store {
         }
     }
 
+    // MARK: App requests (Ask tab → Claude Code)
+
+    /// Writes an app request (request.md + pictures) to Drive › Paper Quest › app-requests › <time>.
+    /// Returns where it went. Uses the linked Drive folder, else direct Google sign-in.
+    func saveAppRequest(markdown: String, pictures: [Data]) async throws -> String {
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        if folderLinked, let root = Self.resolveFolder() {
+            try await Task.detached {
+                try FolderIO.withAccess(root) {
+                    let dir = root.appendingPathComponent("app-requests", isDirectory: true).appendingPathComponent(stamp, isDirectory: true)
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    try FolderIO.writeFile(Data(markdown.utf8), to: dir.appendingPathComponent("request.md"))
+                    for (n, p) in pictures.enumerated() { try FolderIO.writeFile(p, to: dir.appendingPathComponent("picture-\(n + 1).jpg")) }
+                }
+            }.value
+            return "Drive › \(folderName ?? Self.rootFolderName) › app-requests › \(stamp)"
+        }
+        guard GoogleAuth.shared.isSignedIn else {
+            throw DriveError(message: "Google Drive isn't connected (Settings › Google Drive)")
+        }
+        let drive = DriveClient()
+        let root = try await drive.folder(named: Self.rootFolderName, in: "root")
+        let requests = try await drive.folder(named: "app-requests", in: root)
+        let dir = try await drive.createFolder(named: stamp, in: requests)
+        _ = try await drive.put(Data(markdown.utf8), name: "request.md", parent: dir, existingID: nil)
+        for (n, p) in pictures.enumerated() { _ = try await drive.put(p, name: "picture-\(n + 1).jpg", parent: dir, existingID: nil) }
+        return "Drive › \(Self.rootFolderName) › app-requests › \(stamp)"
+    }
+
     // MARK: Direct Google sign-in (drive.file scope: the app sees only files it created)
 
     private func syncSignedIn() async throws {

@@ -349,16 +349,31 @@ struct ManuscriptView: View {
 struct SafelistHelp: View {
     let clientID = GoogleAuth.shared.clientID ?? ""
     @State private var copied = false
+    @Environment(\.openURL) private var openURL
+    static let console = URL(string: "https://console.firebase.google.com/project/project-ed65bb90-aac3-42cd-b77/authentication/providers")!
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("One-time step in Firebase", systemImage: "wrench.and.screwdriver").font(.headline)
-            Text("Firebase only accepts Google sign-ins from clients it trusts. On a computer: Firebase console › project-ed65bb90-aac3-42cd-b77 › Authentication › Sign-in method › Google › Safelist client IDs from external projects › add this ID, Save, then sign in here again.")
+        VStack(alignment: .leading, spacing: 10) {
+            Label("One-time fix in Firebase (about a minute)", systemImage: "wrench.and.screwdriver").font(.headline)
+            Text("Firebase only accepts Google sign-ins from client IDs it trusts, and this app's ID isn't on its list yet. Only the project owner can add it:")
                 .font(.footnote)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("1. Tap Copy the client ID.")
+                Text("2. Tap Open Firebase (signs in with the same Google account).")
+                Text("3. On Sign-in method, tap Google › Edit (pencil).")
+                Text("4. Open “Safelist client IDs from external projects”, paste, tap Add, then Save.")
+                Text("5. Come back here and tap Sign in with Google again.")
+            }
+            .font(.footnote)
             Text(clientID).font(.caption.monospaced()).textSelection(.enabled)
-            Button(copied ? "Copied" : "Copy the client ID") {
-                UIPasteboard.general.string = clientID
-                copied = true
+            HStack {
+                Button(copied ? "Copied ✓" : "Copy the client ID") {
+                    UIPasteboard.general.string = clientID
+                    copied = true
+                }
+                .buttonStyle(.bordered)
+                Button("Open Firebase") { openURL(Self.console) }
+                    .buttonStyle(.borderedProminent)
             }
             .font(.footnote)
         }

@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.3
+- New Ask tab: chat with Claude or ChatGPT about your papers, the science or the app; attach screenshots and the app's diagnostics go along automatically
+- "Send to Claude Code" saves an app request (conversation, pictures, diagnostics) to Google Drive › Paper Quest › app-requests
+- Manuscript Studio sign-in: one-tap Firebase fix (copy the client ID, open the right Firebase page, step-by-step)
+
 ## 1.2
 - Fixed: Manuscript Studio sign-in (the app read its settings from the wrong address), so your papers now open in the Manuscript tab
 - Google Drive setup now shows what happened, closes itself when connected, and says exactly what went wrong if not

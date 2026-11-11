@@ -33,6 +33,9 @@ struct RootView: View {
             NavigationStack { ManuscriptView() }
                 .tabItem { Label("Manuscript", systemImage: "doc.richtext") }
                 .tag(AppTab.manuscript)
+            NavigationStack { ChatView() }
+                .tabItem { Label("Ask", systemImage: "sparkles") }
+                .tag(AppTab.ask)
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)

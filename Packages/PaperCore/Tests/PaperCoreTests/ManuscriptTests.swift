@@ -250,3 +250,36 @@ final class EmbeddedImageTests: XCTestCase {
         XCTAssertEqual(ManuscriptHTML.extractEmbeddedImages("<p>none</p>").images.count, 0)
     }
 }
+
+final class ChatWireTests: XCTestCase {
+    func testClaudeChatBodyCarriesPicturesAndHighEffort() throws {
+        let b = ChatWire.claudeBody(context: "diag", message: "What broke?", images: [Data([1, 2, 3])])
+        XCTAssertEqual(b["model"] as? String, "claude-opus-5-5")
+        XCTAssertEqual((b["output_config"] as? [String: Any])?["effort"] as? String, "high")
+        XCTAssertNil((b["output_config"] as? [String: Any])?["format"], "chat answers are plain text")
+        let content = try XCTUnwrap(((b["messages"] as? [[String: Any]])?.first?["content"]) as? [[String: Any]])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["text", "image", "text"])
+        XCTAssertEqual(((content[1]["source"] as? [String: Any])?["data"]) as? String, Data([1, 2, 3]).base64EncodedString())
+        XCTAssertTrue(JSONSerialization.isValidJSONObject(b))
+    }
+
+    func testOpenAIChatBody() throws {
+        let b = ChatWire.openAIBody(model: "astra", context: "", message: "hi", images: [Data([9])])
+        let content = try XCTUnwrap(((b["input"] as? [[String: Any]])?.first?["content"]) as? [[String: Any]])
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["input_image", "input_text"])
+        XCTAssertNil(b["text"], "no JSON schema for chat")
+        XCTAssertEqual((b["reasoning"] as? [String: Any])?["effort"] as? String, "high")
+    }
+
+    func testTranscriptAndAppRequest() {
+        let turns = [ChatWire.Turn(fromUser: true, text: "Sign-in fails"), ChatWire.Turn(fromUser: false, text: "Safelist the client ID.")]
+        let t = ChatWire.transcript(turns, context: "App 1.3")
+        XCTAssertTrue(t.contains("CONTEXT FROM THE APP:\nApp 1.3"))
+        XCTAssertTrue(t.contains("AVRA: Sign-in fails\nASSISTANT: Safelist the client ID."))
+        let r = ChatWire.appRequest(summary: "Make sign-in work", conversation: turns, diagnostics: "x", pictures: 2,
+                                    date: Date(timeIntervalSince1970: 0))
+        XCTAssertTrue(r.contains("## Request\n\nMake sign-in work"))
+        XCTAssertTrue(r.contains("picture-1.jpg"))
+        XCTAssertTrue(r.contains("1970-01-01T00:00:00Z"))
+    }
+}

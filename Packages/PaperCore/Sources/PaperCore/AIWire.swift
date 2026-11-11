@@ -164,3 +164,86 @@ public enum OpenAIWire {
         return gpt.max { $0.created < $1.created }?.id
     }
 }
+
+/// Free conversation (the Ask tab): plain text answers, pictures allowed.
+public enum ChatWire {
+    public static let system = """
+    You are the assistant inside Paper Quest, Avra's private iPhone app for writing scientific papers. The app has:
+    a Quests tab (each paper as a checklist tree with Claude-style marks, XP, levels, daily goal, streak), a Manuscript tab
+    (the Firebase Manuscript Studio web app inside the app: writer, equations, highlights, comments, history, references,
+    files, PDF ink, templates, tabs; a ✨ button where Claude or ChatGPT propose edits Avra approves), this Ask tab, and
+    Settings (Claude and ChatGPT keys, Manuscript Studio and Google Drive connection, daily goal, problem report).
+    Progress syncs to Google Drive › Paper Quest. Updates arrive through TestFlight; Claude Code changes the app's code
+    when Avra sends it an app request from this tab.
+
+    Help with anything Avra asks: the papers and the science, writing, and the app itself. When something in the app
+    fails, read the diagnostics and any screenshots, explain the cause in plain words, give the workaround, and, when the
+    app's code must change, write a short change request (what is wrong or wanted, where in the app, what should happen,
+    what happens now) and suggest "Send to Claude Code". You cannot change the app or its data from here; say so plainly
+    rather than claiming a change was made. Be brief and precise; use LaTeX for math.
+    """
+
+    public struct Turn: Sendable {
+        public var fromUser: Bool
+        public var text: String
+        public init(fromUser: Bool, text: String) { self.fromUser = fromUser; self.text = text }
+    }
+
+    /// One request carrying the conversation as text, then the new message with its pictures (JPEG).
+    public static func transcript(_ history: [Turn], context: String) -> String {
+        var s = context.isEmpty ? "" : "CONTEXT FROM THE APP:\n\(context)\n\n"
+        if !history.isEmpty {
+            s += "CONVERSATION SO FAR:\n"
+            for t in history { s += "\(t.fromUser ? "AVRA" : "ASSISTANT"): \(t.text)\n" }
+            s += "\n"
+        }
+        return s
+    }
+
+    public static func claudeBody(context: String, message: String, images: [Data], effort: String = "high",
+                                  maxTokens: Int = 16000) -> [String: Any] {
+        var content: [[String: Any]] = []
+        if !context.isEmpty { content.append(["type": "text", "text": context]) }
+        for img in images {
+            content.append(["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": img.base64EncodedString()]])
+        }
+        content.append(["type": "text", "text": "AVRA NOW SAYS:\n" + message])
+        return [
+            "model": ClaudeWire.model,
+            "max_tokens": maxTokens,
+            "stream": true,
+            "system": [["type": "text", "text": system]],
+            "fallbacks": "default",
+            "output_config": ["effort": effort],
+            "messages": [["role": "user", "content": content]],
+        ]
+    }
+
+    public static func openAIBody(model: String, context: String, message: String, images: [Data], effort: String? = "high",
+                                  maxTokens: Int = 16000) -> [String: Any] {
+        var content: [[String: Any]] = []
+        if !context.isEmpty { content.append(["type": "input_text", "text": context]) }
+        for img in images {
+            content.append(["type": "input_image", "image_url": "data:image/jpeg;base64,\(img.base64EncodedString())"])
+        }
+        content.append(["type": "input_text", "text": "AVRA NOW SAYS:\n" + message])
+        var b: [String: Any] = [
+            "model": model, "instructions": system, "input": [["role": "user", "content": content]],
+            "max_output_tokens": maxTokens, "store": false,
+        ]
+        if let effort { b["reasoning"] = ["effort": effort] }
+        return b
+    }
+
+    /// The app request Claude Code reads from Drive › Paper Quest › app-requests.
+    public static func appRequest(summary: String, conversation: [Turn], diagnostics: String, pictures: Int, date: Date = Date()) -> String {
+        var s = "# Paper Quest app request\n\n"
+        s += "Sent \(ISO8601DateFormatter().string(from: date)) from the iPhone app (Ask tab).\n\n"
+        s += "## Request\n\n\(summary)\n\n"
+        if pictures > 0 { s += "Pictures: \(pictures) attached in this folder (picture-1.jpg …).\n\n" }
+        s += "## Conversation\n\n"
+        for t in conversation { s += "**\(t.fromUser ? "Avra" : "Assistant"):** \(t.text)\n\n" }
+        s += "## Diagnostics\n\n```\n\(diagnostics)\n```\n"
+        return s
+    }
+}

@@ -358,6 +358,8 @@ struct DriveClient {
         case "json": return "application/json"
         case "md": return "text/markdown"
         case "txt": return "text/plain"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
         default: return "application/octet-stream"
         }
     }
