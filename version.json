@@ -1,0 +1,10 @@
+{
+  "version": "1.4",
+  "build": 10,
+  "commit": "0c7055d",
+  "date": "2026-11-11T06:54Z",
+  "notes": [
+    "Reader: open any Manuscript Studio paper section by section; only the section you open is loaded, figures download as you scroll to them and stay cached, equations are typeset",
+    "Works for big papers like the geometric algebra review (text is small; its 18 figures load one at a time)"
+  ]
+}
