@@ -1,0 +1,10 @@
+{
+  "version": "3.18",
+  "build": 57,
+  "commit": "4ec0fd3",
+  "date": "2026-11-12T22:22Z",
+  "notes": [
+    "Fixed: a model could be only half the rock when the scan box was smaller than the rock (Desert Peak 4623-3 was cut in half along its axis). The box advice now says to make it a little bigger than the rock all round, the back too; and a model missing a side gets a red warning on its scan page, because its sizes and volume are wrong",
+    "Standing straight: the levelling now works from part of a core too, with a note that it is less sure (it was missing for a half model)"
+  ]
+}
