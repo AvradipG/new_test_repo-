@@ -97,6 +97,24 @@ final class LevelTests: XCTestCase {
         XCTAssertEqual(Rotation.normalized(t.single.angle + 100), 0, accuracy: 3)
     }
 
+    /// 3.17: with the underside scanned, the end it stood on is measured from its own face, so a table that
+    /// isn't level (here 2° off) doesn't come into it.
+    func testUndersideFaceIsIndependentOfTheTable() {
+        let c = core(R: 0.0127, L: 0.05, tiltDeg: 1.2, towardDeg: -40)
+        // The whole scene tipped 2° about x: the table wasn't level.
+        let tip = Pose.rotation(axis: SIMD3(1, 0, 0), degrees: 2)
+        let tipped = c.positions.map { p -> SIMD3<Float> in
+            let q = tip * SIMD3<Double>(p)
+            return SIMD3<Float>(Float(q.x), Float(q.y), Float(q.z))
+        }
+        let byGravity = try! XCTUnwrap(CoreLeveller.plan(positions: tipped, indices: c.indices))
+        XCTAssertGreaterThan(abs(byGravity.asScanned.tiltDeg - 1.2), 0.5, "the gravity reading is thrown off by the table")
+        let byFace = try! XCTUnwrap(CoreLeveller.plan(positions: tipped, indices: c.indices, bottomSeen: true))
+        XCTAssertEqual(byFace.asScanned.method, "end_face")
+        XCTAssertEqual(byFace.asScanned.tiltDeg, 1.2, accuracy: 0.15)
+        XCTAssertEqual(Rotation.normalized(byFace.asScanned.liftAzimuthDeg + 40), 0, accuracy: 4)
+    }
+
     func testAStraightCoreNeedsNothing() {
         let c = core(R: 0.019, L: 0.06, tiltDeg: 0, towardDeg: 0)
         let r = try! XCTUnwrap(CoreLeveller.plan(positions: c.positions, indices: c.indices))

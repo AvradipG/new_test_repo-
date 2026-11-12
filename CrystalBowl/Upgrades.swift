@@ -65,7 +65,9 @@ extension AppModel {
     /// 7 (3.14): a stand under the rock is looked for and cut off; sheets made again without it.
     /// 8 (3.16): stand cuts need an outline change too (3.14 cut straight cores at their end marks); how to stand
     /// a core straight for the micro-CT (paper under the low side).
-    static let extrasVersion = 8
+    /// 9 (3.17): a stand cut also needs a clear colour difference; the bottom face is used for the levelling when
+    /// the underside was scanned.
+    static let extrasVersion = 9
 
     func upgradeScans() async {
         // Piece sets put together before 3.12 are put together again, one at a time: 2 = the 3.10 floor fix (the flat
@@ -119,7 +121,7 @@ extension AppModel {
         // 3.16: cuts made by colour alone in 3.14/3.15 are looked at again with the outline check (four straight
         // cores had their bottoms cut where their black end marks are). A cut that doesn't hold is undone.
         var undoneCut: Double?
-        if (scan.extrasVersion ?? 0) < 8 && (scan.standCheck == "auto" || scan.standCheck == "ai") {
+        if (scan.extrasVersion ?? 0) < 9 && (scan.standCheck == "auto" || scan.standCheck == "ai") {
             undoneCut = scan.standCutY
             scan.standCutY = nil
             scan.standCheck = nil
@@ -230,7 +232,8 @@ extension AppModel {
             let measured = scan
             let level = await Task.detached { () -> LevelReport? in
                 guard let mesh = MeshTools.loadMesh(measured) else { return nil }
-                return CoreLeveller.plan(positions: mesh.positions, indices: mesh.indices, unitToMM: 1000 * measured.scaleFactor)
+                return CoreLeveller.plan(positions: mesh.positions, indices: mesh.indices, unitToMM: 1000 * measured.scaleFactor,
+                                         bottomSeen: measured.underside == true)
             }.value
             scan.level = level
             if let l = level {

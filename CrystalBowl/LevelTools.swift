@@ -6,6 +6,7 @@ import ScanMath
 /// from the reference mark (the red line, 0°) the same way as the scanning mat's ring, so the core can be set on
 /// the mat with its mark at 0° and the paper slid in at the angle read off the ring.
 struct LevelSection: View {
+    @EnvironmentObject var model: AppModel
     let scan: Scan
     @AppStorage("level.paperMM") private var paperMM = 0.10
     @State private var turned = false
@@ -30,9 +31,10 @@ struct LevelSection: View {
             }
             .pickerStyle(.segmented)
         }
-        let p: LevelPlan = (turned ? l.turnedOver : nil) ?? l.asScanned
-        let mark: Double? = (scan.mark?.isTrusted ?? false) ? scan.mark?.angle : nil
-        let s = CoreLeveller.slips(p, radiusMM: l.diameterMM / 2, markAngleDeg: mark, turnedOver: turned, paperMM: paperMM)
+        let c = choice(l)
+        let p: LevelPlan = c.plan
+        let mark: Double? = c.mark
+        let s = CoreLeveller.slips(p, radiusMM: l.diameterMM / 2, markAngleDeg: mark, turnedOver: c.mirrored, paperMM: paperMM)
         let straight = p.tiltDeg < Swift.max(0.1, 1.5 * p.spreadDeg) || s.single.layers == 0
         Text(Self.leanText(p, lengthMM: l.lengthMM)).font(.callout)
         if straight {
@@ -47,7 +49,35 @@ struct LevelSection: View {
         Stepper(value: $paperMM, in: 0.03...0.5, step: 0.01) {
             Text(String(format: "Paper: %.2f mm a layer (printer paper about 0.10)", paperMM)).font(.footnote)
         }
-        Text(Self.basisText(p, mark: mark, turned: turned)).font(.caption).foregroundStyle(.secondary)
+        Text(c.source ?? Self.basisText(p, mark: mark, turned: turned)).font(.caption).foregroundStyle(.secondary)
+    }
+
+    struct Choice {
+        let plan: LevelPlan
+        let mark: Double?
+        /// Angles seen from above run the other way (the plan was measured with the core the other way up).
+        let mirrored: Bool
+        let source: String?
+    }
+
+    /// Which measurement to show (3.17). Standing on the end it stood on in this scan: that end's own face when
+    /// the underside was scanned in this capture, else the face as the linked upside-down scan saw it from above
+    /// (pure geometry, no table), else the lean as it stood. Turned over: this scan's view of its top face.
+    private func choice(_ l: LevelReport) -> Choice {
+        let ownMark: Double? = (scan.mark?.isTrusted ?? false) ? scan.mark?.angle : nil
+        if turned, let t = l.turnedOver { return Choice(plan: t, mark: ownMark, mirrored: true, source: nil) }
+        if l.asScanned.method == "end_face" {
+            return Choice(plan: l.asScanned, mark: ownMark, mirrored: false,
+                          source: "Measured from this end's own face against the core's side (the underside was scanned): no table or level comes into it.")
+        }
+        if let id = scan.pairedScanID, let other = model.scans.first(where: { $0.id == id }), let face = other.level?.turnedOver {
+            let otherMark: Double? = (other.mark?.isTrusted ?? false) ? other.mark?.angle : nil
+            var note: String = "Measured on the linked scan of this rock turned over, which saw this end's face from above: pure geometry, no table or level comes into it."
+            if otherMark == nil { note += " That scan has no reference mark yet, so the angles count from its 0° view: set its mark for angles from the red line." }
+            return Choice(plan: face, mark: otherMark, mirrored: true, source: note)
+        }
+        return Choice(plan: l.asScanned, mark: ownMark, mirrored: false,
+                      source: Self.basisText(l.asScanned, mark: ownMark, turned: false) + " For a measurement that doesn't depend on the table, scan it upside down too (Close-ups and the other side).")
     }
 
     /// Whole degrees, signed like the mat's ring.

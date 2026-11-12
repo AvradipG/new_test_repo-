@@ -1317,7 +1317,7 @@ extension ScanDetailView {
             }
             if model.isCaptureSupported && scan.orientation != "upside_down" && scan.pairedScanID == nil {
                 Button { model.startUpsideDownScan(of: scan) } label: {
-                    Label("Scan it upside down (a linked scan)", systemImage: "arrow.up.and.down.circle")
+                    Label("Turn it over and scan the other side (a linked scan)", systemImage: "arrow.up.and.down.circle")
                 }
             }
             if let other = scan.pairedScanID, let o = model.scans.first(where: { $0.id == other }) {

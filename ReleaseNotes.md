@@ -3,6 +3,10 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.17
+- Standing straight, without trusting the table: after a scan, "Turn it over and scan the other side" (scan page › Close-ups and the other side) makes a linked scan that sees the bottom face from above. The levelling then measures that end from its own face against the core's side, so a table that isn't level no longer matters. A rock flipped during the capture is measured the same way
+- A stand under the rock is cut only when it also differs clearly in brightness from the rock: one more core that lost its bottom in 3.16 is measured in full again
+
 ## 3.16
 - Standing a core straight for the micro-CT: for a cylindrical sample the scan page shows how far it leans standing on its end, and where to slide paper slips under it so it stands straight and turns without wobbling. The angle counts from the red line (0°) like the scanning mat's ring, and the number of paper layers follows the paper thickness you set. One slip, or a steadier pair; also for standing it on the other end
 - Fixed: 3.14 took the black end marks of four straight cores for a stand and cut their bottoms off the measurements. A stand now also has to change the outline where it meets the rock; those cores are measured in full again by themselves

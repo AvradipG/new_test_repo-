@@ -72,8 +72,10 @@ enum StandStrip {
             return StandFinder.outlineStep(positions: mesh.positions, y: y, band: band)
         }.value
         if let st = step {
-            changes = st.areaChange >= 0.12 || st.shift >= 0.08
-            text = String(format: "outline area changes %.0f%%, shifts %.2f of its size", st.areaChange * 100, st.shift)
+            // 3.17: and a clear difference in brightness (a core that lost 21 mm in 3.16 had rock 0.48, "stand" 0.45).
+            let brighter: Bool = abs(f.standLuma - f.rockLuma) >= 0.12
+            changes = (st.areaChange >= 0.12 || st.shift >= 0.08) && brighter
+            text = String(format: "outline area changes %.0f%%, shifts %.2f of its size; brightness %.2f against %.2f", st.areaChange * 100, st.shift, f.rockLuma, f.standLuma)
         }
         save(strip, scan: whole, cutY: changes ? y : nil, how: changes ? "auto" : "not_found")
         return Found(cutY: y, heightMM: (y - strip.bottomY) * 1000 * whole.scaleFactor, result: f, outlineChanges: changes, outlineText: text)

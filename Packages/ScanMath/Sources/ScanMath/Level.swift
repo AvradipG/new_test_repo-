@@ -90,7 +90,9 @@ public enum CoreLeveller {
 
     /// Works out how to stand a core straight. Positions are the model's (metres, +Y up, as it stood in the
     /// scan). Nil when the shape isn't a cylinder.
-    public static func plan(positions: [SIMD3<Float>], indices: [UInt32], unitToMM: Double = 1000) -> LevelReport? {
+    /// - Parameter bottomSeen: the underside was scanned too (the rock was flipped during the capture), so the
+    ///   end it stood on is measured from its own face against the axis: no table or gravity comes into it (3.17).
+    public static func plan(positions: [SIMD3<Float>], indices: [UInt32], unitToMM: Double = 1000, bottomSeen: Bool = false) -> LevelReport? {
         var tris: [SIMD3<Int>] = []
         tris.reserveCapacity(indices.count / 3)
         var k = 0
@@ -129,8 +131,9 @@ public enum CoreLeveller {
         var lean = a - up * simd_dot(a, up)
         let ll = simd_length(lean)
         lean = ll > 1e-12 ? lean / ll : SIMD3(0, 0, 1)
-        let asStood = LevelPlan(tiltDeg: standing * 180 / .pi, liftAzimuthDeg: azimuth(lean), rimGapMM: 2 * R * tan(standing) * unitToMM,
+        var asStood = LevelPlan(tiltDeg: standing * 180 / .pi, liftAzimuthDeg: azimuth(lean), rimGapMM: 2 * R * tan(standing) * unitToMM,
                                 method: "as_stood", spreadDeg: spread)
+        if bottomSeen, let face = facePlan(piece, axis: -a, radius: R, unitToMM: unitToMM, spread: spread) { asStood = face }
         let over = facePlan(piece, axis: a, radius: R, unitToMM: unitToMM, spread: spread)
         return LevelReport(diameterMM: 2 * R * unitToMM, lengthMM: length, standingTiltDeg: standing * 180 / .pi,
                            asScanned: asStood, turnedOver: over, cylinderShare: best.share)
