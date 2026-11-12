@@ -25,6 +25,9 @@ enum StandStrip {
         let cutY: Double
         let heightMM: Double
         let result: StandFinder.Result
+        /// The outline changes where the colour does (3.16): without that, a colour change alone is not cut.
+        var outlineChanges: Bool = true
+        var outlineText: String = ""
     }
 
     static func folder(_ scan: Scan) -> URL { scan.exportsURL.appendingPathComponent("stand", isDirectory: true) }
@@ -54,9 +57,26 @@ enum StandStrip {
         if let f = found, !u.rowColours.isEmpty {
             cutY = strip.y(atShare: Double(f.boundaryRow) / Double(u.rowColours.count))
         }
-        save(strip, scan: whole, cutY: cutY, how: found == nil ? "not_found" : "auto")
-        guard let f = found, let y = cutY else { return nil }
-        return Found(cutY: y, heightMM: (y - strip.bottomY) * 1000 * whole.scaleFactor, result: f)
+        guard let f = found, let y = cutY else {
+            save(strip, scan: whole, cutY: nil, how: "not_found")
+            return nil
+        }
+        // 3.16: the colour alone cut four straight cores (their black end marks read as a stand). A stand is
+        // also a change of outline: the rock's footprint above the line differs from the block's below it.
+        var changes = false
+        var text = "outline not measured"
+        let band: Double = Swift.max(0.002, 0.06 * (strip.topY - strip.bottomY))
+        let checked = whole
+        let step = await Task.detached { () -> (areaChange: Double, shift: Double)? in
+            guard let mesh = MeshTools.loadMesh(checked) else { return nil }
+            return StandFinder.outlineStep(positions: mesh.positions, y: y, band: band)
+        }.value
+        if let st = step {
+            changes = st.areaChange >= 0.12 || st.shift >= 0.08
+            text = String(format: "outline area changes %.0f%%, shifts %.2f of its size", st.areaChange * 100, st.shift)
+        }
+        save(strip, scan: whole, cutY: changes ? y : nil, how: changes ? "auto" : "not_found")
+        return Found(cutY: y, heightMM: (y - strip.bottomY) * 1000 * whole.scaleFactor, result: f, outlineChanges: changes, outlineText: text)
     }
 
     static func save(_ strip: Strip, scan: Scan, cutY: Double?, how: String) {
@@ -166,6 +186,9 @@ struct StandSection: View {
                 Label("No stand found under the rock.", systemImage: "cube").font(.callout)
             default:
                 Label("Not looked at yet (it happens when the sample sheets are made).", systemImage: "clock").font(.callout)
+            }
+            if let note = scan.standNote {
+                Label(note, systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
             }
             if let note = scan.standAI {
                 Label(note, systemImage: "sparkles").font(.footnote).foregroundStyle(.secondary)

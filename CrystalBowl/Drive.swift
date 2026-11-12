@@ -520,6 +520,7 @@ enum ScanPackage {
             "detail_photos": scan.detailCount,
             "detail_note": "detail/: full-resolution close-ups (macro and main lens), taken by the automatic shutter when the phone was still and the picture sharp; detail/detail.json lists lens, zoom, focus, sharpness and direction of each",
             "orientation": scan.orientation ?? NSNull(),
+            "micro_ct_levelling": LevelSection.manifest(scan),
             "stand": scan.standCutY.map { y -> Any in
                 ["cut_y_m": y, "how": scan.standCheck ?? "auto",
                  "note": "a stand under the rock was cut off the model here; sizes, volume, sections and sheets are the rock's alone. model/stand/ holds the unrolled strip, the cut and the rock-only STL/OBJ; the full model is unchanged"]

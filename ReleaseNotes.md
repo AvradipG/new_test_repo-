@@ -3,6 +3,10 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.16
+- Standing a core straight for the micro-CT: for a cylindrical sample the scan page shows how far it leans standing on its end, and where to slide paper slips under it so it stands straight and turns without wobbling. The angle counts from the red line (0°) like the scanning mat's ring, and the number of paper layers follows the paper thickness you set. One slip, or a steadier pair; also for standing it on the other end
+- Fixed: 3.14 took the black end marks of four straight cores for a stand and cut their bottoms off the measurements. A stand now also has to change the outline where it meets the rock; those cores are measured in full again by themselves
+
 ## 3.15
 - AI second opinion (optional, off until you switch it on in Settings): with your own Claude or ChatGPT API key, the app asks the AI where a stand under the rock begins. It confirms or questions the colour check, finds a stand the colour check missed, and on the stand page "Ask the AI" draws its line next to yours. The key stays in the iPhone's Keychain; only renders of the 3D model are sent, never your photos
 

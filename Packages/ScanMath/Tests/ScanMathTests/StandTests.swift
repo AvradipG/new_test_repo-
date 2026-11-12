@@ -5,7 +5,7 @@ import simd
 /// 3.14: a small rock scanned on a wooden block; the block is found on the unrolled side and cut off the model.
 final class StandTests: XCTestCase {
     /// Closed box mesh, outward faces counter-clockwise, split into a fine grid so cuts cross many triangles.
-    func box(_ lo: SIMD3<Float>, _ hi: SIMD3<Float>, n: Int = 6) -> ([SIMD3<Float>], [UInt32]) {
+    static func box(_ lo: SIMD3<Float>, _ hi: SIMD3<Float>, n: Int = 6) -> ([SIMD3<Float>], [UInt32]) {
         var P: [SIMD3<Float>] = [], T: [UInt32] = []
         // Each face as an n×n grid: origin o, edge vectors u and v with u × v pointing out.
         let d = hi - lo
@@ -66,7 +66,7 @@ final class StandTests: XCTestCase {
     }
 
     func testBoxCutIsClosedWithTheRightVolume() {
-        let (P, T) = box(SIMD3(-0.01, 0, -0.005), SIMD3(0.01, 0.03, 0.005))
+        let (P, T) = Self.box(SIMD3(-0.01, 0, -0.005), SIMD3(0.01, 0.03, 0.005))
         XCTAssertEqual(volume(P, T), 0.02 * 0.03 * 0.01, accuracy: 1e-12)
         let cut = MeshCut.above(positions: P, indices: T, y: 0.0123)
         XCTAssertTrue(isClosed(cut.indices))
@@ -83,7 +83,7 @@ final class StandTests: XCTestCase {
 
     func testTiltedRockOnABlockIsCutAtTheJoin() {
         // A tilted box (the rock) on a wider block (the stand), as one mesh; cut where the rock begins.
-        let (rp, rt) = box(SIMD3(-0.005, 0.02, -0.004), SIMD3(0.005, 0.04, 0.004))
+        let (rp, rt) = Self.box(SIMD3(-0.005, 0.02, -0.004), SIMD3(0.005, 0.04, 0.004))
         let R = Pose.rotation(axis: SIMD3(0, 0, 1), degrees: 12)
         let tilted = rp.map { p -> SIMD3<Float> in
             let q = R * SIMD3<Double>(Double(p.x), Double(p.y) - 0.03, Double(p.z))

@@ -70,6 +70,10 @@ struct Scan: Identifiable, Codable, Hashable {
     var standCheck: String?
     /// What the AI second opinion said about the stand, when it was asked (3.15).
     var standAI: String?
+    /// Why a colour change was or wasn't taken for a stand (3.16).
+    var standNote: String?
+    /// How to stand the core straight for the micro-CT: lean, side to lift, paper (3.16).
+    var level: LevelReport?
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {

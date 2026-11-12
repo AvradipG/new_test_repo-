@@ -63,7 +63,9 @@ extension AppModel {
     /// 6 (3.9): side views on graph paper (origin at the rock's corner, height and width read off the axes);
     /// no ruler laid beside the rock and no scale bar in the figures.
     /// 7 (3.14): a stand under the rock is looked for and cut off; sheets made again without it.
-    static let extrasVersion = 7
+    /// 8 (3.16): stand cuts need an outline change too (3.14 cut straight cores at their end marks); how to stand
+    /// a core straight for the micro-CT (paper under the low side).
+    static let extrasVersion = 8
 
     func upgradeScans() async {
         // Piece sets put together before 3.12 are put together again, one at a time: 2 = the 3.10 floor fix (the flat
@@ -114,11 +116,31 @@ extension AppModel {
         var scan = scans.first { $0.id == original.id } ?? original
         // 3.14: a stand under the rock (a block that lifts a small rock for the scan), looked for once on the model
         // as it is; when one is found the model is measured and sliced again without it.
+        // 3.16: cuts made by colour alone in 3.14/3.15 are looked at again with the outline check (four straight
+        // cores had their bottoms cut where their black end marks are). A cut that doesn't hold is undone.
+        var undoneCut: Double?
+        if (scan.extrasVersion ?? 0) < 8 && (scan.standCheck == "auto" || scan.standCheck == "ai") {
+            undoneCut = scan.standCutY
+            scan.standCutY = nil
+            scan.standCheck = nil
+            scan.standAI = nil
+            try? ScanStore.save(scan)
+        }
         if scan.standCheck == nil && !scan.isPieces {
             upgradeNote = "Looking for a stand under the rock: \(scan.name)"
             let found = await StandStrip.examine(scan)
-            var cutY: Double? = found?.cutY
-            var how: String = found == nil ? "not_found" : "auto"
+            var cutY: Double? = (found?.outlineChanges ?? false) ? found?.cutY : nil
+            var how: String = cutY == nil ? "not_found" : "auto"
+            if let f = found {
+                let detail: String = " (" + f.outlineText + ")"
+                if f.outlineChanges {
+                    scan.standNote = "Found by its colour, and the outline changes there" + detail + "."
+                } else {
+                    scan.standNote = "A change of colour near the bottom was not taken for a stand: the outline runs on unchanged" + detail + ". If there is a stand, set the cut here."
+                }
+            } else {
+                scan.standNote = nil
+            }
             // 3.15: the AI second opinion, when switched on.
             if AIAssist.isReady, let strip = StandStrip.load(scan),
                let a = try? await AIAssist.askStand(strip: strip.image, heightMM: strip.heightMM) {
@@ -132,6 +154,12 @@ extension AppModel {
                     } else {
                         scan.standAI = "The AI puts the top of the stand elsewhere" + why + ": check the cut."
                     }
+                } else if let f = found, a.hasStand, a.confidence >= 0.7, abs(strip.share(atY: f.cutY) - a.boundaryFromTop) < 0.06 {
+                    // Colour and the AI agree although the outline runs on: take it, for the user to check.
+                    cutY = f.cutY
+                    how = "auto"
+                    scan.standAI = "The AI sees a stand where the colour changes" + why + ": cut there; check it."
+                    StandStrip.writeInfo(strip, scan: scan, cutY: f.cutY, how: "auto")
                 } else if a.hasStand && a.confidence >= 0.75 && a.boundaryFromTop > 0.2 && a.boundaryFromTop < 0.95 {
                     let y: Double = strip.y(atShare: a.boundaryFromTop)
                     cutY = y
@@ -146,7 +174,7 @@ extension AppModel {
                 scan.standCutY = y
                 scan.standCheck = how
                 let above: String = StandStrip.load(scan).map { String(format: "%.1f mm above the bottom", (y - $0.bottomY) * 1000 * $0.scaleFactor) } ?? "?"
-                let detail: String = found.map { String(format: " (%.0f%% of the height; rock luma %.2f, stand %.2f)", $0.result.standShare * 100, $0.result.rockLuma, $0.result.standLuma) } ?? ""
+                let detail: String = found.map { String(format: " (%.0f%% of the height; rock luma %.2f, stand %.2f; ", $0.result.standShare * 100, $0.result.rockLuma, $0.result.standLuma) + $0.outlineText + ")" } ?? ""
                 AppLog.info("stand", "Stand found under the rock by " + (how == "ai" ? "the AI" : "its colour") + ": cut " + above + detail + "; measured again without it", scan: scan)
                 try? ScanStore.save(scan)
                 reload()
@@ -155,7 +183,17 @@ extension AppModel {
                 scan = scans.first { $0.id == original.id } ?? scan
             } else {
                 scan.standCheck = "not_found"
+                if let f = found {
+                    AppLog.info("stand", String(format: "Colour change at %.0f%% of the height not taken for a stand: ", f.result.standShare * 100) + f.outlineText, scan: scan)
+                }
                 try? ScanStore.save(scan)
+                if let old = undoneCut {
+                    AppLog.info("stand", String(format: "Stand cut of 3.14 undone (it was at model height %.4f m): measured again in full", old), scan: scan)
+                    reload()
+                    await repair(scan)
+                    reload()
+                    scan = scans.first { $0.id == original.id } ?? scan
+                }
             }
         }
         if scan.needsRepair {
@@ -186,6 +224,20 @@ extension AppModel {
             }
         } else {
             AppLog.warn("sheet", "3D model could not be loaded: no sheets made", scan: scan)
+        }
+        // 3.16: how to stand it straight in the micro-CT.
+        if !scan.isPieces {
+            let measured = scan
+            let level = await Task.detached { () -> LevelReport? in
+                guard let mesh = MeshTools.loadMesh(measured) else { return nil }
+                return CoreLeveller.plan(positions: mesh.positions, indices: mesh.indices, unitToMM: 1000 * measured.scaleFactor)
+            }.value
+            scan.level = level
+            if let l = level {
+                AppLog.info("level", String(format: "Core Ø %.1f × %.1f mm leans %.2f° (± %.2f°) as it stood; lift at azimuth %.0f°, rim gap %.2f mm; turned over: %@",
+                                            l.diameterMM, l.lengthMM, l.asScanned.tiltDeg, l.asScanned.spreadDeg, l.asScanned.liftAzimuthDeg, l.asScanned.rimGapMM,
+                                            l.turnedOver.map { String(format: "%.2f°", $0.tiltDeg) } ?? "unknown"), scan: scan)
+            }
         }
         scan.extrasVersion = Self.extrasVersion
         try? ScanStore.save(scan)
