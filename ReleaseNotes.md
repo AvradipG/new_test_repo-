@@ -3,6 +3,10 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.18
+- Fixed: a model could be only half the rock when the scan box was smaller than the rock (Desert Peak 4623-3 was cut in half along its axis). The box advice now says to make it a little bigger than the rock all round, the back too; and a model missing a side gets a red warning on its scan page, because its sizes and volume are wrong
+- Standing straight: the levelling now works from part of a core too, with a note that it is less sure (it was missing for a half model)
+
 ## 3.17
 - Standing straight, without trusting the table: after a scan, "Turn it over and scan the other side" (scan page › Close-ups and the other side) makes a linked scan that sees the bottom face from above. The levelling then measures that end from its own face against the core's side, so a table that isn't level no longer matters. A rock flipped during the capture is measured the same way
 - A stand under the rock is cut only when it also differs clearly in brightness from the rock: one more core that lost its bottom in 3.16 is measured in full again

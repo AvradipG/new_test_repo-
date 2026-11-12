@@ -32,6 +32,9 @@ public struct LevelReport: Codable, Hashable, Sendable {
     public var turnedOver: LevelPlan?
     /// Share of the surface on the cylinder: how much of a cylinder it is.
     public var cylinderShare: Double
+    /// How far round the side the model reaches (degrees); under about 300 the model is partial and the axis less
+    /// sure (3.18). Nil in reports before 3.18.
+    public var arcDegrees: Double?
 }
 
 public enum CoreLeveller {
@@ -114,7 +117,8 @@ public enum CoreLeveller {
         for seed in [3, 17, 29] as [UInt64] {
             if let f = CylinderFinder.fit(piece, radius: nil, attempts: 160, seed: seed) { fits.append(f) }
         }
-        guard let best = fits.max(by: { $0.share < $1.share }), best.share >= 0.3, best.arcDegrees >= 200 else { return nil }
+        // 3.18: half a core (a model the scan box cut) still shows its axis: from 150° round on.
+        guard let best = fits.max(by: { $0.share < $1.share }), best.share >= 0.3, best.arcDegrees >= 150 else { return nil }
         var a = simd_normalize(best.axis)
         if a.y < 0 { a = -a }
         var spread = 0.0
@@ -136,7 +140,7 @@ public enum CoreLeveller {
         if bottomSeen, let face = facePlan(piece, axis: -a, radius: R, unitToMM: unitToMM, spread: spread) { asStood = face }
         let over = facePlan(piece, axis: a, radius: R, unitToMM: unitToMM, spread: spread)
         return LevelReport(diameterMM: 2 * R * unitToMM, lengthMM: length, standingTiltDeg: standing * 180 / .pi,
-                           asScanned: asStood, turnedOver: over, cylinderShare: best.share)
+                           asScanned: asStood, turnedOver: over, cylinderShare: best.share, arcDegrees: best.arcDegrees)
     }
 
     /// Paper slips for a plan: (angle from the reference mark counted like the mat's ring, layers) for one slip
@@ -155,6 +159,38 @@ public enum CoreLeveller {
         let single = (Rotation.normalized(rel), layers(g1), g1)
         let pair = [(Rotation.normalized(rel - 60), layers(g2), g2), (Rotation.normalized(rel + 60), layers(g2), g2)]
         return (single, pair)
+    }
+}
+
+extension ScanMath {
+    /// The widest sweep of directions round the vertical (degrees) in which no part of the side faces: about 0 for a
+    /// whole rock, 180 for a model cut in half by the scan box (3.18). Model frame, +Y up.
+    public static func sideGapDegrees(positions: [SIMD3<Float>], indices: [UInt32]) -> Double {
+        var bins = [Double](repeating: 0, count: 36)
+        var total = 0.0
+        var k = 0
+        while k + 2 < indices.count {
+            let a = SIMD3<Double>(positions[Int(indices[k])]), b = SIMD3<Double>(positions[Int(indices[k + 1])])
+            let c = SIMD3<Double>(positions[Int(indices[k + 2])])
+            k += 3
+            let cr = simd_cross(b - a, c - a)
+            let l = simd_length(cr)
+            guard l > 0 else { continue }
+            let n = cr / l
+            guard abs(n.y) < 0.5 else { continue }
+            let az: Double = atan2(n.x, n.z) * 180 / .pi
+            let i: Int = Swift.min(35, Swift.max(0, Int((az + 180) / 10)))
+            bins[i] += l / 2
+            total += l / 2
+        }
+        guard total > 0 else { return 360 }
+        let empty = bins.map { $0 < 0.002 * total }
+        guard empty.contains(false) else { return 360 }
+        var best = 0, run = 0
+        for i in 0..<72 {
+            if empty[i % 36] { run += 1; best = Swift.max(best, Swift.min(run, 36)) } else { run = 0 }
+        }
+        return Double(best * 10)
     }
 }
 

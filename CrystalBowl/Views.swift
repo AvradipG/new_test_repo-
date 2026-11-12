@@ -672,7 +672,7 @@ struct CaptureView: View {
             VStack(spacing: 10) {
                 Text(model.piecesCapture
                      ? "Drag the box edges so it holds all the pieces (and the smallest grains), but as little else as possible."
-                     : "The table is found and the box sits on it round the rock. Drag the box edges so it just fits the rock, nothing else.")
+                     : "The table is found and the box sits on the table round the rock. Make it a little bigger than the rock on every side, the back too: walk a quarter of the way round to check. Anything outside the box is cut off the model.")
                     .multilineTextAlignment(.center)
                 HStack {
                     Button("Reset box") { model.resetDetection() }.buttonStyle(.bordered)
@@ -896,6 +896,14 @@ struct ScanDetailView: View {
     var body: some View {
         if let scan {
             List {
+                if scan.isPartial {
+                    Section {
+                        Label(String(format: "Only part of the rock is in the model: there is no surface over %.0f° of its side. The scan box was smaller than the rock and cut the rest off, so sizes and volume are wrong. Scan it again, and before Start capture make the box a little bigger than the rock all round, the back too.", scan.sideGapDeg ?? 0),
+                              systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .font(.callout)
+                    }
+                }
                 Section {
                     if scan.hasModel {
                         ModelPreview(url: scan.modelURL)

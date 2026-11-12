@@ -67,7 +67,8 @@ extension AppModel {
     /// a core straight for the micro-CT (paper under the low side).
     /// 9 (3.17): a stand cut also needs a clear colour difference; the bottom face is used for the levelling when
     /// the underside was scanned.
-    static let extrasVersion = 9
+    /// 10 (3.18): a model the scan box cut is flagged; levelling from a partial cylinder.
+    static let extrasVersion = 10
 
     func upgradeScans() async {
         // Piece sets put together before 3.12 are put together again, one at a time: 2 = the 3.10 floor fix (the flat
@@ -236,6 +237,14 @@ extension AppModel {
                                          bottomSeen: measured.underside == true)
             }.value
             scan.level = level
+            let checked = scan
+            scan.sideGapDeg = await Task.detached { () -> Double? in
+                guard let mesh = MeshTools.loadMesh(checked) else { return nil }
+                return ScanMath.sideGapDegrees(positions: mesh.positions, indices: mesh.indices)
+            }.value
+            if scan.isPartial {
+                AppLog.warn("build", String(format: "Only part of the rock is in the model: no surface over %.0f° of its side (the scan box cut it off)", scan.sideGapDeg ?? 0), scan: scan)
+            }
             if let l = level {
                 AppLog.info("level", String(format: "Core Ø %.1f × %.1f mm leans %.2f° (± %.2f°) as it stood; lift at azimuth %.0f°, rim gap %.2f mm; turned over: %@",
                                             l.diameterMM, l.lengthMM, l.asScanned.tiltDeg, l.asScanned.spreadDeg, l.asScanned.liftAzimuthDeg, l.asScanned.rimGapMM,

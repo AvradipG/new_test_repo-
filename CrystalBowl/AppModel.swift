@@ -708,6 +708,15 @@ final class AppModel: ObservableObject {
                 throw NSError(domain: "CrystalBowl", code: 3, userInfo: [NSLocalizedDescriptionKey: "The model file couldn't be read"])
             }
             scan.stats = stats
+            // 3.18: is a whole side missing (the scan box cut the rock)?
+            let checked = scan
+            scan.sideGapDeg = await Task.detached { () -> Double? in
+                guard let mesh = MeshTools.loadMesh(checked) else { return nil }
+                return ScanMath.sideGapDegrees(positions: mesh.positions, indices: mesh.indices)
+            }.value
+            if scan.isPartial {
+                AppLog.warn("build", String(format: "Only part of the rock is in the model: no surface over %.0f° of its side (the scan box cut it off)", scan.sideGapDeg ?? 0), scan: scan)
+            }
             if scan.photoCount == nil { scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL) }
             inheritCaliper(&scan)
             try? ScanStore.save(scan)

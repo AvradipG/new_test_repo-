@@ -115,6 +115,27 @@ final class LevelTests: XCTestCase {
         XCTAssertEqual(Rotation.normalized(byFace.asScanned.liftAzimuthDeg + 40), 0, accuracy: 4)
     }
 
+    /// 3.18, from a real scan (Desert Peak 4623-3): the scan box cut the core in half along its axis. The missing
+    /// side is found, and the levelling still works from the half that is there.
+    func testHalfACoreIsSeenAsPartialAndStillLevelled() {
+        let c = core(R: 0.0127, L: 0.05, tiltDeg: 1.0, towardDeg: 30)
+        XCTAssertLessThan(ScanMath.sideGapDegrees(positions: c.positions, indices: c.indices), 30)
+        // Keep the triangles in front of the plane through the axis (z > 0).
+        var T: [UInt32] = []
+        var k = 0
+        while k + 2 < c.indices.count {
+            let t = [c.indices[k], c.indices[k + 1], c.indices[k + 2]]
+            let mid = t.map { c.positions[Int($0)].z }.reduce(0, +) / 3
+            if mid > 0 { T += t }
+            k += 3
+        }
+        XCTAssertGreaterThanOrEqual(ScanMath.sideGapDegrees(positions: c.positions, indices: T), 150)
+        let r = try! XCTUnwrap(CoreLeveller.plan(positions: c.positions, indices: T))
+        XCTAssertLessThan(r.arcDegrees ?? 360, 220)
+        XCTAssertEqual(r.diameterMM, 25.4, accuracy: 0.5)
+        XCTAssertEqual(r.asScanned.tiltDeg, 1.0, accuracy: 0.3)
+    }
+
     func testAStraightCoreNeedsNothing() {
         let c = core(R: 0.019, L: 0.06, tiltDeg: 0, towardDeg: 0)
         let r = try! XCTUnwrap(CoreLeveller.plan(positions: c.positions, indices: c.indices))

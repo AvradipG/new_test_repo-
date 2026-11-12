@@ -74,6 +74,12 @@ struct Scan: Identifiable, Codable, Hashable {
     var standNote: String?
     /// How to stand the core straight for the micro-CT: lean, side to lift, paper (3.16).
     var level: LevelReport?
+    /// The widest sweep round the rock (degrees) with no surface in the model: large when the scan box cut part of
+    /// the rock off (3.18). Nil when not checked.
+    var sideGapDeg: Double?
+
+    /// The model lacks a whole side (the scan box was too small).
+    var isPartial: Bool { (sideGapDeg ?? 0) >= 90 }
 
     /// Correction factor from a caliper check (1 when there is none).
     var scaleFactor: Double {

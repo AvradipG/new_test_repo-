@@ -37,6 +37,11 @@ struct LevelSection: View {
         let s = CoreLeveller.slips(p, radiusMM: l.diameterMM / 2, markAngleDeg: mark, turnedOver: c.mirrored, paperMM: paperMM)
         let straight = p.tiltDeg < Swift.max(0.1, 1.5 * p.spreadDeg) || s.single.layers == 0
         Text(Self.leanText(p, lengthMM: l.lengthMM)).font(.callout)
+        if let arc = l.arcDegrees, arc < 300 {
+            Label(String(format: "Only %.0f° of the side is in the model, so the axis comes from part of the core and is less sure: scan it again with a bigger box before relying on the paper.", arc),
+                  systemImage: "exclamationmark.triangle")
+                .font(.footnote).foregroundStyle(.orange)
+        }
         if straight {
             Label("It stands straight within what the scan can tell: no paper needed.", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
