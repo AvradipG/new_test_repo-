@@ -10,6 +10,8 @@ final class AppRouter: ObservableObject {
     @Published var tab = 0
     @Published var openRoomID: UUID?
     @Published var focusRoomID: UUID?
+    /// A share file someone sent, waiting to be added.
+    @Published var incomingShare: IncomingShare?
     /// The room on screen right now ("call this room Studio").
     var currentRoomID: UUID?
 

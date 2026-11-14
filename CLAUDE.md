@@ -52,6 +52,12 @@ plain-language requests, each ending with a push that reaches the phone through 
   every AI call, `reviewHome`, voice `assistant` with TidyCore `Assistant` schema, `importBridge` of Drive
   `bridge/from-ai.md` parsed by TidyCore `BridgeInbox`), `VoiceAssistant.swift` (`AppRouter`, SFSpeechRecognizer
   push-to-talk, spoken replies), `SuggestionsView.swift` (AI status chip, suggestions card, `MemoryView`).
+- Sharing (1.7): `Sharing.swift` (`ShareExport.make` → one `.tidyatlas` file = TidyCore `ShareArchive` with a JSON
+  `SharePackage` of the place/room and its files; `ShareImport.open/add` keep the sender's UUIDs so a re-share replaces
+  the same rooms; `ShareSheetView`, `ImportShareView`, `ReceiveShareSection`). The file type
+  `com.avradip.tidyatlas.share` is declared in `project.yml`; `RootView.onOpenURL` receives it. When adding a stored
+  property to a model, add it to the matching `S…` struct in `Sharing.swift` too (as an optional, so older share
+  files still open).
 - Drive: `Drive.swift`, `DriveBackground.swift` (from Crystal Bowl), `DriveSync.swift` (`TidyPackage` export written
   to Documents/DriveMirror only when content changes; upload state in drive-state.json / drive-folder-state.json),
   `DriveViews.swift`. `FloorPlan.swift` draws the plan PNG.

@@ -28,6 +28,7 @@ struct TidyAtlasApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var router: AppRouter
+    @State private var openError: String?
 
     var body: some View {
         TabView(selection: $router.tab) {
@@ -47,5 +48,18 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(4)
         }
+        .onOpenURL { url in
+            // A .tidyatlas file someone shared (AirDrop, Messages, Mail, Files, Drive).
+            guard url.isFileURL else { return }
+            do {
+                router.incomingShare = try ShareImport.open(url)
+            } catch {
+                openError = error.localizedDescription
+            }
+        }
+        .sheet(item: $router.incomingShare) { ImportShareView(share: $0) }
+        .alert("Couldn't open the file", isPresented: Binding(get: { openError != nil }, set: { if !$0 { openError = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(openError ?? "") }
     }
 }

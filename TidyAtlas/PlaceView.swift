@@ -118,6 +118,7 @@ struct PlaceView: View {
     @State private var look = 1
     @State private var photos: PhotoSet?
     @State private var exporting = false
+    @State private var sharing = false
 
     var body: some View {
         ScrollView {
@@ -179,6 +180,11 @@ struct PlaceView: View {
         .fullScreenCover(item: $rescanRoom) { HouseScanSheet(place: place, rescan: $0) }
         .sheet(item: $naming) { RoomNameSheet(room: $0) }
         .fullScreenCover(item: $photos) { PhotoViewer(set: $0) }
+        .sheet(isPresented: $sharing) { ShareSheetView(place: place) }
+        .toolbar {
+            Button { sharing = true } label: { Image(systemName: "square.and.arrow.up") }
+                .accessibilityLabel("Share this place")
+        }
         .alert("Scans", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(message ?? "") }

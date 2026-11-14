@@ -15,6 +15,7 @@ struct RoomView: View {
     enum Filter: String, CaseIterable { case toSort = "To sort", outOfPlace = "Out of place", sorted = "Put away", all = "All" }
 
     @State private var tab = Tab.map
+    @State private var showShare = false
     @State private var filter = Filter.toSort
     @State private var selected: UUID?
     @State private var editingItem: Item?
@@ -67,6 +68,9 @@ struct RoomView: View {
                 Button("Design studio", systemImage: "sofa.fill") { showStudio = true }
                 Button("Room details", systemImage: "slider.horizontal.3") { editingRoom = true }
                 Button("Name & tags", systemImage: "tag") { showNaming = true }
+                if room.place != nil {
+                    Button("Share this room", systemImage: "square.and.arrow.up") { showShare = true }
+                }
                 Button("Kitchen planner", systemImage: "fork.knife") { showKitchen = true }
                 if room.usdzFile != nil {
                     Button("View LiDAR scan in AR", systemImage: "arkit") { quickLook = room.usdzFile.map(Storage.roomScanURL) }
@@ -90,6 +94,9 @@ struct RoomView: View {
         .navigationDestination(isPresented: $showStudio) { DesignStudioView(room: room) }
         .navigationDestination(isPresented: $showKitchen) { KitchenView(room: room) }
         .sheet(isPresented: $showNaming) { RoomNameSheet(room: room) }
+        .sheet(isPresented: $showShare) {
+            if let place = room.place { ShareSheetView(place: place, room: room) }
+        }
         .sheet(item: $insideZone) { z in
             CameraPicker { media in run([media], inside: z) }.ignoresSafeArea()
         }

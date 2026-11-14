@@ -3,6 +3,13 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.7
+- Share a place or a room with someone who has Tidy Atlas: tap the share button on a place (or "Share this room" in a room's menu) and send it by AirDrop, Messages, Mail, WhatsApp or Google Drive
+- Everything goes along: the map and room boundaries, storage spots, things and where they go, plans, designs, LiDAR scans and scan history, map versions, change history, shopping ideas and photos. Choose whether to include photos, location and history
+- On their iPhone, tapping the file opens it in Tidy Atlas and adds it; sending it again later updates their copy instead of doubling it
+- "Share just the 3D model" sends a file anyone can open in AR, even without the app
+- Settings › Sharing › "Open a share file" for files saved in Files or Google Drive
+
 ## 1.6
 - New Map tab: edit the map of every place right away. Drag rooms, turn them, drag a room's sides to set its boundaries, or draw a new room with your finger
 - Name rooms right on the map (unnamed rooms are orange with name ideas); undo any edit; save map versions and go back to one any time

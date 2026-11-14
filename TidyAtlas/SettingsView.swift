@@ -47,6 +47,8 @@ struct SettingsView: View {
 
             DriveSettingsSection()
 
+            ReceiveShareSection()
+
             Section {
                 if location.isAllowed {
                     Label("On: photos are geotagged and the app knows which place you're at", systemImage: "location.fill")

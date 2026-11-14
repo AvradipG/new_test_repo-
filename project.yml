@@ -29,6 +29,18 @@ targets:
         NSMicrophoneUsageDescription: Tidy Atlas listens when you tap the mic to talk to it ("take me to the kitchen"). In walkthrough videos it only uses still frames and ignores the sound.
         NSSpeechRecognitionUsageDescription: When you tap the mic, Tidy Atlas turns what you say into text (on the iPhone where possible) so it can open rooms, find things and remember what you tell it.
         UILaunchScreen: {}
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Tidy Atlas share
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [com.avradip.tidyatlas.share]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.avradip.tidyatlas.share
+            UTTypeDescription: Tidy Atlas share
+            UTTypeConformsTo: [public.data, public.content]
+            UTTypeTagSpecification:
+              public.filename-extension: [tidyatlas]
+              public.mime-type: [application/x-tidyatlas]
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
@@ -39,7 +51,7 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "1.6"
+        MARKETING_VERSION: "1.7"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TA_GIT_COMMIT: dev
