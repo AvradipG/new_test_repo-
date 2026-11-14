@@ -236,6 +236,16 @@ struct DriveClient {
         return id
     }
 
+    /// The content of a file this app uploaded (also after someone else edited it on Drive).
+    func download(_ id: String) async throws -> Data {
+        let (data, _) = try await send { t in
+            var r = URLRequest(url: URL(string: "https://www.googleapis.com/drive/v3/files/\(id)?alt=media")!)
+            r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
+            return r
+        }
+        return data
+    }
+
     /// Uploads a file with a resumable session. Replaces the content of `existingID` when given.
     func upload(_ file: URL, name: String, parent: String, existingID: String?) async throws -> String {
         let sessionURL = try await startUpload(file, name: name, parent: parent, existingID: existingID)

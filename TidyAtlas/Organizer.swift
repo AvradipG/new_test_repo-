@@ -247,10 +247,13 @@ final class Organizer: ObservableObject {
             }
         }
 
+        var found: [String] = [], moved: [String] = []
         for op in plan.ops {
             switch op {
             case let .update(id, m):
                 guard let item = room.items.first(where: { $0.uid == id }), !item.isSorted else { continue }
+                let was = item.zoneID, now = resolve(m.currentZone)
+                if let was, let now, was != now { moved.append("\(item.name) (now in \(room.zonePath(now) ?? "another spot"))") }
                 item.category = m.category
                 item.tags = m.tags
                 if !m.description.isEmpty { item.notes = m.description }
@@ -287,7 +290,14 @@ final class Organizer: ObservableObject {
                 item.room = room
                 context.insert(item)
                 placed.append((item, m.bbox, m))
+                found.append(m.name)
             }
+        }
+        if !found.isEmpty || !moved.isEmpty {
+            var text = "New photo"
+            if !found.isEmpty { text += ": found " + found.prefix(8).joined(separator: ", ") + (found.count > 8 ? " and \(found.count - 8) more" : "") }
+            if !moved.isEmpty { text += (found.isEmpty ? ": " : "; ") + "moved " + moved.prefix(6).joined(separator: ", ") }
+            ActivityLog.add(moved.isEmpty ? .found : .moved, text, room: room, source: AIService.lastProvider?.label ?? "app", in: context)
         }
         return placed
     }
@@ -297,6 +307,7 @@ final class Organizer: ObservableObject {
     func applyHouseScan(_ scanned: [ScannedRoom], geotag: ScanGeotag?, modelFile: String?, worldMapFile: String? = nil,
                         joinedMap: Bool = true, kind: String = "Whole place", rescan: Room? = nil,
                         to place: Place, context: ModelContext) {
+        ActivityLog.add(.scan, "\(kind) scan of \(place.name): " + scanned.map(\.name).joined(separator: ", "), source: "app", in: context)
         if let g = geotag {
             place.latitude = g.location.coordinate.latitude
             place.longitude = g.location.coordinate.longitude
@@ -396,6 +407,7 @@ final class Organizer: ObservableObject {
             room.usdzFile = name
         }
         if quiet { return }
+        ActivityLog.add(.scan, "Scanned \(room.name) with LiDAR", room: room, source: "app", in: context)
         try? context.save()
         Haptics.success()
         scheduleDriveSync()
@@ -454,6 +466,7 @@ final class Organizer: ObservableObject {
         }
         var ctx: [String: Any] = [
             "room": room.name, "energy": energy.rawValue, "minutes_available": minutes,
+            "memory_and_recent_changes": memoryNotes(context: context),
             "zones": room.zones.map { ["name": room.zonePath($0.uid) ?? $0.name, "kind": $0.kindRaw, "needs_setting_up": $0.isIdea] },
             "items": items,
         ]
@@ -491,6 +504,8 @@ final class Organizer: ObservableObject {
             context.insert(step)
         }
         room.activePlanID = record.uid
+        ActivityLog.add(.plan, "\(record.provider) made a \(result.steps.count)-step tidy plan" + (old == nil ? "" : " (version \(record.version))"),
+                        room: room, source: record.provider, in: context)
         try? context.save()
         scheduleDriveSync()
         return result.pepTalk
@@ -499,6 +514,7 @@ final class Organizer: ObservableObject {
     func complete(_ step: TidyStep, in room: Room, context: ModelContext) {
         step.status = .done
         step.completedAt = Date()
+        ActivityLog.add(.step, "Done: \(step.title)", room: room, in: context)
         if let id = step.itemID, let item = room.items.first(where: { $0.uid == id }) { item.putAway() }
         try? context.save()
         Haptics.success()
@@ -555,7 +571,7 @@ final class Organizer: ObservableObject {
         }
         let r = try await AIService.call(
             AskResult.self, system: Prompts.askSystem,
-            content: [.text("Inventory:\n\(InventoryText.render(lines))\n\nQuestion: \(question)")],
+            content: [.text("Inventory:\n\(InventoryText.render(lines))\n\n\(memoryNotes(context: container.mainContext))\n\nQuestion: \(question)")],
             schema: Prompts.askSchema, effort: .low, maxTokens: 4000
         )
         return (r.answer, r.itemRefs.compactMap { byRef[$0] })

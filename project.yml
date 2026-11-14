@@ -26,7 +26,8 @@ targets:
         UIBackgroundModes: [processing]
         NSCameraUsageDescription: Tidy Atlas uses the camera and LiDAR to photograph rooms and things so Claude can tag them, to measure their size, to map the room and to show labels in AR.
         NSLocationWhenInUseUsageDescription: Tidy Atlas geotags your whole-place scans and photos with GPS so it knows which place and which room is where, and shows the place you're at first. Location is used only while the app is open.
-        NSMicrophoneUsageDescription: The microphone is only used because iPhone videos include sound. Tidy Atlas uses still frames from walkthrough videos and ignores the sound.
+        NSMicrophoneUsageDescription: Tidy Atlas listens when you tap the mic to talk to it ("take me to the kitchen"). In walkthrough videos it only uses still frames and ignores the sound.
+        NSSpeechRecognitionUsageDescription: When you tap the mic, Tidy Atlas turns what you say into text (on the iPhone where possible) so it can open rooms, find things and remember what you tell it.
         UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
@@ -38,7 +39,7 @@ targets:
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
-        MARKETING_VERSION: "1.5"
+        MARKETING_VERSION: "1.6"
         CURRENT_PROJECT_VERSION: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TA_GIT_COMMIT: dev

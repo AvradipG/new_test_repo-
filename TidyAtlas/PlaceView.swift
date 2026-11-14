@@ -115,6 +115,9 @@ struct PlaceView: View {
     @State private var rescanRoom: Room?
     @State private var naming: Room?
     @State private var message: String?
+    @State private var look = 1
+    @State private var photos: PhotoSet?
+    @State private var exporting = false
 
     var body: some View {
         ScrollView {
@@ -122,28 +125,29 @@ struct PlaceView: View {
                 header
                 Picker("View", selection: $view) {
                     Text("Map").tag(0)
+                    Text("Photos").tag(4)
                     Text("3D").tag(1)
                     Text("Plan").tag(2)
-                    Text("Edit map").tag(3)
+                    Text("Edit").tag(3)
                 }
                 .pickerStyle(.segmented)
+                if view == 1 { threeDControls }
                 Group {
                     switch view {
                     case 0: mapView
-                    case 1:
-                        if let snap = RoomSnapshot.place(place, selected: nil) {
-                            Room3DView(snapshot: snap) { _ in }
-                        } else { emptyHint }
+                    case 1: threeD
                     case 3:
                         PlaceMapEditor(place: place)
+                    case 4:
+                        PlacePhotos(place: place) { photos = $0 }
                     default:
                         if let plan {
                             ScrollView([.horizontal, .vertical]) { Image(uiImage: plan).resizable().scaledToFit().frame(width: 800) }
                         } else { emptyHint }
                     }
                 }
-                .frame(minHeight: view == 3 ? 520 : 440, maxHeight: view == 3 ? .infinity : 440)
-                .background(view == 3 ? Color.clear : Palette.card, in: RoundedRectangle(cornerRadius: 18))
+                .frame(height: contentHeight)
+                .background(view == 3 || view == 4 ? Color.clear : Palette.card, in: RoundedRectangle(cornerRadius: 18))
                 .clipShape(RoundedRectangle(cornerRadius: 18))
 
                 scanButtons
@@ -174,6 +178,7 @@ struct PlaceView: View {
         .fullScreenCover(isPresented: $addRooms) { HouseScanSheet(place: place, addToMap: true) }
         .fullScreenCover(item: $rescanRoom) { HouseScanSheet(place: place, rescan: $0) }
         .sheet(item: $naming) { RoomNameSheet(room: $0) }
+        .fullScreenCover(item: $photos) { PhotoViewer(set: $0) }
         .alert("Scans", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(message ?? "") }
@@ -207,11 +212,89 @@ struct PlaceView: View {
                             .padding(5).background(.white, in: Circle()).foregroundStyle(Palette.teal)
                     }
                 }
+                ForEach(photoPins) { pin in
+                    Annotation("", coordinate: pin.coordinate) {
+                        Button { photos = PhotoSet(files: photoPins.map(\.file), start: pin.index) } label: {
+                            Image(systemName: "camera.fill").font(.caption2)
+                                .padding(4).background(.white, in: Circle()).foregroundStyle(.orange)
+                        }
+                    }
+                }
             }
             .mapStyle(.hybrid)
         } else {
             emptyHint
         }
+    }
+
+    struct PhotoPin: Identifiable {
+        let id: UUID
+        let file: String
+        let index: Int
+        let coordinate: CLLocationCoordinate2D
+    }
+
+    /// Photos taken with the phone's location on, where they were taken.
+    private var photoPins: [PhotoPin] {
+        let caps = place.rooms.flatMap(\.captures).filter { $0.latitude != nil && $0.longitude != nil }
+            .sorted { $0.createdAt < $1.createdAt }
+        return caps.enumerated().map { n, c in
+            PhotoPin(id: c.uid, file: c.file, index: n,
+                     coordinate: CLLocationCoordinate2D(latitude: c.latitude ?? 0, longitude: c.longitude ?? 0))
+        }
+    }
+
+    private var contentHeight: CGFloat? {
+        switch view {
+        case 3: return 700
+        case 4: return nil
+        default: return 440
+        }
+    }
+
+    /// Empty or furnished, and the same in AR.
+    private var threeDControls: some View {
+        HStack {
+            Picker("Show", selection: $look) {
+                Text("Empty").tag(0)
+                Text("Furnished").tag(1)
+                Text("Things").tag(2)
+            }
+            .pickerStyle(.segmented)
+            if look < 2 {
+                Button {
+                    exporting = true
+                    quickLook = Place3D.exportUSDZ(place, furnished: look == 1)
+                    exporting = false
+                    if quickLook == nil { message = "Couldn't make the AR model." }
+                } label: { Label("AR", systemImage: "arkit") }
+                .buttonStyle(.bordered)
+                .disabled(place.mappedRooms.isEmpty || exporting)
+            }
+        }
+    }
+
+    @ViewBuilder private var threeD: some View {
+        if place.mappedRooms.isEmpty {
+            emptyHint
+        } else if look == 2 {
+            if let snap = RoomSnapshot.place(place, selected: nil) {
+                Room3DView(snapshot: snap) { _ in }
+            } else { emptyHint }
+        } else {
+            Place3DView(place: place, furnished: look == 1, version: sceneVersion)
+        }
+    }
+
+    /// Changes whenever rooms move or designs change, so the 3D view is rebuilt.
+    private var sceneVersion: String {
+        var parts: [String] = []
+        for (r, p) in place.mappedRooms {
+            let current = r.designs.first { $0.isCurrent }
+            let pieces = current?.piecesData?.count ?? 0
+            parts.append("\(r.uid)|\(p.x)|\(p.z)|\(p.rotationDeg)|\(r.widthM)|\(r.depthM)|\(r.zones.count)|\(pieces)|\(r.name)")
+        }
+        return parts.joined(separator: ";")
     }
 
     struct RoomPin: Identifiable {
@@ -314,5 +397,39 @@ struct PlaceView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Real photos of the place, room by room.
+struct PlacePhotos: View {
+    let place: Place
+    var onOpen: (PhotoSet) -> Void
+
+    var body: some View {
+        let rooms = place.sortedRooms.filter { !$0.captures.isEmpty }
+        VStack(alignment: .leading, spacing: 16) {
+            if rooms.isEmpty {
+                Text("No photos yet. Open a room and add photos or a walkthrough video; they show up here, room by room.")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            }
+            ForEach(rooms) { room in
+                let caps = room.captures.sorted { $0.createdAt > $1.createdAt }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text(room.displayName).font(.display(.headline))
+                        Spacer()
+                        Text("\(caps.count) photo\(caps.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                    }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 8)], spacing: 8) {
+                        ForEach(Array(caps.enumerated()), id: \.offset) { n, c in
+                            CaptureThumb(file: c.file, size: 92)
+                                .onTapGesture { onOpen(PhotoSet(files: caps.map(\.file), start: n)) }
+                        }
+                    }
+                }
+                .card()
+            }
+        }
     }
 }

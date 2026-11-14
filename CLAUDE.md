@@ -44,6 +44,14 @@ plain-language requests, each ending with a push that reaches the phone through 
 - Nested storage: `Zone.parentID` (TidyCore `StorageTree` for paths, children, loop-safe moves), `StorageTreeView.swift`,
   "Photo inside this spot" = `Organizer.scan(inside:)`. Kitchen: `KitchenView.swift`, `Zone.kitchenZone`,
   `Item.expiresAt`, TidyCore `Kitchen`. Shopping: `ShoppingItem`, `ShoppingView` (tab).
+- Map editing, memory, voice (1.6): `PlaceMapEditor.swift` (Map tab via `MapTab` in `SuggestionsView.swift`, also "Edit" on
+  the place page: move/turn, edge handles for hand-drawn rooms = TidyCore `MapEdit.resize`, draw rooms, inline naming,
+  undo, `MapVersion` snapshots = TidyCore `MapSnapshot`), `MapTools.swift` (map versions; `splitBySections` splits a
+  scan by `CapturedRoom.sections` via TidyCore `SectionSplit`), `Place3D.swift` (whole place empty/furnished, USDZ),
+  `AIBridge.swift` (`ActivityEvent` change log via `ActivityLog.add`, `AIMemory`, `AISuggestion`, `memoryNotes` added to
+  every AI call, `reviewHome`, voice `assistant` with TidyCore `Assistant` schema, `importBridge` of Drive
+  `bridge/from-ai.md` parsed by TidyCore `BridgeInbox`), `VoiceAssistant.swift` (`AppRouter`, SFSpeechRecognizer
+  push-to-talk, spoken replies), `SuggestionsView.swift` (AI status chip, suggestions card, `MemoryView`).
 - Drive: `Drive.swift`, `DriveBackground.swift` (from Crystal Bowl), `DriveSync.swift` (`TidyPackage` export written
   to Documents/DriveMirror only when content changes; upload state in drive-state.json / drive-folder-state.json),
   `DriveViews.swift`. `FloorPlan.swift` draws the plan PNG.

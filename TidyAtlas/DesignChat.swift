@@ -47,6 +47,8 @@ extension Organizer {
             content.append(.jpeg(photo))
         }
         content.append(.text(json))
+        let memory = memoryNotes(context: context)
+        if !memory.isEmpty { content.append(.text(memory)) }
 
         let answer = try await AIService.call(DesignAI.Answer.self, system: DesignAI.system, content: content,
                                               schema: DesignAI.schema, effort: .medium, only: provider)
@@ -76,6 +78,7 @@ extension Organizer {
             d.room = room
             context.insert(d)
             message.designID = d.uid
+            ActivityLog.add(.design, "\(d.provider ?? "AI") designed \"\(d.name)\"", room: room, source: d.provider ?? "AI", in: context)
         }
         if let buys = answer.shopping, !buys.isEmpty {
             saveShopping(buys, room: room, context: context)

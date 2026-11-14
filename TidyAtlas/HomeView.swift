@@ -5,6 +5,7 @@ import TidyCore
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @EnvironmentObject private var organizer: Organizer
+    @EnvironmentObject private var router: AppRouter
     @Query(sort: \Place.createdAt) private var places: [Place]
     @Query private var steps: [TidyStep]
     @State private var placeDraft: PlaceDraft?
@@ -66,7 +67,7 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                if places.isEmpty { onboarding }
+                if places.isEmpty { onboarding } else { SuggestionsCard() }
                 ForEach(orderedPlaces) { place in placeSection(place) }
                 if !places.isEmpty {
                     Button { placeDraft = PlaceDraft(kind: .other) } label: {
@@ -79,6 +80,18 @@ struct HomeView: View {
         }
         .background(Palette.paper)
         .navigationTitle("Spaces")
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { AssistantButton() } }
+        .onChange(of: router.openRoomID) { _, id in
+            guard let id else { return }
+            router.openRoomID = nil
+            if let r = places.flatMap(\.rooms).first(where: { $0.uid == id }) { openRoom = r }
+        }
+        .onChange(of: router.focusRoomID) { _, id in
+            guard let id else { return }
+            router.focusRoomID = nil
+            if let r = places.flatMap(\.rooms).first(where: { $0.uid == id }) { focusRoom = r }
+        }
+        .task { await organizer.autoReviewIfDue(context: context) }
         .navigationDestination(for: Room.self) { RoomView(room: $0) }
         .navigationDestination(item: $openRoom) { RoomView(room: $0) }
         .navigationDestination(for: Place.self) { PlaceView(place: $0) }
@@ -108,6 +121,7 @@ struct HomeView: View {
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.secondary)
             HStack {
+                AIStatusChip()
                 DriveChip()
                 if let here = places.first(where: { $0.uid == herePlaceID }) {
                     Label("You're at \(here.name)", systemImage: "location.fill")

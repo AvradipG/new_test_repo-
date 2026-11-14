@@ -27,6 +27,8 @@ final class Place {
     /// ARKit world map of the place (Documents/WorldMaps), so later scans join the same map.
     var worldMapFile: String?
     @Relationship(deleteRule: .cascade, inverse: \ScanRecord.place) var scans: [ScanRecord] = []
+    /// Saved versions of the hand-corrected map (newest restores first).
+    @Relationship(deleteRule: .cascade, inverse: \MapVersion.place) var mapVersions: [MapVersion] = []
 
     init(name: String, kind: PlaceKind) {
         self.name = name
@@ -116,6 +118,11 @@ final class Room {
         if placement != nil, let b = place?.northBearing { return GeoMath.normalize(b + mapRotationDeg) }
         return nil
     }
+
+    /// The size on the map was set by hand (drawn or dragged), not by a scan.
+    var boundaryEdited: Bool = false
+    /// This scan was already split into one room per RoomPlan section.
+    var sectionsSplit: Bool = false
 
     /// Where the room is on its place's map: a hand correction, or its position in the whole-place scan.
     var placement: RoomPlacement? {
@@ -338,12 +345,17 @@ final class Item {
 
     var box: PhotoBox? { hasBox ? PhotoBox(x: boxX, y: boxY, w: boxW, h: boxH) : nil }
 
-    /// "I put it away": moves it to its suggested spot and marks it done.
+    /// "I put it away": moves it to its suggested spot and marks it done (and notes it in the change log).
     func putAway() {
         if let s = suggestedZoneID { zoneID = s }
+        let already = isSorted
         isSorted = true
         outOfPlace = false
         updatedAt = Date()
+        if !already {
+            ActivityLog.add(.putAway, "Put away \(name)" + (room?.zonePath(zoneID).map { " → \($0)" } ?? ""),
+                            room: room, item: self, in: modelContext)
+        }
     }
 }
 
@@ -523,5 +535,125 @@ final class Capture {
     var status: CaptureStatus {
         get { CaptureStatus(rawValue: statusRaw) ?? .waiting }
         set { statusRaw = newValue.rawValue }
+    }
+}
+
+extension Room {
+    /// Name ideas: RoomPlan's guess first, then common rooms.
+    var nameIdeas: [String] {
+        var out: [String] = []
+        if let s = sectionLabel, let n = Room.sectionNames[s] { out.append(n) }
+        return out + ["Bedroom", "Living room", "Kitchen", "Office", "Bathroom", "Hallway", "Dining room", "Kids' room",
+                      "Laundry", "Garage", "Guest room", "Closet"].filter { !out.contains($0) }
+    }
+
+    static let sectionNames = ["bedroom": "Bedroom", "bathroom": "Bathroom", "kitchen": "Kitchen", "livingRoom": "Living room",
+                               "diningRoom": "Dining room"]
+
+    /// Nothing in it yet (a room drawn on the map), so it can be deleted without losing anything.
+    var isEmptyShell: Bool {
+        items.isEmpty && zones.isEmpty && captures.isEmpty && layoutData == nil && designs.isEmpty && plans.isEmpty
+    }
+
+    /// Has walls from a LiDAR scan (its boundary comes from the scan, not from hand edits).
+    var hasScanWalls: Bool { !(layout?.walls.isEmpty ?? true) }
+}
+
+extension Place {
+    /// The whole map as it is now, for undo and saved versions.
+    func mapSnapshot() -> MapSnapshot { MapSnapshot(rooms: sortedRooms.map(\.mapState)) }
+}
+
+extension Room {
+    var mapState: MapRoomState {
+        MapRoomState(id: uid, name: name, needsName: needsName, tags: tags, mapX: mapX, mapZ: mapZ, rotationDeg: mapRotationDeg,
+                     width: widthM, depth: depthM, height: heightM, layout: layoutData, boundaryEdited: boundaryEdited)
+    }
+
+    func apply(_ s: MapRoomState) {
+        name = s.name
+        needsName = s.needsName
+        tags = s.tags
+        mapX = s.mapX
+        mapZ = s.mapZ
+        mapRotationDeg = s.rotationDeg
+        widthM = s.width
+        depthM = s.depth
+        heightM = s.height
+        layoutData = s.layout
+        boundaryEdited = s.boundaryEdited
+    }
+}
+
+/// A saved version of a place's map (rooms, names, positions, boundaries), kept until deleted by hand.
+@Model
+final class MapVersion {
+    var uid: UUID = UUID()
+    var name: String = ""
+    var date: Date = Date()
+    /// JSON of `MapSnapshot`.
+    var snapshotData: Data?
+    var place: Place?
+
+    init(name: String) {
+        self.name = name
+    }
+
+    var snapshot: MapSnapshot? { MapSnapshot.decode(snapshotData) }
+}
+
+/// One change in the home (put away, moved, found, scanned, planned, designed, map edited…): the memory of what
+/// happened, shown per thing and read by Claude and ChatGPT. Plain names are kept so it reads well after deletes.
+@Model
+final class ActivityEvent {
+    var uid: UUID = UUID()
+    var date: Date = Date()
+    var kind: String = ""
+    var text: String = ""
+    var placeName: String = ""
+    var roomName: String = ""
+    var roomID: UUID?
+    var itemID: UUID?
+    /// "you", "voice", "Claude", "ChatGPT", "Drive" or "app".
+    var source: String = "you"
+
+    init(kind: String, text: String) {
+        self.kind = kind
+        self.text = text
+    }
+}
+
+/// A fact both AIs keep in mind ("keys go on the hook by the door"), from the owner, the voice assistant, an AI
+/// review or the Drive bridge.
+@Model
+final class AIMemory {
+    var uid: UUID = UUID()
+    var date: Date = Date()
+    var text: String = ""
+    var source: String = "you"
+    var active: Bool = true
+
+    init(text: String, source: String) {
+        self.text = text
+        self.source = source
+    }
+}
+
+/// A suggestion from Claude, ChatGPT or the Drive bridge (shown on the home screen).
+@Model
+final class AISuggestion {
+    var uid: UUID = UUID()
+    var date: Date = Date()
+    var title: String = ""
+    var detail: String = ""
+    var roomName: String = ""
+    var source: String = ""
+    /// "new", "done" or "dismissed".
+    var status: String = "new"
+    /// Stable key so the same suggestion isn't added twice.
+    var key: String = ""
+
+    init(title: String) {
+        self.title = title
     }
 }

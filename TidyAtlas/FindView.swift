@@ -63,6 +63,7 @@ struct FindView: View {
         .searchable(text: $query, prompt: "Search by name, tag, room…")
         .navigationTitle("Find")
         .navigationDestination(for: Room.self) { RoomView(room: $0) }
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { AssistantButton() } }
     }
 
     private func catChip(_ value: String?, _ label: String) -> some View {

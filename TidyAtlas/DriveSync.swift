@@ -241,9 +241,63 @@ enum TidyPackage {
             }
             out.append(("shopping-list.json", write(json(["schema": "tidy-atlas.shopping/1", "items": list]), "shopping-list.json")))
         }
+        out.append(contentsOf: bridgeFiles(context: context))
         var seen = Set<String>()
         return out.filter { seen.insert($0.0).inserted }
     }
+
+    // MARK: AI bridge
+
+    /// Written once by the app, then edited on Drive by Claude, ChatGPT or the owner; never overwritten.
+    static let bridgeInbox = "bridge/from-ai.md"
+
+    /// The change log, shared memory and suggestions, plus a guide for an AI reading this folder.
+    static func bridgeFiles(context: ModelContext) -> [(String, URL)] {
+        var out: [(String, URL)] = []
+        out.append(("AI-BRIDGE.md", write(Data(bridgeGuide.utf8), "AI-BRIDGE.md")))
+        let events = (try? context.fetch(FetchDescriptor<ActivityEvent>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+        let log: [[String: Any]] = events.prefix(5000).map { e in
+            ["date_utc": f8601(e.date), "kind": e.kind, "text": e.text, "place": e.placeName, "room": e.roomName,
+             "room_id": jsonValue(e.roomID?.uuidString), "thing_id": jsonValue(e.itemID?.uuidString), "by": e.source] as [String: Any]
+        }
+        out.append(("activity-log.json", write(json(["schema": "tidy-atlas.activity/1", "events": log] as [String: Any]), "activity-log.json")))
+        let memories = ((try? context.fetch(FetchDescriptor<AIMemory>(sortBy: [SortDescriptor(\.date)]))) ?? []).filter(\.active)
+        let mem: [[String: Any]] = memories.map { ["date_utc": f8601($0.date), "text": $0.text, "from": $0.source] as [String: Any] }
+        out.append(("memory.json", write(json(["schema": "tidy-atlas.memory/1", "remember": mem] as [String: Any]), "memory.json")))
+        let suggestions = (try? context.fetch(FetchDescriptor<AISuggestion>(sortBy: [SortDescriptor(\.date)]))) ?? []
+        let sug: [[String: Any]] = suggestions.map {
+            ["date_utc": f8601($0.date), "title": $0.title, "detail": $0.detail, "room": $0.roomName, "from": $0.source,
+             "status": $0.status] as [String: Any]
+        }
+        out.append(("suggestions.json", write(json(["schema": "tidy-atlas.suggestions/1", "suggestions": sug] as [String: Any]), "suggestions.json")))
+        let inbox = mirror.appendingPathComponent(bridgeInbox)
+        if !FileManager.default.fileExists(atPath: inbox.path) { write(Data((BridgeInbox.template + "\n").utf8), bridgeInbox) }
+        out.append((bridgeInbox, inbox))
+        return out
+    }
+
+    static let bridgeGuide = """
+    # Tidy Atlas: notes for an AI assistant (Claude, ChatGPT)
+
+    This Google Drive folder is written by the owner's Tidy Atlas iPhone app, a private home organiser for someone with
+    ADHD. Read it to know what they own, where everything is, what changed lately and what to keep in mind. Be kind,
+    concrete and brief; suggest small steps.
+
+    Read:
+    - inventory.json      places > rooms > storage spots (nested: desk > drawer > tray) and every thing: where it is now,
+                          where it should live, size, put away or not, tidy steps
+    - activity-log.json   what happened, newest first: things put away or moved, photos, scans, plans, designs, map edits,
+                          what the owner said to the voice assistant
+    - memory.json         facts to keep in mind (from the owner, Claude, ChatGPT)
+    - suggestions.json    suggestions so far and whether the owner did them
+    - shopping-list.json, rooms/, places/ (plans, 3D scans, photos)
+
+    Write (the app reads it at its next sync and adds it to its suggestions and memory):
+    - bridge/from-ai.md   add lines below the --- line, one per note:
+                          SUGGEST: [Room name] Short title — what to do and why
+                          REMEMBER: a fact worth keeping
+                          Don't delete the file; the app never overwrites it and skips lines it has read before.
+    """
 
     static let readme = """
     Tidy Atlas
@@ -259,6 +313,9 @@ enum TidyPackage {
         place.geojson    GPS point of the place and rough points for every room and thing (Google Earth, maps, GIS)
         place-plan.png   every room of the whole-place LiDAR scan in its real position, with a north arrow
         place-scan.usdz  the whole place in 3D (open on a Mac or iPhone; AR on iPhone)
+    activity-log.json   every change (put away, moved, found, scans, plans, designs, map edits), newest first
+    memory.json         what Claude and ChatGPT keep in mind; suggestions.json: their suggestions
+    AI-BRIDGE.md        how an AI with access to this folder reads it and writes back (bridge/from-ai.md)
     rooms/<place> - <room> (<id>)/
         room.json        that room only
         floor-plan.png   top-down map: storage spots, numbered things, dashed arrows to where they go
@@ -386,6 +443,11 @@ extension Organizer {
             DriveStateStore.save(state, DriveStateStore.api)
             pendingUploads = todo.count + running.count
             await finishDriveUpload()
+            // Read back what an AI (or the owner) wrote into the bridge file on Drive.
+            if let id = state.files[TidyPackage.bridgeInbox]?.id, let data = try? await client.download(id),
+               let text = String(data: data, encoding: .utf8) {
+                importBridge(text, context: container.mainContext)
+            }
         } catch {
             driveStatus = "Upload paused: \(error.localizedDescription). It carries on by itself when the phone is online."
             AppDelegate.scheduleUploadTask()
@@ -487,6 +549,7 @@ extension Organizer {
         let photos = uploadPhotos ? await NetworkState.isUnmetered() : false
         let files = TidyPackage.files(context: container.mainContext, includePhotos: photos)
         let todo = files.filter { rel, url in state.files[rel].map { Self.changed(url, $0) } ?? true }
+        if let text = Self.readBridgeFromFolder() { importBridge(text, context: container.mainContext) }
         guard !todo.isEmpty else {
             driveStatus = nil
             return
@@ -497,7 +560,13 @@ extension Organizer {
                 var done: [String: DriveFileRecord] = [:]
                 try FolderCopy.withAccess(root) {
                     for (rel, url) in todo {
-                        try FolderCopy.copy(url, to: root.appendingPathComponent(rel))
+                        let dst = root.appendingPathComponent(rel)
+                        // Never overwrite what an AI or the owner wrote into the bridge file.
+                        if rel == TidyPackage.bridgeInbox && FileManager.default.fileExists(atPath: dst.path) {
+                            done[rel] = FolderCopy.record(url)
+                            continue
+                        }
+                        try FolderCopy.copy(url, to: dst)
                         done[rel] = FolderCopy.record(url)
                     }
                 }

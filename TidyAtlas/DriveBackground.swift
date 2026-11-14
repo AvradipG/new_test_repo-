@@ -95,7 +95,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     let container: ModelContainer = {
         do {
             return try ModelContainer(for: Place.self, Room.self, Zone.self, Item.self, TidyStep.self, Capture.self, DesignVariant.self, TidyPlan.self,
-                                      ScanRecord.self, ShoppingItem.self)
+                                      ScanRecord.self, ShoppingItem.self, MapVersion.self, ActivityEvent.self, AIMemory.self, AISuggestion.self)
         } catch {
             fatalError("Couldn't open the database: \(error)")
         }

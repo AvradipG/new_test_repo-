@@ -9,6 +9,7 @@ struct RoomView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var organizer: Organizer
+    @EnvironmentObject private var router: AppRouter
 
     enum Tab: String, CaseIterable { case map = "Map", things = "Things", plan = "Plan", photos = "Photos" }
     enum Filter: String, CaseIterable { case toSort = "To sort", outOfPlace = "Out of place", sorted = "Put away", all = "All" }
@@ -58,7 +59,10 @@ struct RoomView: View {
         .background(Palette.paper)
         .navigationTitle(room.name)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { router.currentRoomID = room.uid }
+        .onDisappear { if router.currentRoomID == room.uid { router.currentRoomID = nil } }
         .toolbar {
+            AssistantButton()
             Menu {
                 Button("Design studio", systemImage: "sofa.fill") { showStudio = true }
                 Button("Room details", systemImage: "slider.horizontal.3") { editingRoom = true }
@@ -547,6 +551,9 @@ struct ItemEditor: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var tagsText = ""
+    @State private var startZone: UUID?
+    @State private var startSorted = false
+    @State private var history: [ActivityEvent] = []
 
     var body: some View {
         NavigationStack {
@@ -586,6 +593,10 @@ struct ItemEditor: View {
                     Toggle("Put away (done)", isOn: $item.isSorted)
                 }
                 if !item.reason.isEmpty { Section("Claude's note") { Text(item.reason) } }
+                Section("History") {
+                    if history.isEmpty { Text("No changes logged yet.").foregroundStyle(.secondary) }
+                    ForEach(history) { ActivityRow(event: $0) }
+                }
                 Section {
                     Button("Remove this thing", role: .destructive) {
                         Storage.remove(thumb: item.thumbFile)
@@ -602,12 +613,26 @@ struct ItemEditor: View {
                     Button("Done") {
                         item.tags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty }
                         item.updatedAt = Date()
+                        if item.zoneID != startZone {
+                            ActivityLog.add(.moved, "Moved \(item.name): \(room.zonePath(startZone) ?? "loose") → \(room.zonePath(item.zoneID) ?? "loose")",
+                                            room: room, item: item, in: context)
+                        }
+                        if item.isSorted && !startSorted && item.zoneID == startZone {
+                            ActivityLog.add(.putAway, "Put away \(item.name)", room: room, item: item, in: context)
+                        }
                         try? context.save()
                         dismiss()
                     }
                 }
             }
-            .onAppear { tagsText = item.tags.joined(separator: ", ") }
+            .onAppear {
+                tagsText = item.tags.joined(separator: ", ")
+                startZone = item.zoneID
+                startSorted = item.isSorted
+                let id = item.uid
+                history = ((try? context.fetch(FetchDescriptor<ActivityEvent>(sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? [])
+                    .filter { $0.itemID == id }
+            }
         }
     }
 }

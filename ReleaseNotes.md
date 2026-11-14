@@ -3,6 +3,18 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.6
+- New Map tab: edit the map of every place right away. Drag rooms, turn them, drag a room's sides to set its boundaries, or draw a new room with your finger
+- Name rooms right on the map (unnamed rooms are orange with name ideas); undo any edit; save map versions and go back to one any time
+- Scans that covered several rooms or passages are found automatically: split them into separate rooms with one tap and name each one
+- See the real photos of your home: a Photos view on each place, the photos of a room in the map editor, and photo pins on the map
+- The whole place in 3D and AR, empty or furnished
+- See at a glance whether Claude and ChatGPT are set up (top of the Spaces screen)
+- Talk to the app: tap the mic and say "take me to the kitchen", "where's my passport?", "I put the charger away", "call this room Studio" or "remember the keys go on the hook"; it answers out loud
+- The app keeps a log of what changed (put away, moved, found, scans, plans, designs, map edits) with a history for every thing, and a memory Claude and ChatGPT share and read every time
+- Suggestions: "Review my home" (and once a week by itself) gives small next steps based on what changed
+- AI bridge on Google Drive: the change log, memory and suggestions are uploaded with a guide for Claude or ChatGPT; what they write into bridge/from-ai.md comes back into the app
+
 ## 1.5
 - Fix the map any time: drag and turn rooms, rename them, and put rooms on the map that were scanned on their own or only photographed
 - Add rooms you missed, or rescan a room that didn't come out well: the app finds your earlier scan so the new one joins the same map

@@ -30,7 +30,8 @@ extension Organizer {
     /// understand). Map corrections, things, storage spots and designs stay. Returns how many rooms were updated.
     func refreshScans(of place: Place, context: ModelContext) -> Int {
         var n = 0
-        for room in place.rooms {
+        // Rooms split into sections keep their split walls (their scan covers several rooms).
+        for room in place.rooms where !room.sectionsSplit {
             guard let captured = Self.loadCaptured(room.capturedRoomFile) else { continue }
             let file = room.capturedRoomFile
             let manual = room.mapX != nil ? room.placement : nil
