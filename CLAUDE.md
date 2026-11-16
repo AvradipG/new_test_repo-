@@ -1,9 +1,11 @@
 # Paper Quest: notes for Claude
 
-Private iPhone/iPad app (SwiftUI, iOS 17+) to track and gamify writing scientific papers on the go. Each paper is a
-tree (sections → subsections → components such as equations, figures, tables, review flags, text checks) with
-Claude-style marks: dashed circle = to do, spinning arc = in progress, green tick = done ("done" means the owner is
-satisfied, so never tick things for them unless they ask). XP, levels, daily goal, streak, confetti.
+Private iPhone/iPad app (SwiftUI, iOS 17+) for **writing, editing and reading scientific papers on the go and passing
+edits to Claude and ChatGPT** (the owner's words, 2026-11-16: "it's not a tracking system, it's a whole app to write,
+edit, view and pass and request edits to LLMs on the go"). Tabs: Papers (home: every Manuscript Studio paper with Write /
+Read / Ask AI, new paper, add from file), Write (the Manuscript Studio editor), Ask (chat with pictures, app requests),
+Progress (optional per-paper checklist trees with Claude-style marks, XP, streaks; "done" means the owner is satisfied,
+so never tick things for them unless they ask), Settings.
 Same owner and delivery loop as the Crystal Bowl Scanner (`crystal-bowl-ios`) and Tidy Atlas (`tidy-atlas-ios`):
 plain-language requests, each ending with a push that reaches the phone through TestFlight.
 

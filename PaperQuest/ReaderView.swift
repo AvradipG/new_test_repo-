@@ -155,12 +155,15 @@ struct ReaderView: View {
 
     private func load() async {
         defer { loading = false }
+        var m: StudioManuscript?
         do {
-            let m = try await StudioStore().manuscript(paperID)
-            if m.format == "html" { sections = ReaderPaper.sections(m.text) } else { source = m.text }
+            m = try await StudioStore().manuscript(paperID)
         } catch {
-            self.error = error.localizedDescription
+            m = StudioStore.cachedManuscript(paperID)
+            if m == nil { self.error = error.localizedDescription }
         }
+        guard let m else { return }
+        if m.format == "html" { sections = ReaderPaper.sections(m.text) } else { source = m.text }
     }
 }
 

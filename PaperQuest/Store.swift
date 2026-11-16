@@ -3,7 +3,7 @@ import PaperCore
 import SwiftUI
 import UIKit
 
-enum AppTab: Hashable { case quests, manuscript, ask, settings }
+enum AppTab: Hashable { case papers, manuscript, ask, quests, settings }
 
 /// What the screen shows after a tick: a small "+10 XP" toast, or confetti for a cleared subsection, section or paper.
 struct CelebrationEvent: Identifiable, Equatable {
@@ -32,7 +32,7 @@ final class Store: ObservableObject {
     @Published var folderName: String?
     @Published var inboxReport: String?
     @Published var latestRemote: RemoteVersion?
-    @Published var tab: AppTab = .quests
+    @Published var tab: AppTab = .papers
     /// A paper to show in the Manuscript tab (set from a tracker; the tab opens it and clears this).
     @Published var manuscriptRequest: String?
 

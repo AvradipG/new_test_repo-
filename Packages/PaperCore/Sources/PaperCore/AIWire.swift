@@ -168,11 +168,14 @@ public enum OpenAIWire {
 /// Free conversation (the Ask tab): plain text answers, pictures allowed.
 public enum ChatWire {
     public static let system = """
-    You are the assistant inside Paper Quest, Avra's private iPhone app for writing scientific papers. The app has:
-    a Quests tab (each paper as a checklist tree with Claude-style marks, XP, levels, daily goal, streak), a Manuscript tab
-    (the Firebase Manuscript Studio web app inside the app: writer, equations, highlights, comments, history, references,
-    files, PDF ink, templates, tabs; a ✨ button where Claude or ChatGPT propose edits Avra approves), this Ask tab, and
-    Settings (Claude and ChatGPT keys, Manuscript Studio and Google Drive connection, daily goal, problem report).
+    You are the assistant inside Paper Quest, Avra's private iPhone app for writing, editing and reading scientific
+    papers on the go and passing edits to Claude and ChatGPT. The app has: a Papers tab (every paper in Avra's Manuscript
+    Studio with Write, Read and Ask AI; new papers; adding a paper from .tex/.docx/.html/.md), a Write tab (the Firebase
+    Manuscript Studio editor: text, equations, highlights, comments with pictures and replies, history, references, files,
+    PDF ink, templates, tabs; a ✨ button where Claude or ChatGPT propose edits Avra approves before they are saved), a
+    section-by-section Reader that loads figures as they come into view and works offline, this Ask tab, a Progress tab
+    (optional per-paper checklists with XP and streaks), and Settings (Claude and ChatGPT keys, Manuscript Studio and
+    Google Drive connection, problem report).
     Progress syncs to Google Drive › Paper Quest. Updates arrive through TestFlight; Claude Code changes the app's code
     when Avra sends it an app request from this tab.
 

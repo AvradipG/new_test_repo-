@@ -3,6 +3,11 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 1.5
+- The app opens on your papers: Write, Read or Ask AI on each one, start a new paper, or add one from a file
+- Tabs are now Papers, Write, Ask, Progress and Settings; checklists live under Progress
+- Papers you've opened can be read without a connection (text kept on the phone; figures as you viewed them)
+
 ## 1.4
 - Reader: open any Manuscript Studio paper section by section; only the section you open is loaded, figures download as you scroll to them and stay cached, equations are typeset
 - Works for big papers like the geometric algebra review (text is small; its 18 figures load one at a time)

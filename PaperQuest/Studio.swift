@@ -254,7 +254,7 @@ struct StudioStore {
             "where": ["fieldFilter": ["field": ["fieldPath": "memberUids"], "op": "ARRAY_CONTAINS", "value": ["stringValue": uid]]],
         ]]
         let rows = try await call(URL(string: url + ":runQuery")!, method: "POST", body: query) as? [[String: Any]] ?? []
-        return rows.compactMap { row in
+        let list: [StudioPaper] = rows.compactMap { row in
             guard let doc = row["document"] as? [String: Any], let name = doc["name"] as? String else { return nil }
             let f = FirestoreValue.object(doc["fields"] as? [String: Any] ?? [:])
             let editors = f["editorUids"] as? [Any] ?? []
@@ -262,9 +262,42 @@ struct StudioStore {
             return StudioPaper(id: String(name.split(separator: "/").last ?? ""), name: f["name"] as? String ?? "Untitled paper",
                                description: f["description"] as? String ?? "", canEdit: canEdit)
         }.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        UserDefaults.standard.set(list.map { ["id": $0.id, "name": $0.name, "description": $0.description] }, forKey: "studio.papers")
+        return list
+    }
+
+    nonisolated static let textCache: URL = {
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PaperText", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }()
+
+    /// The last text read from Manuscript Studio, kept on the phone so papers open without a connection.
+    nonisolated static func cachedManuscript(_ pid: String) -> StudioManuscript? {
+        guard let data = try? Data(contentsOf: textCache.appendingPathComponent("\(pid).json")),
+              let d = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let text = d["text"] as? String else { return nil }
+        return StudioManuscript(title: d["title"] as? String ?? "", text: text, format: d["format"] as? String ?? "html",
+                                revision: d["revision"] as? Int ?? 0, updateTime: nil)
+    }
+
+    nonisolated static func cachedPapers() -> [StudioPaper] {
+        (UserDefaults.standard.array(forKey: "studio.papers") as? [[String: String]] ?? []).map {
+            StudioPaper(id: $0["id"] ?? "", name: $0["name"] ?? "", description: $0["description"] ?? "", canEdit: true)
+        }.filter { !$0.id.isEmpty }
     }
 
     func manuscript(_ pid: String) async throws -> StudioManuscript {
+        let m = try await fetchManuscript(pid)
+        let d: [String: Any] = ["title": m.title, "text": m.text, "format": m.format, "revision": m.revision]
+        if let data = try? JSONSerialization.data(withJSONObject: d) {
+            try? data.write(to: Self.textCache.appendingPathComponent("\(pid).json"), options: .atomic)
+        }
+        return m
+    }
+
+    private func fetchManuscript(_ pid: String) async throws -> StudioManuscript {
         let (url, _) = try await base()
         let doc = try await call(URL(string: "\(url)/manuscriptProjects/\(pid)/manuscripts/main")!) as? [String: Any] ?? [:]
         let f = FirestoreValue.object(doc["fields"] as? [String: Any] ?? [:])

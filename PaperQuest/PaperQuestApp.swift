@@ -27,15 +27,18 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $store.tab) {
-            NavigationStack { HomeView() }
-                .tabItem { Label("Quests", systemImage: "checklist") }
-                .tag(AppTab.quests)
+            NavigationStack { PapersView() }
+                .tabItem { Label("Papers", systemImage: "books.vertical") }
+                .tag(AppTab.papers)
             NavigationStack { ManuscriptView() }
-                .tabItem { Label("Manuscript", systemImage: "doc.richtext") }
+                .tabItem { Label("Write", systemImage: "pencil.and.outline") }
                 .tag(AppTab.manuscript)
             NavigationStack { ChatView() }
                 .tabItem { Label("Ask", systemImage: "sparkles") }
                 .tag(AppTab.ask)
+            NavigationStack { HomeView() }
+                .tabItem { Label("Progress", systemImage: "checklist") }
+                .tag(AppTab.quests)
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppTab.settings)

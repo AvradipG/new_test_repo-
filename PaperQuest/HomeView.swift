@@ -32,7 +32,7 @@ struct HomeView: View {
             .padding(16)
         }
         .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle("Paper Quest")
+        .navigationTitle("Progress")
         .navigationDestination(for: String.self) { id in PaperView(paperID: id) }
         .toolbar { ToolbarItem(placement: .topBarTrailing) { DriveChip() } }
         .refreshable { await store.syncDrive() }
