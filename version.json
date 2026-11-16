@@ -1,0 +1,11 @@
+{
+  "version": "1.5",
+  "build": 11,
+  "commit": "b6c823c",
+  "date": "2026-11-16T22:02Z",
+  "notes": [
+    "The app opens on your papers: Write, Read or Ask AI on each one, start a new paper, or add one from a file",
+    "Tabs are now Papers, Write, Ask, Progress and Settings; checklists live under Progress",
+    "Papers you've opened can be read without a connection (text kept on the phone; figures as you viewed them)"
+  ]
+}
