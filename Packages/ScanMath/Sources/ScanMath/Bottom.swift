@@ -5,7 +5,7 @@ import simd
 /// the model there with a guess: often a shallow dish set a few millimetres up inside the core, which makes the
 /// model look like a cup and takes volume off (Adnoc Sample 5: 2.3–3.5 mm up, about 5 % of the volume).
 /// A core standing on its end has that face on the table, so the fill is flat, in the table's plane.
-public struct BottomFillPlan: Codable, Equatable, Sendable {
+public struct BottomFillPlan: Codable, Hashable, Sendable {
     /// The table: the lowest point of the model (model units, metres).
     public var floorY: Double
     /// The model is cut here and the outline at this height carried straight down to the table.
