@@ -1,0 +1,12 @@
+{
+  "version": "3.20",
+  "build": 60,
+  "commit": "76caad9",
+  "date": "2026-11-20T06:29Z",
+  "notes": [
+    "The bottom of a core no longer looks like a cup. The end it stands on faces the table, so no photo ever sees it, and the 3D model had closed it with a guess a few millimetres up inside the core (Adnoc Sample 5: 1.8 mm, and 4 % of the volume missing). It is now filled flat at the table, so height, volume, slices and levelling are the core's. Older scans are checked by themselves; the scan page says what was done, with a switch to turn it off",
+    "To scan that end for real: Dimensions only now offers \"Flip it and scan the bottom too\" after the first ring, as Dimensions + detail already did",
+    "Nothing you start is lost: a scan stopped or interrupted before its first photo is kept as a draft too, with its Sample ID and settings",
+    "A Sample ID is remembered as soon as it is typed, not only when the scan starts"
+  ]
+}
