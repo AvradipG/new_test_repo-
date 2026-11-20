@@ -569,6 +569,7 @@ struct PiecesHome: View {
     @EnvironmentObject var model: AppModel
     @AppStorage(UnitPref.key) private var unitRaw = "mm"
     @AppStorage("pieces.typedName") private var name = ""
+    @FocusState private var nameFocused: Bool
     @State private var kind: TargetShape.Kind = .auto
     @State private var a = ""
     @State private var b = ""
@@ -591,6 +592,8 @@ struct PiecesHome: View {
                     TextField("Sample ID, e.g. Plug 7 broken", text: $name)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .focused($nameFocused)
+                        .onChange(of: nameFocused) { _, focused in if !focused { model.rememberName(name) } }
                     RecentNamesRow(current: name) { name = $0 }
                     TargetEditor(kind: $kind, a: $a, b: $b, c: $c)
                     Button {

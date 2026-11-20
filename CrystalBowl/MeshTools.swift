@@ -19,10 +19,16 @@ enum MeshTools {
     /// The scan's model, without the stand when one was found or set (3.14): cut exactly at the stand's top and
     /// closed there, so volume and sections are the rock's.
     static func loadMesh(_ scan: Scan) -> (positions: [SIMD3<Float>], indices: [UInt32])? {
-        guard let mesh = loadMesh(scan.modelURL) else { return nil }
-        guard let y = scan.standCutY else { return mesh }
-        let cut = MeshCut.above(positions: mesh.positions, indices: mesh.indices, y: Float(y))
-        return cut.indices.count >= 12 ? (cut.positions, cut.indices) : mesh
+        guard var mesh = loadMesh(scan.modelURL) else { return nil }
+        if let y = scan.standCutY {
+            let cut = MeshCut.above(positions: mesh.positions, indices: mesh.indices, y: Float(y))
+            if cut.indices.count >= 12 { mesh = (cut.positions, cut.indices) }
+        }
+        // 3.20: the end it stood on, filled flat at the table instead of photogrammetry's hollow guess.
+        if scan.bottomFillOff != true, let plan = scan.bottomFill {
+            mesh = BottomFill.apply(positions: mesh.positions, indices: mesh.indices, plan: plan)
+        }
+        return mesh
     }
 
     /// All triangles of the model in world coordinates (metres).
@@ -78,6 +84,7 @@ enum MeshTools {
         }
         if let report = writeReport(scan) { urls.append(report) }
         urls += StandStrip.exportRockOnly(scan) // 3.14: the rock without its stand
+        urls += BottomTools.exportFilled(scan) // 3.20: with its unseen bottom filled flat
         let dims = dimensionsURL(scan)
         if (try? dimensionsData(scan).write(to: dims, options: .atomic)) != nil { urls.append(dims) }
         return urls

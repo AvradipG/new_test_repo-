@@ -525,6 +525,7 @@ enum ScanPackage {
                 ["cut_y_m": y, "how": scan.standCheck ?? "auto",
                  "note": "a stand under the rock was cut off the model here; sizes, volume, sections and sheets are the rock's alone. model/stand/ holds the unrolled strip, the cut and the rock-only STL/OBJ; the full model is unchanged"]
             } ?? NSNull(),
+            "bottom_fill": BottomTools.manifest(scan),
             "paired_scan": scan.pairedScanID ?? NSNull(),
             "blurry_photos_set_aside": scan.blurrySetAside ?? 0,
             "quick_scan": scan.quick ?? false,

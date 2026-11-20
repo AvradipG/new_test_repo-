@@ -21,11 +21,15 @@ public enum Drafts {
     /// - Parameters:
     ///   - captureOpen: the scan was marked "being captured" (set when a capture starts, cleared when it ends).
     ///   - capturingNow: this run of the app is capturing it right now.
-    public static func state(hasModel: Bool, photoCount: Int, buildRequested: Bool, captureOpen: Bool, capturingNow: Bool) -> State {
+    ///   - keptAsDraft: the scan was kept on purpose (3.20: a scan opened and stopped before any photo is kept
+    ///     too, with its Sample ID and settings).
+    public static func state(hasModel: Bool, photoCount: Int, buildRequested: Bool, captureOpen: Bool, capturingNow: Bool,
+                             keptAsDraft: Bool = false) -> State {
         if capturingNow { return .capturing }
         if hasModel || buildRequested { return .done }
-        if photoCount == 0 { return .empty }
-        return captureOpen ? .interrupted : .draft
+        if captureOpen { return .interrupted }
+        if photoCount == 0 && !keptAsDraft { return .empty }
+        return .draft
     }
 
     /// The list of recent Sample IDs with `name` put first: blanks ignored, the same name (any case or spacing)

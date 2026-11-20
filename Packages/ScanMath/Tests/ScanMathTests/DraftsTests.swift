@@ -12,8 +12,11 @@ final class DraftsTests: XCTestCase {
         XCTAssertEqual(Drafts.state(hasModel: false, photoCount: 40, buildRequested: false, captureOpen: true, capturingNow: true), .capturing)
         XCTAssertEqual(Drafts.state(hasModel: false, photoCount: 40, buildRequested: true, captureOpen: false, capturingNow: false), .done)
         XCTAssertEqual(Drafts.state(hasModel: true, photoCount: 0, buildRequested: false, captureOpen: false, capturingNow: false), .done)
-        // Nothing taken: nothing to keep.
-        XCTAssertEqual(Drafts.state(hasModel: false, photoCount: 0, buildRequested: false, captureOpen: true, capturingNow: false), .empty)
+        // 3.20: a scan opened and closed before any photo is still kept: interrupted, or stopped and kept.
+        XCTAssertEqual(Drafts.state(hasModel: false, photoCount: 0, buildRequested: false, captureOpen: true, capturingNow: false), .interrupted)
+        XCTAssertEqual(Drafts.state(hasModel: false, photoCount: 0, buildRequested: false, captureOpen: false, capturingNow: false, keptAsDraft: true), .draft)
+        // Nothing taken and not kept (discarded): nothing to show.
+        XCTAssertEqual(Drafts.state(hasModel: false, photoCount: 0, buildRequested: false, captureOpen: false, capturingNow: false), .empty)
     }
 
     func testRecentSampleNames() {

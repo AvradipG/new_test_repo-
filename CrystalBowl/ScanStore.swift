@@ -86,6 +86,16 @@ struct Scan: Identifiable, Codable, Hashable {
     var draftSavedAt: Date?
     /// 3.19: why the scan is unfinished: "stopped" (by the user), "interrupted" (app closed), "failed" (camera).
     var draftReason: String?
+    /// 3.20: the end the core stood on, never seen by the camera, filled flat at the table (photogrammetry had
+    /// closed it with a hollow guess). Nil when none was needed.
+    var bottomFill: BottomFillPlan?
+    /// 3.20: the user switched the fill off (the model is measured as photogrammetry made it).
+    var bottomFillOff: Bool?
+    /// 3.20: volume added by the fill, as a share of the volume before it.
+    var bottomFillGain: Double?
+
+    /// The unseen bottom is filled flat (3.20).
+    var bottomFillActive: Bool { bottomFill != nil && bottomFillOff != true }
 
     /// The model lacks a whole side (the scan box was too small).
     var isPartial: Bool { (sideGapDeg ?? 0) >= 90 }

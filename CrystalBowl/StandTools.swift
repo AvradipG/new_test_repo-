@@ -110,6 +110,11 @@ enum StandStrip {
         try? FileManager.default.createDirectory(at: folder(scan), withIntermediateDirectories: true)
         let stl = folder(scan).appendingPathComponent("\(scan.fileStem)_rock-only.stl")
         let obj = folder(scan).appendingPathComponent("\(scan.fileStem)_rock-only.obj")
+        return writeMesh(mesh, stl: stl, obj: obj, title: "\(scan.name): the rock without its stand (cut and closed)\(scan.bottomFillActive ? ", unseen bottom filled flat" : ""), metres")
+    }
+
+    /// A mesh as binary STL and OBJ (metres).
+    static func writeMesh(_ mesh: (positions: [SIMD3<Float>], indices: [UInt32]), stl: URL, obj: URL, title: String) -> [URL] {
         var out: [URL] = []
         // Binary STL.
         var data = Data(count: 80)
@@ -131,7 +136,7 @@ enum StandStrip {
             data.append(contentsOf: [0, 0])
         }
         if (try? data.write(to: stl, options: .atomic)) != nil { out.append(stl) }
-        var text = "# \(scan.name): the rock without its stand (cut and closed), metres\n"
+        var text = "# \(title)\n"
         for p in mesh.positions { text += String(format: "v %.6f %.6f %.6f\n", p.x, p.y, p.z) }
         for t in 0..<n {
             let i0: UInt32 = mesh.indices[t * 3] + 1, i1: UInt32 = mesh.indices[t * 3 + 1] + 1, i2: UInt32 = mesh.indices[t * 3 + 2] + 1
@@ -149,6 +154,9 @@ extension AppModel {
         guard var s = scans.first(where: { $0.id == scan.id }) else { return }
         s.standCutY = cutY
         s.standCheck = cutY == nil ? "none" : "user"
+        // 3.20: the bottom fill was found on the model as cut before; it is looked for again.
+        s.bottomFill = nil
+        s.bottomFillGain = nil
         s.extrasVersion = Swift.min(s.extrasVersion ?? 0, 2)
         try? ScanStore.save(s)
         if let strip = StandStrip.load(s) { StandStrip.writeInfo(strip, scan: s, cutY: cutY, how: s.standCheck ?? "user") }

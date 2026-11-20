@@ -3,6 +3,12 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.20
+- The bottom of a core no longer looks like a cup. The end it stands on faces the table, so no photo ever sees it, and the 3D model had closed it with a guess a few millimetres up inside the core (Adnoc Sample 5: 1.8 mm, and 4 % of the volume missing). It is now filled flat at the table, so height, volume, slices and levelling are the core's. Older scans are checked by themselves; the scan page says what was done, with a switch to turn it off
+- To scan that end for real: Dimensions only now offers "Flip it and scan the bottom too" after the first ring, as Dimensions + detail already did
+- Nothing you start is lost: a scan stopped or interrupted before its first photo is kept as a draft too, with its Sample ID and settings
+- A Sample ID is remembered as soon as it is typed, not only when the scan starts
+
 ## 3.19
 - A scan is never lost by a slip any more. Cancel on the scan screen is now Stop, and it asks first: keep the scan as a draft (the first choice), build the model from the photos taken so far, discard (asked twice), or keep scanning
 - Unfinished scans: a list on the Scan page with Resume, Build now and Discard. Resume carries on where you stopped: the new photos join the earlier ones, nothing taken before is touched

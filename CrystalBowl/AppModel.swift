@@ -259,6 +259,10 @@ final class AppModel: ObservableObject {
     /// Builds the model of a draft from the photos it has.
     func buildDraft(_ scan: Scan) {
         recoveredDraft = nil
+        guard ScanStore.countPhotos(in: scan.imagesURL) > 0 else {
+            showToast("No photos yet: resume the scan first")
+            return
+        }
         var s = scans.first { $0.id == scan.id } ?? scan
         s.draftReason = nil
         try? ScanStore.save(s)
@@ -273,7 +277,8 @@ final class AppModel: ObservableObject {
         Drafts.state(hasModel: s.hasModel, photoCount: ScanStore.countPhotos(in: s.imagesURL),
                      buildRequested: s.buildRequested == true || buildingID == s.id,
                      captureOpen: s.captureOpen == true,
-                     capturingNow: phase == .capturing && currentScan?.id == s.id)
+                     capturingNow: phase == .capturing && currentScan?.id == s.id,
+                     keptAsDraft: s.draftReason != nil)
     }
 
     /// Scans with photos and no model that nothing is building: resume, build or discard.
@@ -293,11 +298,7 @@ final class AppModel: ObservableObject {
             let moved = Self.mergeResumedPhotos(&s)
             let count = ScanStore.countPhotos(in: s.imagesURL)
             s.captureOpen = nil
-            if count == 0 && !s.hasModel {
-                AppLog.info("capture", "\(s.name): the app was closed during a scan before any photo was taken; the empty scan is removed", scan: s)
-                ScanStore.delete(s)
-                continue
-            }
+            // 3.20: kept even before the first photo, with its Sample ID and settings.
             s.photoCount = count
             s.draftReason = "interrupted"
             try? ScanStore.save(s)
@@ -672,15 +673,8 @@ final class AppModel: ObservableObject {
         scan.photoCount = count
         scan.captureOpen = nil
         scan.draftSavedAt = Date()
-        if count == 0 && !scan.hasModel {
-            AppLog.info("capture", "No photo was taken, so the scan is not kept", scan: scan)
-            ScanStore.delete(scan)
-            reload()
-            showToast("Nothing was taken yet, so nothing was kept")
-            return
-        }
         if !resumed { scan.passes = passNumber }
-        if build {
+        if build && count > 0 {
             scan.draftReason = nil
             try? ScanStore.save(scan)
             reload()
@@ -691,7 +685,9 @@ final class AppModel: ObservableObject {
             try? ScanStore.save(scan)
             reload()
             AppLog.info("capture", "Kept as a draft with \(count) photos (\(reason))", scan: scan)
-            if reason == "stopped" { showToast("Kept as a draft: \(count) photos. Resume it any time") }
+            if reason == "stopped" {
+                showToast(count == 0 ? "Kept as a draft with its Sample ID. Start it any time" : "Kept as a draft: \(count) photos. Resume it any time")
+            }
         }
     }
 

@@ -68,7 +68,8 @@ extension AppModel {
     /// 9 (3.17): a stand cut also needs a clear colour difference; the bottom face is used for the levelling when
     /// the underside was scanned.
     /// 10 (3.18): a model the scan box cut is flagged; levelling from a partial cylinder.
-    static let extrasVersion = 10
+    /// 11 (3.20): the unseen end a core stood on is filled flat at the table (photogrammetry left a hollow there).
+    static let extrasVersion = 11
 
     func upgradeScans() async {
         // Piece sets put together before 3.12 are put together again, one at a time: 2 = the 3.10 floor fix (the flat
@@ -197,6 +198,32 @@ extension AppModel {
                     reload()
                     scan = scans.first { $0.id == original.id } ?? scan
                 }
+            }
+        }
+        // 3.20: the end a core stood on was never seen; a hollow guess there is filled flat at the table.
+        if (scan.extrasVersion ?? 0) < 11 && scan.bottomFill == nil && scan.bottomFillOff != true && scan.underside != true {
+            upgradeNote = "Checking the bottom the camera couldn't see: \(scan.name)"
+            let s0 = scan
+            let found = await Task.detached { () -> (BottomFillPlan, Double)? in
+                guard let mesh = MeshTools.loadMesh(s0),
+                      CoreLeveller.plan(positions: mesh.positions, indices: mesh.indices) != nil,
+                      let plan = BottomFill.find(positions: mesh.positions, indices: mesh.indices) else { return nil }
+                let before = ScanMath.signedVolume(positions: mesh.positions, indices: mesh.indices)
+                let filled = BottomFill.apply(positions: mesh.positions, indices: mesh.indices, plan: plan)
+                let after = ScanMath.signedVolume(positions: filled.positions, indices: filled.indices)
+                return (plan, before > 0 ? after / before - 1 : 0)
+            }.value
+            if let f = found {
+                let plan: BottomFillPlan = f.0, gain: Double = f.1
+                scan.bottomFill = plan
+                scan.bottomFillGain = gain
+                try? ScanStore.save(scan)
+                AppLog.info("bottom", String(format: "The end it stood on wasn't seen: photogrammetry closed it %.1f mm up inside the core (a cup). Filled flat at the table: volume %+.1f%%; measured again",
+                                             plan.recess * 1000 * scan.scaleFactor, gain * 100), scan: scan)
+                reload()
+                await repair(scan)
+                reload()
+                scan = scans.first { $0.id == original.id } ?? scan
             }
         }
         if scan.needsRepair {

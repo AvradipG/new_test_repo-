@@ -66,10 +66,12 @@ struct RootView: View {
             set: { if !$0 { model.recoveredDraft = nil } }
         ), titleVisibility: .visible, presenting: model.recoveredDraft) { scan in
             Button("Resume scanning \(scan.name)") { model.resumeDraft(scan) }
-            Button("Build the model from these photos") { model.buildDraft(scan) }
+            if (scan.photoCount ?? 0) > 0 {
+                Button("Build the model from these photos") { model.buildDraft(scan) }
+            }
             Button("Keep it for later", role: .cancel) { model.recoveredDraft = nil }
         } message: { scan in
-            Text("Crystal Bowl was closed during the scan of \(scan.name) (by iOS, or a crash). Its \(scan.photoCount ?? 0) photos are kept as a draft, under Unfinished scans on the Scan page.")
+            Text("Crystal Bowl was closed during the scan of \(scan.name) (by iOS, or a crash). " + ((scan.photoCount ?? 0) > 0 ? "Its \(scan.photoCount ?? 0) photos are kept" : "Its Sample ID and settings are kept") + " as a draft, under Unfinished scans on the Scan page.")
         }
         .overlay(alignment: .top) {
             if let text = model.toast {
@@ -139,6 +141,7 @@ struct HomeView: View {
     @EnvironmentObject var model: AppModel
     /// Kept while typing even if the app is closed (3.19).
     @AppStorage("scan.typedName") private var sampleName = ""
+    @FocusState private var nameFocused: Bool
     @State private var confirmDiscardDraft: Scan?
     @AppStorage(AppModel.keepPhotosKey) private var keepPhotos = false
     @AppStorage(CaptureGuide.hapticsKey) private var haptics = true
@@ -236,7 +239,10 @@ struct HomeView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .submitLabel(.go)
+                        .focused($nameFocused)
                         .onSubmit(start)
+                        // 3.20: a Sample ID is remembered as soon as it is typed, before any scan starts.
+                        .onChange(of: nameFocused) { _, focused in if !focused { model.rememberName(sampleName) } }
                     RecentNamesRow(current: sampleName) { sampleName = $0 }
                     Button(action: start) {
                         Label("Start new scan", systemImage: "viewfinder")
@@ -420,6 +426,7 @@ struct DraftRow: View {
                     .disabled(!model.isCaptureSupported)
                 Button { model.buildDraft(scan) } label: { Label("Build now", systemImage: "cube") }
                     .buttonStyle(.bordered)
+                    .disabled(ScanStore.countPhotos(in: scan.imagesURL) == 0)
                 Spacer()
                 Button(role: .destructive, action: onDiscard) { Image(systemName: "trash") }
                     .buttonStyle(.bordered)
@@ -441,7 +448,8 @@ struct DraftRow: View {
         default: why = "not built"
         }
         let kind = scan.isPieces ? "broken pieces · " : (scan.quick == true ? "dimensions only · " : "")
-        return "\(kind)\(n) photo\(n == 1 ? "" : "s") · \(why) · \(when)"
+        let photos = n == 0 ? "no photos yet" : "\(n) photo\(n == 1 ? "" : "s")"
+        return "\(kind)\(photos) · \(why) · \(when)"
     }
 }
 
@@ -715,7 +723,8 @@ struct CaptureView: View {
                 }
                 Button("Stop side 2 (side 1 is kept)", role: .destructive) { model.stopCapture(.discard) }
             } else if model.shotCount == 0 && model.resumeSession == nil {
-                Button("Leave (nothing taken yet)", role: .destructive) { model.stopCapture(.discard) }
+                Button("Keep as a draft (Sample ID and settings)") { model.stopCapture(.draft) }
+                Button("Leave and delete it", role: .destructive) { model.stopCapture(.discard) }
             } else {
                 Button("Keep as a draft and resume later") { model.stopCapture(.draft) }
                 Button("Build the model from these photos") { model.stopCapture(.build) }
@@ -741,7 +750,7 @@ struct CaptureView: View {
 
     private var stopMessage: String {
         if model.captureSide == 2 { return "Side 1 of the pieces stays saved either way." }
-        if model.shotCount == 0 && model.resumeSession == nil { return "No photo has been taken yet." }
+        if model.shotCount == 0 && model.resumeSession == nil { return "No photo has been taken yet. A draft keeps the Sample ID and settings, to start from later." }
         return "The \(model.shotCount) photo\(model.shotCount == 1 ? "" : "s") taken so far are already saved on this iPhone. A draft keeps them with the Sample ID: resume it later to add more, or build the model from it, from Unfinished scans on the Scan page."
     }
 
@@ -914,10 +923,14 @@ struct CaptureView: View {
                     Label("Get the dimensions now", systemImage: "ruler.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                Text("One ring is enough for height, footprint and the micro-CT cylinder. The underside isn't captured, so its shape is guessed flat.")
+                Text("One ring is enough for height, footprint and the micro-CT cylinder. The end it stands on can't be seen: for a core it is filled flat at the table. To scan that end too, flip it.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button { model.anotherPass() } label: {
                     Label("Fill the gaps first", systemImage: "circle.dashed").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                Button { model.flipAndContinue() } label: {
+                    Label("Flip it and scan the bottom too", systemImage: "arrow.triangle.2.circlepath").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
             } else if needsMore {
@@ -1146,6 +1159,7 @@ struct ScanDetailView: View {
                 if scan.hasModel {
                     StandSection(scan: scan)
                     LevelSection(scan: scan)
+                    BottomSection(scan: scan)
                     detailSection(scan)
                     RepeatsSection(scan: scan, repeats: model.repeats(of: scan))
                     SectionsPanel(scan: scan, viewer: $sectionViewer)
