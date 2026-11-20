@@ -77,6 +77,15 @@ struct Scan: Identifiable, Codable, Hashable {
     /// The widest sweep round the rock (degrees) with no surface in the model: large when the scan box cut part of
     /// the rock off (3.18). Nil when not checked.
     var sideGapDeg: Double?
+    /// 3.19: set while this scan is being captured. Still set when the app starts again means iOS or a crash closed
+    /// the app in the middle of the scan; the photos are then kept as a draft.
+    var captureOpen: Bool?
+    /// 3.19: capture sessions in the photos (a resumed draft adds one; its photos are named "s2-…", "s3-…").
+    var captureSessions: Int?
+    /// 3.19: when the capture last saved its progress.
+    var draftSavedAt: Date?
+    /// 3.19: why the scan is unfinished: "stopped" (by the user), "interrupted" (app closed), "failed" (camera).
+    var draftReason: String?
 
     /// The model lacks a whole side (the scan box was too small).
     var isPartial: Bool { (sideGapDeg ?? 0) >= 90 }
@@ -145,6 +154,9 @@ struct Scan: Identifiable, Codable, Hashable {
     var model2URL: URL { folderURL.appendingPathComponent("\(fileStem)_side2.usdz") }
     var hasModel2: Bool { FileManager.default.fileExists(atPath: model2URL.path) }
     var hasPhotos2: Bool { ScanStore.countPhotos(in: images2URL) > 0 }
+    /// Photos of resumed capture session `n` (≥ 2), moved into Images when that session ends.
+    func resumeImagesURL(_ n: Int) -> URL { folderURL.appendingPathComponent("Images-resume-\(n)", isDirectory: true) }
+    func resumeCheckpointURL(_ n: Int) -> URL { folderURL.appendingPathComponent("Checkpoint-resume-\(n)", isDirectory: true) }
     var piecesURL: URL { exportsURL.appendingPathComponent("pieces", isDirectory: true) }
 
     var fileStem: String { storedStem ?? Self.stem(for: name, id: id) }

@@ -3,6 +3,12 @@
 Newest first. The first section's bullet points are shown in the app's update banner,
 so write them for the person using the app.
 
+## 3.19
+- A scan is never lost by a slip any more. Cancel on the scan screen is now Stop, and it asks first: keep the scan as a draft (the first choice), build the model from the photos taken so far, discard (asked twice), or keep scanning
+- Unfinished scans: a list on the Scan page with Resume, Build now and Discard. Resume carries on where you stopped: the new photos join the earlier ones, nothing taken before is touched
+- The scan saves its progress as it goes (every few seconds, and at once when the app leaves the screen or memory runs low). If iOS closes the app in the middle of a scan, or it crashes, the next start offers to resume it or build it from its photos
+- Sample IDs are remembered: the last ones you used show under the name field, one tap to use again, and a name you were typing is kept even if the app closes
+
 ## 3.18
 - Fixed: a model could be only half the rock when the scan box was smaller than the rock (Desert Peak 4623-3 was cut in half along its axis). The box advice now says to make it a little bigger than the rock all round, the back too; and a model missing a side gets a red warning on its scan page, because its sizes and volume are wrong
 - Standing straight: the levelling now works from part of a core too, with a note that it is less sure (it was missing for a half model)

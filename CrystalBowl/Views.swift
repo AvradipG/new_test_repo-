@@ -60,6 +60,17 @@ struct RootView: View {
         } message: { _ in
             Text("Turn the rock upside down where it lies and scan it again. It is kept as its own scan, linked to this one, so the two can be compared or merged later on the computer.")
         }
+        // 3.19: the app was closed in the middle of a scan (iOS under memory pressure, a crash): its photos are kept.
+        .confirmationDialog("A scan was interrupted", isPresented: Binding(
+            get: { model.recoveredDraft != nil && model.phase == .home && model.detailAfterCapture == nil },
+            set: { if !$0 { model.recoveredDraft = nil } }
+        ), titleVisibility: .visible, presenting: model.recoveredDraft) { scan in
+            Button("Resume scanning \(scan.name)") { model.resumeDraft(scan) }
+            Button("Build the model from these photos") { model.buildDraft(scan) }
+            Button("Keep it for later", role: .cancel) { model.recoveredDraft = nil }
+        } message: { scan in
+            Text("Crystal Bowl was closed during the scan of \(scan.name) (by iOS, or a crash). Its \(scan.photoCount ?? 0) photos are kept as a draft, under Unfinished scans on the Scan page.")
+        }
         .overlay(alignment: .top) {
             if let text = model.toast {
                 Text(text)
@@ -126,7 +137,9 @@ struct RootView: View {
 
 struct HomeView: View {
     @EnvironmentObject var model: AppModel
-    @State private var sampleName = ""
+    /// Kept while typing even if the app is closed (3.19).
+    @AppStorage("scan.typedName") private var sampleName = ""
+    @State private var confirmDiscardDraft: Scan?
     @AppStorage(AppModel.keepPhotosKey) private var keepPhotos = false
     @AppStorage(CaptureGuide.hapticsKey) private var haptics = true
     @AppStorage("scan.quick") private var quick = false
@@ -138,7 +151,8 @@ struct HomeView: View {
 
     private var shownScans: [Scan] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        let samples = model.scans.filter { !$0.isPieces }
+        let draftIDs = Set(model.drafts.map(\.id))
+        let samples = model.scans.filter { !$0.isPieces && !draftIDs.contains($0.id) }
         return q.isEmpty ? samples : samples.filter { $0.name.lowercased().contains(q) || $0.id.contains(q) }
     }
 
@@ -201,6 +215,17 @@ struct HomeView: View {
                         .disabled(!model.repairing.isEmpty)
                     }
                 }
+                if !model.drafts.isEmpty {
+                    Section {
+                        ForEach(model.drafts) { scan in
+                            DraftRow(scan: scan) { confirmDiscardDraft = scan }
+                        }
+                    } header: {
+                        Text("Unfinished scans")
+                    } footer: {
+                        Text("Scans that were stopped or interrupted before the model was built. Their photos and Sample ID are kept: resume to add more photos where you left off, or build the model from what is there.")
+                    }
+                }
                 Section {
                     Picker("What do you need?", selection: $quick) {
                         Text("Dimensions only").tag(true)
@@ -212,6 +237,7 @@ struct HomeView: View {
                         .autocorrectionDisabled()
                         .submitLabel(.go)
                         .onSubmit(start)
+                    RecentNamesRow(current: sampleName) { sampleName = $0 }
                     Button(action: start) {
                         Label("Start new scan", systemImage: "viewfinder")
                             .font(.headline)
@@ -329,6 +355,15 @@ struct HomeView: View {
             } message: {
                 Text("Files and the Google Drive folder keep their original names; the new name is shown in the app, the report and manifest.json.")
             }
+            .confirmationDialog("Discard this unfinished scan?", isPresented: Binding(get: { confirmDiscardDraft != nil }, set: { if !$0 { confirmDiscardDraft = nil } }),
+                                titleVisibility: .visible, presenting: confirmDiscardDraft) { scan in
+                Button("Discard \(scan.name) and its photos", role: .destructive) {
+                    model.delete(scan)
+                    confirmDiscardDraft = nil
+                }
+            } message: { scan in
+                Text("Its \(ScanStore.countPhotos(in: scan.imagesURL)) photos are deleted from this iPhone. This can't be undone.")
+            }
             .confirmationDialog("Delete this scan?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }),
                                 titleVisibility: .visible) {
                 Button("Delete \(confirmDelete?.name ?? "scan")", role: .destructive) {
@@ -358,6 +393,81 @@ struct HomeView: View {
         guard model.isCaptureSupported else { return }
         model.startNewScan(name: sampleName, quick: quick)
         sampleName = ""
+    }
+}
+
+/// An unfinished scan on the Scan page (3.19).
+struct DraftRow: View {
+    @EnvironmentObject var model: AppModel
+    let scan: Scan
+    let onDiscard: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: scan.draftReason == "interrupted" || scan.draftReason == "failed"
+                      ? "exclamationmark.arrow.circlepath" : "doc.badge.clock")
+                    .font(.title3).foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(scan.name).font(.headline)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            HStack(spacing: 10) {
+                Button { model.resumeDraft(scan) } label: { Label("Resume", systemImage: "camera.viewfinder") }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.isCaptureSupported)
+                Button { model.buildDraft(scan) } label: { Label("Build now", systemImage: "cube") }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button(role: .destructive, action: onDiscard) { Image(systemName: "trash") }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Discard")
+            }
+            .controlSize(.small)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var detail: String {
+        let n = ScanStore.countPhotos(in: scan.imagesURL)
+        let when = (scan.draftSavedAt ?? scan.created).formatted(date: .abbreviated, time: .shortened)
+        let why: String
+        switch scan.draftReason {
+        case "interrupted": why = "app was closed mid-scan"
+        case "failed": why = "camera stopped"
+        case "stopped": why = "stopped"
+        default: why = "not built"
+        }
+        let kind = scan.isPieces ? "broken pieces · " : (scan.quick == true ? "dimensions only · " : "")
+        return "\(kind)\(n) photo\(n == 1 ? "" : "s") · \(why) · \(when)"
+    }
+}
+
+/// Sample IDs used lately, one tap to use again (3.19).
+struct RecentNamesRow: View {
+    @EnvironmentObject var model: AppModel
+    let current: String
+    let pick: (String) -> Void
+
+    var body: some View {
+        let names = model.recentNames.filter { $0 != current }.prefix(8)
+        if !names.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
+                    ForEach(Array(names), id: \.self) { name in
+                        Button(name) { pick(name) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .contextMenu {
+                Button(role: .destructive) { model.forgetRecentNames() } label: { Label("Clear recent Sample IDs", systemImage: "xmark.circle") }
+            }
+        }
     }
 }
 
@@ -588,6 +698,52 @@ struct CaptureView: View {
     @EnvironmentObject var model: AppModel
     @ObservedObject var guide: CaptureGuide
     let session: ObjectCaptureSession
+    @State private var askStop = false
+    @State private var confirmDiscard = false
+
+    /// 3.19: leaving a scan never loses it by accident. Stop asks what to do; keeping a draft is the first choice.
+    private var stopButton: some View {
+        Button { askStop = true } label: {
+            Label("Stop", systemImage: "pause.circle.fill").font(.headline)
+        }
+        .buttonStyle(.bordered)
+        .disabled(model.stopChoice != nil)
+        .confirmationDialog(stopTitle, isPresented: $askStop, titleVisibility: .visible) {
+            if model.captureSide == 2 {
+                if model.shotCount > 0 {
+                    Button("Finish side 2 and put the pieces together") { model.stopCapture(.build) }
+                }
+                Button("Stop side 2 (side 1 is kept)", role: .destructive) { model.stopCapture(.discard) }
+            } else if model.shotCount == 0 && model.resumeSession == nil {
+                Button("Leave (nothing taken yet)", role: .destructive) { model.stopCapture(.discard) }
+            } else {
+                Button("Keep as a draft and resume later") { model.stopCapture(.draft) }
+                Button("Build the model from these photos") { model.stopCapture(.build) }
+                Button(model.resumeSession == nil ? "Discard the photos…" : "Discard the new photos…", role: .destructive) { confirmDiscard = true }
+            }
+            Button("Keep scanning", role: .cancel) {}
+        } message: {
+            Text(stopMessage)
+        }
+        .alert("Discard \(model.shotCount) photo\(model.shotCount == 1 ? "" : "s")?", isPresented: $confirmDiscard) {
+            Button("Discard", role: .destructive) { model.stopCapture(.discard) }
+            Button("Keep scanning", role: .cancel) {}
+        } message: {
+            Text(model.resumeSession == nil
+                 ? "This scan and its photos are deleted from the iPhone. This can't be undone."
+                 : "The photos taken since you resumed are deleted. The draft keeps its earlier photos.")
+        }
+    }
+
+    private var stopTitle: String {
+        model.captureSide == 2 ? "Stop scanning side 2?" : "Stop this scan?"
+    }
+
+    private var stopMessage: String {
+        if model.captureSide == 2 { return "Side 1 of the pieces stays saved either way." }
+        if model.shotCount == 0 && model.resumeSession == nil { return "No photo has been taken yet." }
+        return "The \(model.shotCount) photo\(model.shotCount == 1 ? "" : "s") taken so far are already saved on this iPhone. A draft keeps them with the Sample ID: resume it later to add more, or build the model from it, from Unfinished scans on the Scan page."
+    }
 
     var body: some View {
         ZStack {
@@ -605,8 +761,7 @@ struct CaptureView: View {
             VStack(spacing: 12) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Button("Cancel", role: .destructive) { model.cancelCapture() }
-                            .buttonStyle(.bordered)
+                        stopButton
                         if CameraAssist.hasLight && model.captureStage != .initializing {
                             Button { model.toggleLight() } label: {
                                 Image(systemName: model.lightOn ? "flashlight.on.fill" : "flashlight.off.fill")
@@ -932,10 +1087,16 @@ struct ScanDetailView: View {
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("No model yet. \(scan.photoCount ?? ScanStore.countPhotos(in: scan.imagesURL)) photos are saved.")
-                            Button("Build model") { model.reconstruct(scan) }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(!scan.hasPhotos)
+                            Text("No model yet. \(ScanStore.countPhotos(in: scan.imagesURL)) photos are saved.")
+                            HStack {
+                                Button("Build model") { model.buildDraft(scan) }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(!scan.hasPhotos)
+                                if model.isCaptureSupported && scan.buildRequested != true {
+                                    Button("Resume scanning") { model.resumeDraft(scan) }
+                                        .buttonStyle(.bordered)
+                                }
+                            }
                         }
                     }
                 }

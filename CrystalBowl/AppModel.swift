@@ -100,6 +100,20 @@ final class AppModel: ObservableObject {
     var currentScan: Scan?
     private var pollTask: Task<Void, Never>?
     private var cancelling = false
+
+    // 3.19: a scan is never lost to a slip or an interruption.
+    enum StopChoice: String { case draft, build, discard }
+    /// What the user chose on Stop; nil while scanning.
+    private(set) var stopChoice: StopChoice?
+    /// The capture session number when this capture adds photos to a draft (2, 3, …); nil for a new scan.
+    private(set) var resumeSession: Int?
+    private var lastAutosave = Date.distantPast
+    /// A scan the app was closed in the middle of, found on this start: offered to resume or build.
+    @Published var recoveredDraft: Scan?
+    /// Sample IDs used lately, newest first.
+    @Published var recentNames: [String] = UserDefaults.standard.stringArray(forKey: AppModel.recentNamesKey) ?? []
+    static let recentNamesKey = "recentSampleNames"
+    private var memoryObserver: NSObjectProtocol?
     var buildQueue: [String] = []
     var photoSession: PhotogrammetrySession?
     var backgroundedDuringBuild = false
@@ -114,9 +128,14 @@ final class AppModel: ObservableObject {
 
     init() {
         reload()
+        recoverInterruptedCaptures()
         refreshDriveAccount()
         refreshFolderLink()
         AppModel.current = self
+        memoryObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification,
+                                                                object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.autosaveCapture(reason: "memory warning", force: true) }
+        }
         // When iOS launches the app in the background only to finish uploads, builds wait until it is opened.
         if UIApplication.shared.applicationState != .background { resumePendingBuilds() }
     }
@@ -134,6 +153,7 @@ final class AppModel: ObservableObject {
             var scan = try ScanStore.create(name: name)
             scan.quick = quick
             try? ScanStore.save(scan)
+            rememberName(name)
             piecesCapture = false
             captureSide = 1
             beginCapture(scan, images: scan.imagesURL, checkpoint: scan.checkpointURL, quick: quick)
@@ -177,6 +197,7 @@ final class AppModel: ObservableObject {
             scan.kind = "pieces"
             scan.pieceTarget = target
             try? ScanStore.save(scan)
+            rememberName(name)
             piecesCapture = true
             captureSide = 1
             beginCapture(scan, images: scan.imagesURL, checkpoint: scan.checkpointURL, quick: false)
@@ -199,7 +220,149 @@ final class AppModel: ObservableObject {
         beginCapture(scan, images: scan.images2URL, checkpoint: scan.checkpoint2URL, quick: false)
     }
 
-    private func beginCapture(_ scan: Scan, images: URL, checkpoint: URL, quick: Bool) {
+    /// Puts a Sample ID at the top of the recent list shown under the name field.
+    func rememberName(_ name: String) {
+        recentNames = Drafts.recentNames(recentNames, adding: name)
+        UserDefaults.standard.set(recentNames, forKey: Self.recentNamesKey)
+    }
+
+    func forgetRecentNames() {
+        recentNames = []
+        UserDefaults.standard.removeObject(forKey: Self.recentNamesKey)
+    }
+
+    /// Carries on scanning a draft (3.19): a new capture session whose photos go into a folder of their own and join
+    /// the scan's photos when it ends, so nothing taken before is touched.
+    func resumeDraft(_ draft: Scan) {
+        guard isCaptureSupported, phase == .home, buildingID != draft.id else { return }
+        var scan = scans.first { $0.id == draft.id } ?? draft
+        let n = max(2, (scan.captureSessions ?? 1) + 1)
+        let fm = FileManager.default
+        try? fm.removeItem(at: scan.resumeImagesURL(n))
+        try? fm.removeItem(at: scan.resumeCheckpointURL(n))
+        do {
+            try fm.createDirectory(at: scan.resumeImagesURL(n), withIntermediateDirectories: true)
+            try fm.createDirectory(at: scan.resumeCheckpointURL(n), withIntermediateDirectories: true)
+        } catch {
+            errorMessage = "Couldn't prepare the scan folder: \(error.localizedDescription)"
+            return
+        }
+        scan.captureSessions = n
+        try? ScanStore.save(scan)
+        recoveredDraft = nil
+        piecesCapture = scan.isPieces
+        captureSide = 1
+        AppLog.info("capture", "Resuming the draft \(scan.name) with \(ScanStore.countPhotos(in: scan.imagesURL)) photos (session \(n))", scan: scan)
+        beginCapture(scan, images: scan.resumeImagesURL(n), checkpoint: scan.resumeCheckpointURL(n), quick: scan.quick ?? false, resume: n)
+    }
+
+    /// Builds the model of a draft from the photos it has.
+    func buildDraft(_ scan: Scan) {
+        recoveredDraft = nil
+        var s = scans.first { $0.id == scan.id } ?? scan
+        s.draftReason = nil
+        try? ScanStore.save(s)
+        AppLog.info("capture", "Draft \(s.name) sent to build with \(ScanStore.countPhotos(in: s.imagesURL)) photos", scan: s)
+        if s.isPieces { s.piecesSplit = 3; try? ScanStore.save(s) }
+        reload()
+        reconstruct(s)
+    }
+
+    /// Whether a scan is a draft, being captured, done or empty.
+    func draftState(_ s: Scan) -> Drafts.State {
+        Drafts.state(hasModel: s.hasModel, photoCount: ScanStore.countPhotos(in: s.imagesURL),
+                     buildRequested: s.buildRequested == true || buildingID == s.id,
+                     captureOpen: s.captureOpen == true,
+                     capturingNow: phase == .capturing && currentScan?.id == s.id)
+    }
+
+    /// Scans with photos and no model that nothing is building: resume, build or discard.
+    var drafts: [Scan] {
+        scans.filter { s in
+            let state = draftState(s)
+            return state == .draft || state == .interrupted
+        }
+    }
+
+    /// On start: a scan still marked "being captured" was cut short when iOS closed the app (memory, heat) or it
+    /// crashed. Photos of a resumed session join the others; the scan becomes a draft; an empty one is removed.
+    private func recoverInterruptedCaptures() {
+        var found: [Scan] = []
+        for var s in scans where s.captureOpen == true {
+            if phase == .capturing && currentScan?.id == s.id { continue }
+            let moved = Self.mergeResumedPhotos(&s)
+            let count = ScanStore.countPhotos(in: s.imagesURL)
+            s.captureOpen = nil
+            if count == 0 && !s.hasModel {
+                AppLog.info("capture", "\(s.name): the app was closed during a scan before any photo was taken; the empty scan is removed", scan: s)
+                ScanStore.delete(s)
+                continue
+            }
+            s.photoCount = count
+            s.draftReason = "interrupted"
+            try? ScanStore.save(s)
+            AppLog.warn("capture", "\(s.name): the app was closed during this scan (by iOS or a crash). Its \(count) photos\(moved > 0 ? " (\(moved) from the resumed part)" : "") are kept as a draft", scan: s)
+            found.append(s)
+        }
+        if !found.isEmpty {
+            reload()
+            recoveredDraft = found.first
+        }
+    }
+
+    /// Moves the photos of every resumed session of a scan into its photo folder. The capture checkpoint only
+    /// matches the first session's photos, so with new photos the build starts from all of them afresh.
+    @discardableResult
+    static func mergeResumedPhotos(_ scan: inout Scan) -> Int {
+        let fm = FileManager.default
+        var moved = 0
+        for n in 2...max(2, scan.captureSessions ?? 2) {
+            let dir = scan.resumeImagesURL(n)
+            if fm.fileExists(atPath: dir.path) {
+                moved += (try? Drafts.mergePhotos(from: dir, into: scan.imagesURL, session: n)) ?? 0
+                try? fm.removeItem(at: dir)
+            }
+            try? fm.removeItem(at: scan.resumeCheckpointURL(n))
+        }
+        if moved > 0 {
+            try? fm.removeItem(at: scan.checkpointURL)
+            try? fm.createDirectory(at: scan.checkpointURL, withIntermediateDirectories: true)
+            scan.blurrySetAside = nil
+            AppLog.info("capture", "\(moved) photo(s) of the resumed scan joined the others; the model will be built from all \(ScanStore.countPhotos(in: scan.imagesURL))", scan: scan)
+        }
+        return moved
+    }
+
+    /// Writes the capture's progress to scan.json: every few seconds while scanning, and at once when the app
+    /// leaves the screen or memory runs low. The photos themselves are on disk from the moment they are taken.
+    func autosaveCapture(reason: String? = nil, force: Bool = false) {
+        guard phase == .capturing, captureSide == 1, var scan = currentScan else { return }
+        guard force || Date().timeIntervalSince(lastAutosave) >= 5 else { return }
+        lastAutosave = Date()
+        var count = ScanStore.countPhotos(in: scan.imagesURL)
+        if let n = resumeSession { count += ScanStore.countPhotos(in: scan.resumeImagesURL(n)) }
+        scan.photoCount = count
+        scan.passes = max(scan.passes ?? 0, passNumber)
+        scan.coverage = guide.bandCoverage
+        scan.captureOpen = true
+        scan.draftSavedAt = Date()
+        try? ScanStore.save(scan)
+        currentScan = scan
+        if let reason { AppLog.info("capture", "Progress saved (\(reason)): \(count) photos so far, pass \(passNumber)", scan: scan) }
+    }
+
+    private func beginCapture(_ scan: Scan, images: URL, checkpoint: URL, quick: Bool, resume: Int? = nil) {
+        var scan = scan
+        resumeSession = resume
+        stopChoice = nil
+        if captureSide == 1 {
+            // Marked as being captured until it ends; still marked on the next start means the app was closed.
+            scan.captureOpen = true
+            scan.draftReason = nil
+            scan.draftSavedAt = Date()
+            try? ScanStore.save(scan)
+        }
+        lastAutosave = Date()
         currentScan = scan
         quickCapture = quick
         shotScores = [:]
@@ -309,6 +472,7 @@ final class AppModel: ObservableObject {
         }
         pollCount += 1
         if pollCount % 15 == 0 && captureStage == .capturing && !passCompleted { checkNewShots() }
+        if pollCount % 50 == 0 && captureStage == .capturing { autosaveCapture() }
         if captureStage == .completed && previous != .completed { captureFinished() }
     }
 
@@ -431,23 +595,104 @@ final class AppModel: ObservableObject {
 
     func finishCapture() { captureSession?.finish() }
 
-    func cancelCapture() {
-        AppLog.info("capture", "Capture cancelled by the user after \(shotCount) photos")
+    /// Stop on the capture screen (3.19; before, Cancel deleted the scan). Keeping a draft or building lets Object
+    /// Capture finish writing its photos first; discarding removes only this capture session's photos.
+    func stopCapture(_ choice: StopChoice) {
+        guard phase == .capturing, stopChoice == nil else { return }
+        stopChoice = choice
+        AppLog.info("capture", "Stop: \(choice.rawValue) after \(shotCount) photos (pass \(passNumber), side \(captureSide)\(resumeSession.map { ", resumed session \($0)" } ?? ""))", scan: currentScan)
+        if choice == .discard { discardCapture(); return }
+        if captureStage == .capturing, let session = captureSession {
+            session.finish()
+            // If Object Capture doesn't finish, stop it anyway: the photos already on disk are what is kept.
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard let self, self.phase == .capturing, self.stopChoice == choice, self.captureSession === session else { return }
+                AppLog.warn("capture", "Object Capture hadn't finished 15 s after Stop; keeping the photos on disk", scan: self.currentScan)
+                self.cancelling = true
+                session.cancel()
+                self.endCapture()
+                self.settleStopped(build: choice == .build, reason: "stopped")
+            }
+        } else {
+            cancelling = true
+            captureSession?.cancel()
+            endCapture()
+            settleStopped(build: choice == .build, reason: "stopped")
+        }
+    }
+
+    private func discardCapture() {
         cancelling = true
         captureSession?.cancel()
         endCapture()
-        if let scan = currentScan {
+        if var scan = currentScan {
+            let fm = FileManager.default
             if captureSide == 2 {
-                try? FileManager.default.removeItem(at: scan.images2URL)
-                try? FileManager.default.removeItem(at: scan.checkpoint2URL)
+                try? fm.removeItem(at: scan.images2URL)
+                try? fm.removeItem(at: scan.checkpoint2URL)
+            } else if let n = resumeSession {
+                // Only the photos of this session go; the draft keeps what it had.
+                try? fm.removeItem(at: scan.resumeImagesURL(n))
+                try? fm.removeItem(at: scan.resumeCheckpointURL(n))
+                scan.captureSessions = n - 1
+                scan.captureOpen = nil
+                try? ScanStore.save(scan)
+                showToast("The new photos were discarded. The draft keeps its \(ScanStore.countPhotos(in: scan.imagesURL)) earlier photos")
             } else {
                 ScanStore.delete(scan)
             }
         }
+        resumeSession = nil
         captureSide = 1
         currentScan = nil
         phase = .home
         reload()
+    }
+
+    /// After a stop or a failed capture of side 1: the photos taken join the scan, which becomes a draft, or is
+    /// built at once. A scan with no photo at all is removed.
+    private func settleStopped(build: Bool, reason: String) {
+        let side = captureSide
+        captureSide = 1
+        phase = .home
+        guard var scan = currentScan else { reload(); return }
+        currentScan = nil
+        if side == 2 {
+            // Pieces turned over: without a finished second side the pieces are put together from side 1.
+            try? FileManager.default.removeItem(at: scan.images2URL)
+            try? FileManager.default.removeItem(at: scan.checkpoint2URL)
+            reload()
+            return
+        }
+        let resumed = resumeSession != nil
+        resumeSession = nil
+        Self.mergeResumedPhotos(&scan)
+        let count = ScanStore.countPhotos(in: scan.imagesURL)
+        scan.photoCount = count
+        scan.captureOpen = nil
+        scan.draftSavedAt = Date()
+        if count == 0 && !scan.hasModel {
+            AppLog.info("capture", "No photo was taken, so the scan is not kept", scan: scan)
+            ScanStore.delete(scan)
+            reload()
+            showToast("Nothing was taken yet, so nothing was kept")
+            return
+        }
+        if !resumed { scan.passes = passNumber }
+        if build {
+            scan.draftReason = nil
+            try? ScanStore.save(scan)
+            reload()
+            if scan.isPieces { tab = .pieces } else { path = [scan] }
+            buildDraft(scan)
+        } else {
+            scan.draftReason = reason
+            try? ScanStore.save(scan)
+            reload()
+            AppLog.info("capture", "Kept as a draft with \(count) photos (\(reason))", scan: scan)
+            if reason == "stopped" { showToast("Kept as a draft: \(count) photos. Resume it any time") }
+        }
     }
 
     private func endCapture() {
@@ -463,16 +708,18 @@ final class AppModel: ObservableObject {
 
     private func captureFailed(_ error: Error) {
         endCapture()
-        captureSide = 1
         if cancelling { return }
-        AppLog.error("capture", "Capture failed after \(shotCount) photos", error, scan: currentScan)
-        errorMessage = "Capture stopped: \(error.localizedDescription). Photos taken so far are kept, and you can build a model from them in the scan list."
-        if var scan = currentScan {
-            scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL)
-            try? ScanStore.save(scan)
+        if let choice = stopChoice {
+            // Stopped by the user while Object Capture was finishing: what is on disk is kept.
+            settleStopped(build: choice == .build, reason: "stopped")
+            return
         }
-        phase = .home
-        reload()
+        AppLog.error("capture", "Capture failed after \(shotCount) photos", error, scan: currentScan)
+        let side = captureSide
+        settleStopped(build: false, reason: "failed")
+        errorMessage = side == 2
+            ? "Capture of side 2 stopped: \(error.localizedDescription). Side 1 is kept; you can scan side 2 again."
+            : "Capture stopped: \(error.localizedDescription). The photos taken so far are kept as a draft: on the Scan page, under Unfinished scans, resume the scan or build the model from them."
     }
 
     /// A few of this capture's photos, kept as scale photos (3.10), off the main thread.
@@ -524,15 +771,38 @@ final class AppModel: ObservableObject {
             reconstruct(scan)
             return
         }
+        // 3.19: a resumed draft's new photos join the earlier ones; their blur scores follow their new names.
+        var scores = shotScores
+        if let n = resumeSession {
+            scores = ShotQuality.loadScores(scan)
+            for (k, v) in shotScores { scores["s\(n)-" + k] = v }
+            Self.mergeResumedPhotos(&scan)
+            scan.passes = (scan.passes ?? 0) + passNumber
+        } else {
+            scan.passes = passNumber
+        }
+        resumeSession = nil
         scan.photoCount = ScanStore.countPhotos(in: scan.imagesURL)
-        scan.passes = passNumber
+        scan.captureOpen = nil
+        scan.draftSavedAt = Date()
         scan.coverage = guide.bandCoverage
+        ShotQuality.saveScores(scores, for: scan)
         if flippedThisCapture { scan.underside = true } else if scan.underside == nil { scan.underside = false }
+        if stopChoice == .draft {
+            scan.draftReason = "stopped"
+            try? ScanStore.save(scan)
+            currentScan = nil
+            phase = .home
+            reload()
+            AppLog.info("capture", "Kept as a draft with \(scan.photoCount ?? 0) photos (stopped)", scan: scan)
+            showToast("Kept as a draft: \(scan.photoCount ?? 0) photos. Resume it any time")
+            return
+        }
+        scan.draftReason = nil
         if scan.isPieces { scan.piecesSplit = 3 }
         scan.buildRequested = true
         scan.buildAttempts = 0
         scan.pauses = 0
-        ShotQuality.saveScores(shotScores, for: scan)
         try? ScanStore.save(scan)
         currentScan = nil
         phase = .home
@@ -540,7 +810,7 @@ final class AppModel: ObservableObject {
         if scan.isPieces { tab = .pieces } else { path = [scan] }
         reconstruct(scan)
         // 3.13: the close-ups follow straight away, while the rock is still where it was scanned.
-        if !scan.isPieces && !quickCapture { detailAfterCapture = scan }
+        if !scan.isPieces && !quickCapture && stopChoice != .build { detailAfterCapture = scan }
     }
 
     /// Closing the close-ups that followed a capture: offer the upside-down scan of the same rock.
@@ -590,6 +860,7 @@ final class AppModel: ObservableObject {
     func enqueueBuild(_ id: String) { enqueue(id) }
 
     func appMovedToBackground() {
+        autosaveCapture(reason: "app left the screen", force: true)
         if buildingID != nil {
             backgroundedDuringBuild = true
             AppLog.warn("build", "App left the screen during the build at \(Int(progress * 100))% (\(progressNote))")
@@ -766,16 +1037,18 @@ final class AppModel: ObservableObject {
     }
 
     private func photogrammetry(_ scan: Scan) async throws {
-        try await photogrammetry(input: scan.imagesURL, checkpoint: scan.checkpointURL, output: scan.modelURL, from: 0, to: 0.88, label: "Building the model")
+        // Photos from more than one capture session (a resumed draft) are not one continuous walk.
+        try await photogrammetry(input: scan.imagesURL, checkpoint: scan.checkpointURL, output: scan.modelURL, from: 0, to: 0.88,
+                                 label: "Building the model", sequential: (scan.captureSessions ?? 1) <= 1)
     }
 
     /// Builds one model from a folder of photos; progress runs from `from` to `to`.
-    func photogrammetry(input: URL, checkpoint: URL, output: URL, from: Double, to: Double, label: String) async throws {
+    func photogrammetry(input: URL, checkpoint: URL, output: URL, from: Double, to: Double, label: String, sequential: Bool = true) async throws {
         setProgress(from + 0.01, "Preparing \(ScanStore.countPhotos(in: input)) photos…")
         var config = PhotogrammetrySession.Configuration()
         config.checkpointDirectory = checkpoint
         // Guided capture saves photos in the order they were taken, which lets matching start from neighbours.
-        config.sampleOrdering = .sequential
+        config.sampleOrdering = sequential ? .sequential : .unordered
         let resuming = ((try? FileManager.default.contentsOfDirectory(atPath: checkpoint.path))?.isEmpty == false)
         AppLog.info("build", "\(label): photogrammetry starting\(resuming ? " from a saved checkpoint" : "")")
         let session = try PhotogrammetrySession(input: input, configuration: config)
@@ -868,6 +1141,7 @@ final class AppModel: ObservableObject {
         if s.storedStem == nil { s.storedStem = s.fileStem }
         s.name = t
         try? ScanStore.save(s)
+        rememberName(t)
         if s.hasModel { _ = MeshTools.writeReport(s) }
         reload()
     }
