@@ -1,0 +1,34 @@
+name: Agent Board iPhone, monthly build
+# A TestFlight build stops working after 90 days. This starts a fresh build of the
+# agent-board-ios branch once a month (scheduled runs only start from the default branch).
+# The empty commit keeps the repository active: GitHub turns off schedules of public
+# repositories after 60 days without activity.
+on:
+  schedule:
+    - cron: "17 6 3 * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/agent-board-monthly.yml"]
+permissions:
+  contents: write
+  actions: write
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep the repository active
+        run: |
+          git init -q work && cd work
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git fetch -q --depth 1 "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" agent-board-ios
+          git checkout -q FETCH_HEAD
+          git commit -q --allow-empty -m "Monthly TestFlight build"
+          git push -q "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:agent-board-ios
+      - name: Start the iPhone build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run agent-board.yml --repo "${{ github.repository }}" --ref agent-board-ios
+          echo "::notice::Started the Agent Board iPhone build on agent-board-ios."
