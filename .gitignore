@@ -1,0 +1,3 @@
+*.xcodeproj/
+AgentBoard/Info.plist
+build/
